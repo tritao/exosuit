@@ -51,6 +51,12 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		pairing, so the panel warns first.
 	**/
 	public var machineKeyChanged(default, null):Bool = false;
+	/**
+		Whether the invitation carried the machine key's fingerprint (`#mk=`) and the key the handshake reached matched it.
+		A mismatch ends the pairing at once; false means an invitation without one (an older desktop), where comparing the
+		code is the only check, and the panel says so.
+	**/
+	public var machineKeyVerified(default, null):Bool = false;
 	/** True while a pairing is in progress (connecting, comparing the code, waiting for approval). */
 	public var pairing(default, null):Bool = false;
 	public var revision(default, null):Int = 0;
@@ -186,12 +192,20 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		}
 		machineKey = done.remoteStaticKey;
 		var parsed = invitation, reached = hex(done.remoteStaticKey);
+		if (parsed != null && !parsed.link.admits(done.remoteStaticKey)) {
+			// Someone between the phone and the machine (the relay, or whoever has the link) answered with another key.
+			fail("The machine that answered is not the one that made this invitation: its key does not match the invitation. "
+				+ "Nothing was paired. Create a fresh invitation on the machine and try again; if it happens again, do not pair over this relay.");
+			return;
+		}
+		machineKeyVerified = parsed != null && parsed.link.machineKey != null;
 		machineKeyChanged = false;
 		if (parsed != null)
 			for (existing in credentials.devices)
 				if (existing.machineId == parsed.machineId && existing.machineStaticPublicKey.toLowerCase() != reached)
 					machineKeyChanged = true;
 		authenticationCode = NoisePairingCode.fromHandshakeHash(done.transcriptHash);
+		Sys.println(machineKeyVerified ? "exosuit-pairing: machine key matches the invitation" : "exosuit-pairing: the invitation has no machine key");
 		Sys.println("exosuit-pairing: code " + authenticationCode);
 		setStatus("Compare this code with the machine.");
 	}
@@ -306,6 +320,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		authenticationCode = null;
 		codeConfirmed = false;
 		machineKeyChanged = false;
+		machineKeyVerified = false;
 		pairing = false;
 	}
 

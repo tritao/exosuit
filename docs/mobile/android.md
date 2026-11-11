@@ -143,8 +143,13 @@ The phone uses the same shared clients as the desktop and the browser build. The
 
 The Android files are in `android/haxe/src/`:
 
-- `PhoneInvitation` parses the one-time URL (`wss://relay/v1/machines/<m>/pair/<d>?secret=...`; plain `ws` only for
-  loopback). `PhoneRemote` runs the Noise pairing, shows the 6-digit code, and after approval and the user's
+- `PhoneInvitation` parses the one-time URL (`wss://relay/v1/machines/<m>/pair/<d>?secret=...#mk=<fingerprint>`;
+  plain `ws` only for loopback; the shared parser is `src/workspace/client/PairingLink`). The phone connects without the
+  `#mk=` fragment. After the Noise handshake it checks the machine key it reached against the fingerprint: a mismatch
+  ends the pairing ("The machine that answered is not the one that made this invitation"), a match shows "The machine's
+  key matches the invitation." An invitation from an older desktop has no fingerprint; the phone still pairs and shows
+  "This invitation carries no machine key (it comes from an older desktop), so comparing the code is the only check."
+  `PhoneRemote` runs the Noise pairing, shows the 6-digit code, and after approval and the user's
   confirmation stores the credentials and connects. Pairing grants only `machine.directory`. Pairing a machine does not
   disturb the machines already connected; pairing the same machine again replaces the older pairing.
 - `PhoneCredentials` is the list of paired machines (relay origin, machine id, device id, device key, device token,

@@ -8,6 +8,7 @@ import workspace.service.WorkspacePairingProtocol.PairingInvitation;
 import workspace.service.WorkspacePairingProtocol.PairingDevice;
 import workspace.service.WorkspacePairingProtocol.PendingPairing;
 import workspace.service.WorkspaceProtocol;
+import workspace.transport.MachineKeys;
 import workspace.transport.NoiseMessageTransport;
 import workspace.transport.NoisePairingCode;
 import workspace.transport.NoisePrologue;
@@ -42,6 +43,8 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 	final store:WorkspaceDevicePersistence;
 	final relay:WorkspacePairingRelay;
 	final machinePrivateKey:Bytes;
+	/** The machine key's fingerprint, carried by every invitation URL. */
+	final machineFingerprint:String;
 	final offeredGrants:Void->Array<String>;
 	final clock:Void->Float;
 	final onAuthenticated:NoiseMessageTransport->Array<String>->Void;
@@ -65,6 +68,7 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		this.store = store;
 		this.relay = relay;
 		this.machinePrivateKey = machinePrivateKey;
+		machineFingerprint = MachineKeys.fingerprint(NoiseSession.publicKey(machinePrivateKey));
 		this.offeredGrants = offeredGrants;
 		this.clock = clock;
 		this.onAuthenticated = onAuthenticated;
@@ -102,8 +106,10 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 			}
 			invitations.set(deviceId, {expiresAt: clock() + ttlSeconds * 1000});
 			var endpoint = relay.pairingEndpoint();
+			var socketUrl = endpoint.pairingSocketUrl(deviceId, secret);
 			complete({relayOrigin: endpoint.origin, machineId: endpoint.machineId, deviceId: deviceId,
-				secret: secret, pairingSocketUrl: endpoint.pairingSocketUrl(deviceId, secret), expiresInSeconds: ttlSeconds}, null);
+				secret: secret, pairingSocketUrl: socketUrl, expiresInSeconds: ttlSeconds,
+				invitationUrl: socketUrl + MachineKeys.URL_FRAGMENT + machineFingerprint}, null);
 		});
 	}
 

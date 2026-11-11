@@ -10,6 +10,7 @@ import haxeon.rpc.RpcConnector;
 import haxeon.rpc.RpcHandshake;
 import haxeon.rpc.RpcPeerOptions;
 import workspace.client.DeviceMachine;
+import workspace.client.PairingLink;
 import workspace.client.WorkspaceConnections;
 import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
@@ -312,6 +313,7 @@ class MachineDeviceTestMain {
 		revokeAndReconnect();
 		refusals();
 		relayIdentity();
+		pairingLinks();
 		print("ALL PASS");
 	}
 
@@ -656,5 +658,28 @@ class MachineDeviceTestMain {
 		var proof = MachineKeys.registrationProof(shared, relayHex, challenge, StringTools.lpad("", "ab", 64));
 		require(proof == "bd14af04eba3b85dbfb2bca787b9a64bcf63070ec15a5e2de9170096057b1598", "registration proof vector: " + proof);
 		print("PASS: relay ids apart from machine ids, and the machine key vectors");
+	}
+
+	/** Invitation links: the machine key fingerprint is optional, checked against the key reached, and never sent to the relay. */
+	static function pairingLinks():Void {
+		var relayHex = "5ff11fa2bc5136b8ccf63b6c679d6f8d", device = "0123456789abcdef0123456789abcdef", secret = StringTools.lpad("", "ab", 64);
+		var socket = "wss://relay.example/v1/machines/" + relayHex + "/pair/" + device + "?secret=" + secret;
+		var key = Bytes.alloc(32);
+		for (index in 0...32)
+			key.set(index, index);
+		var other = Bytes.alloc(32);
+		var withKey = PairingLink.parse(socket + "#mk=" + MachineKeys.fingerprint(key));
+		require(withKey != null && withKey.socketUrl == socket && withKey.machineKey == "630dcd2966c4336691125448bbb25b4f" && withKey.relayId == relayHex
+			&& withKey.deviceId == device && withKey.origin == "https://relay.example", "a link with a fingerprint parses, and connects without it");
+		require(withKey.admits(key) && !withKey.admits(other) && !withKey.admits(null), "the fingerprint admits only the machine's key");
+		var old = PairingLink.parse(socket);
+		require(old != null && old.machineKey == null && old.socketUrl == socket && old.admits(other), "a link from an older machine has no fingerprint and checks nothing");
+		require(PairingLink.parse(socket + "#mk=XYZ") == null && PairingLink.parse(socket + "#other=1") == null
+			&& PairingLink.parse(socket + "#mk=" + MachineKeys.fingerprint(key) + "0") == null, "a malformed fragment is refused");
+		require(PairingLink.parse("ws://relay.example/v1/machines/" + relayHex + "/pair/" + device + "?secret=" + secret) == null
+			&& PairingLink.parse("ws://127.0.0.1:8787/v1/machines/" + relayHex + "/pair/" + device + "?secret=" + secret) != null,
+			"plain ws only to a loopback relay");
+		require(PairingLink.parse(null) == null && PairingLink.parse("") == null, "nothing is not a link");
+		print("PASS: pairing links with and without the machine key fingerprint");
 	}
 }

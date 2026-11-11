@@ -43,6 +43,9 @@ class PhonePanel implements View {
 		if (remote.authenticationCode != null) {
 			rows.push(new KeyedView("code-instruction", new Text("Compare this code with the machine, then confirm.")));
 			rows.push(new KeyedView("code", new Text(remote.authenticationCode, null, tokens.textPrimary, TextStyleOverride.text(28, TextWrap.None))));
+			rows.push(new KeyedView("key-check", remote.machineKeyVerified ? new Text("The machine's key matches the invitation.", null, tokens.textSecondary)
+				: new Text("This invitation carries no machine key (it comes from an older desktop), so comparing the code is the only check.",
+					null, tokens.textSecondary)));
 			if (remote.machineKeyChanged)
 				rows.push(new KeyedView("key-changed", new Text("Warning: this phone is already paired with a machine of this id, and this one has a "
 					+ "different key. Continue only if you reset or reinstalled that machine and created this invitation yourself. "

@@ -212,7 +212,7 @@ def start(arguments) -> int:
         device_id = invitation["deviceId"]
         status = suit.control({"op": "remote-status"})
         write_json(out / "ready.json", {
-            "relayPort": relay.port, "relayOrigin": relay.origin, "invitationUrl": invitation["pairingSocketUrl"], "deviceId": device_id,
+            "relayPort": relay.port, "relayOrigin": relay.origin, "invitationUrl": invitation.get("invitationUrl") or invitation["pairingSocketUrl"], "deviceId": device_id,
             "relayMachineId": status.get("relayMachineId"), "machineId": status.get("machineId"), "workspaces": ids, "sockets": sockets, "out": str(out),
             "stopFile": str(out / "stop"), "sessions": {name: sessions for name, sessions in WORKSPACES},
             "fakeClaudeLog": str(out / "fake-claude-alpha.log"), "realClaude": bool(arguments.real_claude)})

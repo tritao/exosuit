@@ -18,6 +18,8 @@ import haxe.io.Bytes;
 class MachineKeys {
 	public static inline final RELAY_ID_CONTEXT = "exosuit-relay-id/1";
 	public static inline final PROOF_CONTEXT = "exosuit-relay-register/1";
+	/** What an invitation URL puts before the fingerprint. */
+	public static inline final URL_FRAGMENT = "#mk=";
 
 	public static function fingerprint(publicKey:Bytes):String {
 		requireKey(publicKey);

@@ -44,6 +44,8 @@ typedef MachineWorkspacePick = {
 /** One-time pairing invitation: the address to give the device. */
 typedef MachineInvitation = {
 	var pairingSocketUrl:String;
+	/** What the owner gives the device: the socket URL with the machine key's fingerprint (`#mk=`), or the socket URL alone from an older suit. */
+	var invitationUrl:String;
 	var deviceId:String;
 	var expiresInSeconds:Int;
 }
@@ -187,7 +189,8 @@ class MachineRemoteAccess implements MachineRemoteView {
 				done(null, problem == null ? "suit sent no invitation" : problem);
 				return;
 			}
-			done({pairingSocketUrl: Std.string(value.pairingSocketUrl), deviceId: Std.string(value.deviceId),
+			var socketUrl = Std.string(value.pairingSocketUrl);
+			done({pairingSocketUrl: socketUrl, invitationUrl: value.invitationUrl == null ? socketUrl : Std.string(value.invitationUrl), deviceId: Std.string(value.deviceId),
 				expiresInSeconds: Std.int(value.expiresInSeconds)}, null);
 		});
 

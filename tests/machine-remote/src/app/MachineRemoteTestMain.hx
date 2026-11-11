@@ -251,6 +251,8 @@ class MachineRemoteTestMain {
 		if (finishedShake == null || finishedShake.remoteStaticKey == null || finishedShake.transcriptHash == null)
 			throw "the handshake gave no machine key";
 		var machineKey:Bytes = finishedShake.remoteStaticKey;
+		check(invitation.invitationUrl == invitation.pairingSocketUrl + "#mk=" + MachineKeys.fingerprint(machineKey),
+			"the invitation carries the fingerprint of the machine key the device reached");
 		var shown = NoisePairingCode.fromHandshakeHash(finishedShake.transcriptHash);
 		await("the pending device", 20, function() {
 			var devices = ctl("devices", function(done) machine.remoteDevices(done)).reply;

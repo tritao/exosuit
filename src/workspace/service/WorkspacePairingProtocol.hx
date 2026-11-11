@@ -15,6 +15,12 @@ import haxeon.wire.MessagePack;
 	@:id(4) var secret:String;
 	@:id(5) var pairingSocketUrl:String;
 	@:id(6) var expiresInSeconds:Int;
+	/**
+		What the owner gives the device: `pairingSocketUrl` and `#mk=` with the fingerprint of the machine's Noise key
+		(`MachineKeys.fingerprint`), which the device checks after the handshake. The fragment never reaches the relay: the
+		device connects to `pairingSocketUrl`. Null from a machine before the fingerprint.
+	**/
+	@:optional @:id(7) var invitationUrl:Null<String>;
 }
 
 @:wire typedef PairingListRequest = {}

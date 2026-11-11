@@ -90,7 +90,7 @@ class RemoteAccessPanel implements View {
 				relayUrl: currentRelayText(),
 				relay: machineStatus == null ? null : {configured: machineStatus.enabled, connected: machineStatus.connected, origin: machineStatus.origin, error: machineStatus.error},
 				canManage: true, canConfigure: true, connected: machineStatus != null,
-				invitationUrl: machineInvitation == null ? null : machineInvitation.pairingSocketUrl, invitationError: invitationError,
+				invitationUrl: machineInvitation == null ? null : machineInvitation.invitationUrl, invitationError: invitationError,
 				pending: machineList == null ? [] : [for (item in machineList.pending) {deviceId: item.deviceId, code: item.authenticationCode}],
 				devices: machineList == null ? [] : [for (device in machineList.devices) {deviceId: device.deviceId, connected: device.connected, revoked: device.revoked,
 					workspaces: [for (entry in device.workspaces) {workspace: entry.workspace, preset: entry.preset}]}],
@@ -373,7 +373,7 @@ class RemoteAccessPanel implements View {
 			rows.push(new KeyedView("invitation-target", new Text("Device " + current.deviceId.substr(0, 8) + " · one-time pairing URL")));
 			rows.push(new KeyedView("invitation-warning", paragraph("Treat this URL like a password. Access starts only after code confirmation and your approval, and the device gets only the workspaces you pick.", context, true)));
 			var copy = new Button("Copy one-time pairing URL", null, function() {
-				if (copyText == null || !copyText(current.pairingSocketUrl)) actionError = "Could not copy the pairing address";
+				if (copyText == null || !copyText(current.invitationUrl)) actionError = "Could not copy the pairing address";
 				else actionError = "Pairing address copied";
 				requestFrame();
 			}, "remote-access-copy");
