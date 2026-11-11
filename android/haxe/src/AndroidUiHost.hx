@@ -110,6 +110,12 @@ class AndroidUiHost {
 		context.setSafeArea(pending[0], pending[1], pending[2], pending[3], pending[4]);
 	}
 
+	/** Whether a text field of the UI wants the soft keyboard right now (the host hides a keyboard Android brought back on its own). */
+	public function keyboardWanted():Bool {
+		var app = AndroidExosuitFactory.app;
+		return app != null && app.context().textInput.platformActive;
+	}
+
 	/** System Back: true when the application consumed it, false when the Activity should finish. */
 	public function back():Bool return context.handleBack();
 

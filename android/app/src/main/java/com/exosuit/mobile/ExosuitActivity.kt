@@ -248,6 +248,22 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         check(result == 1) { "Haxeon rejected the ${value.optString("type")} command (code $result)" }
     }
 
+    /**
+     * Home and coming back: Android restores the soft keyboard of the window that had it, whatever the UI shows now (it showed over
+     * the Remote list when the terminal that raised it was long gone). When the window gets focus and no text field of the UI
+     * is active, hide it; an active field (a terminal still in front) keeps it.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || !started) return
+        root.postDelayed({
+            val wanted = try {
+                HaxeonRuntime.command(JSONObject().put("type", "keyboardWanted").toString().toByteArray(Charsets.UTF_8)) == 1
+            } catch (error: Throwable) { true }
+            if (!wanted) androidx.core.view.WindowCompat.getInsetsController(window, root).hide(WindowInsetsCompat.Type.ime())
+        }, 300)
+    }
+
     override fun onResume() {
         super.onResume()
         host?.active()

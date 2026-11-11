@@ -48,6 +48,10 @@ class UiBridge {
 					// 1: the UI consumed Back; 2: nothing left to go back to, the Activity may finish.
 					if (host == null) return 2;
 					return host.back() ? 1 : 2;
+				case "keyboardWanted":
+					// 1: a text field is active; 2: none is, so a soft keyboard on screen is stale.
+					if (host == null) return 2;
+					return host.keyboardWanted() ? 1 : 2;
 				case "frame":
 					if (host == null || failed) return 0;
 					host.frame(number(command, "timeMs"));
