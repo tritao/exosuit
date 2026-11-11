@@ -322,6 +322,9 @@ def step_pair(gui, ctx):
     pending = gui.wait("a request waiting for approval", lambda s: s["state"]["remoteAccess"]["pending"], 30)
     desktop_code = re.sub(r"\D", "", pending[0]["code"])
     gui.check("the desktop and the phone show the same code", lambda s: desktop_code == phone_code, detail=lambda s: [desktop_code, phone_code])
+    # The invitation carries the machine key's fingerprint (#mk=); the phone checked it against the key it reached.
+    gui.check("the phone found the machine key the invitation names", lambda s: "exosuit-pairing: machine key matches the invitation" in phone.logcat(),
+              detail=lambda s: "#mk=" in pairing_url)
     time.sleep(1)
     gui.shot_window("editor-4-code")
     phone.shot("1-code")

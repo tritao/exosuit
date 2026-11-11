@@ -198,7 +198,9 @@ Noise key and relay bearer in the credential store), one machine socket, the pai
   suit starts an idle service on `OPEN` (clients should allow 30 s).
 - **Pairing grants only `machine.directory`.** Workspace grants are kept separately in suit and chosen by the owner at
   approval (presets read, edit, all, or an explicit list). The `ref.machine` and the directory's `machine` are suit's
-  catalog id (`machine-<hex>`); the relay machine id is the hex part.
+  catalog id (`machine-<hex>`). The relay machine id is separate: each relay gets its own, derived from a Noise key
+  made for it, and the directory names it in `relay` (a relay set up before that keeps the catalog id's hex part, so its
+  pairings go on working). See `docs/mobile/relay-identity.md`.
 - **Enforcement stays in the service.** suit sends the service an `EXFW` intro as the first message on its existing
   local pipe (`{version, device, grants}`); the service intersects those grants with what it offers and enforces them per
   request. Any other first message is an ordinary local client. A workspace that is not granted answers

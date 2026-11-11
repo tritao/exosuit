@@ -67,5 +67,7 @@ settings.) Until that switch is used, `e2e-local.ps1 run` still starts the local
   to look.
 - Origins. Native clients send no `Origin` header and are accepted. A page from an origin not in `ALLOWED_ORIGINS` is
   refused. Pass `-AllowedOrigins` to the script if a browser client is hosted.
-- First claim. The first machine to register an id owns it. IDs are random 128-bit values, so this is safe, but the
-  Worker has no account system or abuse control. Do not publish the URL.
+- First claim. The first machine to register an id owns it. suit derives each relay's id from a Noise key made for that
+  relay, and proves the key when someone else registered the id first (`docs/mobile/relay-identity.md`); a relay set
+  up before that keeps the catalog id, which every old invitation shows. The Worker has no account system or abuse
+  control. Do not publish the URL.
