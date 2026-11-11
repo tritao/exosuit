@@ -348,14 +348,14 @@ try {
         Start-Sleep -Seconds 2
         Shot (Join-Path $OutDir '1-pairing-code.png')
         # The machine's approval and the phone's confirmation race a short timeout on the phone; approve first (the host acts on its
-        # next 0.5 s poll), then confirm the shown code.
+        # next 0.5 s poll), then confirm the shown code. The phone confirms by a tap: no intent extra can confirm a code.
         if ($PairOrder -eq 'approve-first') {
             Host-Command @('approve')
             Start-Sleep -Seconds 3
-            Start-App @('--ez', 'pairing_confirm', 'true')
+            Tap-PhoneElement 'The code matches' -role 1 -after 0
         } else {
             # The phone confirms first and waits for the owner: the owner approves some seconds later.
-            Start-App @('--ez', 'pairing_confirm', 'true')
+            Tap-PhoneElement 'The code matches' -role 1 -after 0
             Start-Sleep -Seconds 12
             Host-Command @('approve')
         }
@@ -438,7 +438,7 @@ esume"
     Tap-Key Ctrl
     & $script:Adb -s $script:Serial shell input text c | Out-Null
     Wait-Fake $fake { param($l) $l.Count -gt $mark -and ($l[$mark..($l.Count - 1)] -contains 'KEY CTRL_C') } 'sticky Ctrl then c -> CTRL_C' 15
-    # Paste: the debug clipboard_text extra fills the Android clipboard, the Paste key sends it bracketed.
+    # Paste: the test-rig clipboard_text extra (needs files/automation.on) fills the Android clipboard, the Paste key sends it bracketed.
     Start-App @('--es', 'clipboard_text', "'pasted from the phone'")
     Start-Sleep -Seconds 2
     Tap-Key Paste

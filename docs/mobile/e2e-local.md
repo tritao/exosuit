@@ -130,9 +130,9 @@ workspaces, Alpha (attached) and Beta; its Remote Access panel is the machine's 
 3. "Create pairing invitation". The one-time URL is read from the editor's automation snapshot
    (`state.remoteAccess.invitationUrl`, written only when `EXOSUIT_AUTOMATION_DIR` is set, in an owner-only folder).
    The desktop's Copy button is not used, so the real clipboard is left alone.
-4. The phone starts pairing from the URL (debug intent extra `pairing_url`). Both sides must show the same 6-digit code.
+4. The phone starts pairing from the URL (test-rig intent extra `pairing_url`, taken only with `files/automation.on`). Both sides must show the same 6-digit code.
 5. In the editor: "I checked both codes", "Access to Alpha" = All permissions (Beta stays No access), Approve. On the
-   phone: the debug extra `pairing_confirm`.
+   phone: a tap on "The code matches" (no intent extra can confirm a code).
 6. The phone lists Alpha with its session and not Beta; the editor lists the phone as connected.
 7. The phone taps Alpha's row in the Remote list (no debug intent), taps its session, sends the prompt and shows
    `FAKE-REPLY: <prompt>`.

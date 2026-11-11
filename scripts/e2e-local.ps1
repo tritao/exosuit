@@ -226,6 +226,9 @@ function Start-Phone($info) {
             if (((Adb shell run-as $package ls files) -join ' ') -notmatch 'dev-ca.pem') { throw 'The development CA did not reach the app''s files' }
         }
     }
+    # The app's automation snapshot and its test-rig intent extras (pairing_url) need files/automation.on, read at launch.
+    Adb shell run-as $package mkdir -p files | Out-Null
+    Adb shell run-as $package touch files/automation.on | Out-Null
 }
 
 # Starts the app when it is not running (or with -Restart) and measures the time until it lists the machine's workspaces.

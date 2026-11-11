@@ -31,7 +31,13 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     private lateinit var content: FrameLayout
     private lateinit var vault: CredentialVault
     private val debuggable by lazy { applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0 }
-    /** Debug-only commands from the launching intent (pairing_url, pairing_confirm, open_workspace), held until the module has started. */
+    /**
+     * A test rig drives this app: a debug build with `files/automation.on`, which only `adb run-as` can create (the
+     * directory is private to the app). The activity is exported as the launcher, so its intent extras come from any app;
+     * debuggable alone is no gate while debug APKs are the ones installed.
+     */
+    private fun automated() = debuggable && File(filesDir, "automation.on").exists()
+    /** Test-rig commands from the launching intent (pairing_url, open_workspace), held until the module has started. */
     private val pendingCommands = ArrayDeque<JSONObject>()
 
     override fun onCreate(state: Bundle?) {
@@ -52,7 +58,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
             TlsTrust.install(this)
             // Debug builds: a test run that put `files/automation.on` there gets the app's labelled elements and state in
             // `files/automation/snapshot.json` (AutomationProbe), so it taps what the UI shows instead of fixed pixels.
-            if (debuggable && File(filesDir, "automation.on").exists())
+            if (automated())
                 android.system.Os.setenv("EXOSUIT_AUTOMATION_DIR", File(filesDir, "automation").path, true)
             check(HaxeonRuntime.load(assets, if (debuggable) File(filesDir, "dev").path else null) == 0) { "Haxeon module load failed" }
             loaded = true
@@ -222,13 +228,13 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         android.util.Log.i("ExosuitLive", if (status == 0) "exosuit-live: patched in $millis ms" else "exosuit-live: refused (status $status)")
     }
 
-    /** Debug builds only: `--es pairing_url <url>` starts pairing, `--ez pairing_confirm true` confirms the shown code,
-     * `--es open_workspace <name>` opens the granted workspace with that name once the machine lists it,
-     * `--es clipboard_text <text>` sets the clipboard. */
+    /** Test rig only (see automated): `--es pairing_url <url>` starts pairing, `--es open_workspace <name>` opens the
+     * granted workspace with that name once the machine lists it, `--es clipboard_text <text>` sets the clipboard.
+     * Confirming the pairing code is never an intent: the rig taps "The code matches" like a person, so no other app
+     * can skip the code comparison. */
     private fun queueIntentCommands(source: Intent?) {
-        if (!debuggable || source == null) return
+        if (source == null || !automated()) return
         source.getStringExtra("pairing_url")?.let { pendingCommands.addLast(JSONObject().put("type", "pair").put("url", it)) }
-        if (source.getBooleanExtra("pairing_confirm", false)) pendingCommands.addLast(JSONObject().put("type", "confirm"))
         // `--es clipboard_text <text>` puts text on the Android clipboard (there is no adb shell command for it), for paste checks.
         source.getStringExtra("clipboard_text")?.let {
             (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("test", it))

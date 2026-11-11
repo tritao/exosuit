@@ -312,6 +312,8 @@ def step_pair(gui, ctx):
     pairing_url = phone_url(config, url)
 
     gui.step("give it to the phone")
+    # The app takes the pairing_url extra only from a test rig, i.e. when files/automation.on exists.
+    phone.ensure_automation()
     phone.run("logcat", "-c")
     phone.run("shell", "am", "start", "-n", phone.activity, "--es", "pairing_url", "'" + pairing_url + "'")
     code = phone.wait_log(r"exosuit-pairing: code [0-9 ]+", 90)
@@ -330,7 +332,8 @@ def step_pair(gui, ctx):
     order = os.environ.get("EXOSUIT_E2E_PAIR_ORDER", "confirm-first")
     gap = float(os.environ.get("EXOSUIT_E2E_ORDER_GAP", "12"))
     gui.step("pairing order %s: confirm the code on the phone and approve in the editor granting Alpha only" % order)
-    confirm_on_phone = lambda: phone.run("shell", "am", "start", "-n", phone.activity, "--ez", "pairing_confirm", "true")
+    # A tap, as a person confirms: the app accepts no intent extra that confirms a code.
+    confirm_on_phone = lambda: phone.tap_element(r"The code matches", 30, after=0)
     if order == "confirm-first":
         confirm_on_phone()
         time.sleep(gap)

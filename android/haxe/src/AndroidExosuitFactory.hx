@@ -14,7 +14,7 @@ import workspace.service.WorkspaceTerminalProtocol;
 
 /** Builds the same ExosuitApp the desktop runs, with the capabilities a phone has, attached to its paired workspace. */
 class AndroidExosuitFactory {
-	/** The phone's remote attachment, once the app exists; the Activity's debug commands (pair, confirm) go to it. */
+	/** The phone's remote attachment, once the app exists; the Activity's test-rig commands (pair, open) go to it. */
 	public static var remote(default, null):Null<PhoneRemote>;
 	/** The app, for the live-patch hooks (UiBridge.liveRelease, liveRebuild). */
 	public static var app(default, null):Null<ExosuitApp>;

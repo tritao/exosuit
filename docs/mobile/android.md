@@ -170,9 +170,10 @@ The Android files are in `android/haxe/src/`:
   real `wss` relay: the acceptance run uses plain `ws`/`http` to a loopback relay (through `adb reverse`), which
   debug builds allow (`app/src/debug`, a network security config for 127.0.0.1 and localhost). Release builds keep
   Android's default (HTTPS only).
-- Debug intent extras (debug builds only): `--es pairing_url <url>` starts pairing, `--ez pairing_confirm true`
-  presses "The code matches", `--es open_workspace <name>` opens the granted workspace with that name once a
-  directory lists it.
+- Test-rig intent extras (debug builds with `files/automation.on`, which only `adb run-as` can create; the launcher
+  activity is exported, so any app can send it extras): `--es pairing_url <url>` starts pairing, `--es open_workspace
+  <name>` opens the granted workspace with that name once a directory lists it. No extra confirms a pairing code:
+  scripts tap "The code matches" from the automation snapshot.
 
 ### Tests, desktop test host and acceptance run
 
@@ -228,8 +229,8 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
 - **Input.** Soft-keyboard text and Enter go through the text-input path (`sendTyped`). The extra-keys row sits above
   the keyboard and does not take focus (`TouchKeyButton`), so the keyboard stays up: Esc, Tab, S-Tab (the terminfo
   back-tab `ESC [ Z`), a sticky Ctrl (applies to the next typed letter), the four arrows, Paste and Enter. Paste reads
-  the Android clipboard and sends it as a bracketed paste when the program asked for that. For tests the debug extra
-  `--es clipboard_text <text>` sets the clipboard.
+  the Android clipboard and sends it as a bracketed paste when the program asked for that. For tests the test-rig extra
+  `--es clipboard_text <text>` sets the clipboard (needs `files/automation.on`).
 - **Scrolling.** A finger drag scrolls the scrollback (a mouse-reporting program gets wheel events instead). Touch
   pointer ids are negative, which an earlier `>= 0` check missed. A tap focuses the pane and shows the keyboard.
 - **Who sets the size (decision).** The controller does, as on the desktop. The phone claims control by itself when
