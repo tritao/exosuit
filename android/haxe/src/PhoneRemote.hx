@@ -45,6 +45,12 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 	public var error(default, null):Null<String>;
 	public var authenticationCode(default, null):Null<String>;
 	public var codeConfirmed(default, null):Bool = false;
+	/**
+		True when this phone is already paired with a machine of the invitation's id whose key differs from the one this
+		pairing reached: either that machine was reset, or the invitation leads somewhere else. Confirming replaces the old
+		pairing, so the panel warns first.
+	**/
+	public var machineKeyChanged(default, null):Bool = false;
 	/** True while a pairing is in progress (connecting, comparing the code, waiting for approval). */
 	public var pairing(default, null):Bool = false;
 	public var revision(default, null):Int = 0;
@@ -175,6 +181,12 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 			return;
 		}
 		machineKey = done.remoteStaticKey;
+		var parsed = invitation, reached = hex(done.remoteStaticKey);
+		machineKeyChanged = false;
+		if (parsed != null)
+			for (existing in credentials.devices)
+				if (existing.machineId == parsed.machineId && existing.machineStaticPublicKey.toLowerCase() != reached)
+					machineKeyChanged = true;
 		authenticationCode = NoisePairingCode.fromHandshakeHash(done.transcriptHash);
 		Sys.println("exosuit-pairing: code " + authenticationCode);
 		setStatus("Compare this code with the machine.");
@@ -289,6 +301,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		invitation = null;
 		authenticationCode = null;
 		codeConfirmed = false;
+		machineKeyChanged = false;
 		pairing = false;
 	}
 

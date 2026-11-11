@@ -43,8 +43,13 @@ class PhonePanel implements View {
 		if (remote.authenticationCode != null) {
 			rows.push(new KeyedView("code-instruction", new Text("Compare this code with the machine, then confirm.")));
 			rows.push(new KeyedView("code", new Text(remote.authenticationCode, null, tokens.textPrimary, TextStyleOverride.text(28, TextWrap.None))));
+			if (remote.machineKeyChanged)
+				rows.push(new KeyedView("key-changed", new Text("Warning: this phone is already paired with a machine of this id, and this one has a "
+					+ "different key. Continue only if you reset or reinstalled that machine and created this invitation yourself. "
+					+ "Confirming replaces the old pairing.", null, tokens.danger)));
 			if (!remote.codeConfirmed) {
-				var confirm = new Button("The code matches", null, remote.confirmCode, "phone-pairing-confirm");
+				var confirm = new Button(remote.machineKeyChanged ? "The code matches: replace the old pairing" : "The code matches", null,
+					remote.confirmCode, "phone-pairing-confirm");
 				confirm.variant = ButtonVariant.Primary;
 				rows.push(new KeyedView("confirm", confirm));
 			}
