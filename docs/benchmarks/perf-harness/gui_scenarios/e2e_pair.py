@@ -325,7 +325,8 @@ def step_pair(gui, ctx):
     phone.shot("1-code")
 
     # Either side may act first. EXOSUIT_E2E_PAIR_ORDER=confirm-first (default: the phone confirms, waits EXOSUIT_E2E_ORDER_GAP
-    # seconds, default 12, then the owner approves) or approve-first (the owner approves, the phone confirms 3 s later).
+    # seconds, default 12, then the owner approves) or approve-first (the owner approves, the phone confirms the same gap
+    # later: the default is past the 10 s the machine once allowed after approving).
     order = os.environ.get("EXOSUIT_E2E_PAIR_ORDER", "confirm-first")
     gap = float(os.environ.get("EXOSUIT_E2E_ORDER_GAP", "12"))
     gui.step("pairing order %s: confirm the code on the phone and approve in the editor granting Alpha only" % order)
@@ -347,7 +348,7 @@ def step_pair(gui, ctx):
         gui.scroll(PANEL, -4)
     gui.click(gui.element("Approve"))
     if order == "approve-first":
-        time.sleep(3)
+        time.sleep(gap)
         phone.shot("1b-approved-waiting-for-confirm")
         confirm_on_phone()
     gui.wait("the device is paired with Alpha", lambda s: [d for d in s["state"]["remoteAccess"]["devices"]

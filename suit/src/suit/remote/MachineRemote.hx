@@ -48,6 +48,13 @@ private typedef ServiceStart = {
 	var waiters:Array<Null<String>->Null<String>->Void>;
 }
 
+/** An approval in flight: answered once the device has it, or when it fails. */
+private typedef PendingApproval = {
+	var deviceId:String;
+	var finish:Dynamic->Void;
+	var answered:Bool;
+}
+
 /**
 	The machine's relay identity, paired devices and what each may reach (ADR 0005 section 4, M19 Phase 9). One machine
 	socket to the relay, held here; Noise terminated here per device channel against the pinned device key; a
@@ -70,6 +77,7 @@ class MachineRemote implements MachineSessionHost {
 	final sessions:Array<MachineDeviceSession> = [];
 	final starts:Array<ServiceStart> = [];
 	final deferred:Array<DeferredReply> = [];
+	final approvals:Array<PendingApproval> = [];
 	var endpoint:Null<RelayMachineEndpoint> = null;
 	var host:Null<WorkspaceRelayHost> = null;
 	var identity:Null<WorkspaceNoiseIdentity> = null;
@@ -102,7 +110,7 @@ class MachineRemote implements MachineSessionHost {
 
 	/** Work that wants prompt polling. */
 	public function busy():Bool
-		return sessions.length > 0 || starts.length > 0 || deferred.length > 0;
+		return sessions.length > 0 || starts.length > 0 || deferred.length > 0 || approvals.length > 0;
 
 	// ---- setup
 
@@ -205,6 +213,14 @@ class MachineRemote implements MachineSessionHost {
 			if (manager != null)
 				manager.poll();
 		}
+		var pairing = manager;
+		if (pairing != null)
+			for (approval in approvals.copy())
+				if (!approval.answered && pairing.awaitingConfirmation(approval.deviceId)) {
+					// The device has its approval; its user may take a while to confirm the code, longer than the editor waits.
+					version++;
+					answerApproval(approval, {ok: true});
+				}
 		var index = sessions.length;
 		while (index-- > 0) {
 			sessions[index].poll();
@@ -413,14 +429,17 @@ class MachineRemote implements MachineSessionHost {
 					var granted = workspaceGrants(request);
 					var pairing = requireManager();
 					return later(function(finish) {
+						var approval:PendingApproval = {deviceId: id, finish: finish, answered: false};
+						approvals.push(approval);
 						// The device's workspaces are in place before it is approved, so its first directory read shows them.
 						store.setGrants(id, granted);
 						pairing.approve(id, [MachineDirectoryProtocol.CAPABILITY], function(error) {
+							approvals.remove(approval);
 							if (error != null)
 								store.clearGrants(id);
 							else
 								version++;
-							finish(error == null ? {ok: true} : {ok: false, error: error});
+							answerApproval(approval, error == null ? {ok: true} : {ok: false, error: error});
 						});
 					});
 				case "remote-grant":
@@ -460,6 +479,13 @@ class MachineRemote implements MachineSessionHost {
 		deferred.push(pending);
 		work(function(value) pending.resolve(value));
 		return pending;
+	}
+
+	static function answerApproval(approval:PendingApproval, value:Dynamic):Void {
+		if (approval.answered)
+			return;
+		approval.answered = true;
+		approval.finish(value);
 	}
 
 	function requireManager():WorkspacePairingManager {

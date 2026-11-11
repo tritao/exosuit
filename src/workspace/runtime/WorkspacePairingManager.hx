@@ -214,6 +214,12 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		return result;
 	}
 
+	/** Whether `deviceId` has its approval and the machine now waits for the device to confirm the code. */
+	public function awaitingConfirmation(deviceId:String):Bool {
+		var candidate = pending.get(deviceId);
+		return candidate != null && candidate.state == "awaiting_confirmation";
+	}
+
 	public function listDevices():Array<PairingDevice> {
 		var result:Array<PairingDevice> = [];
 		for (record in store.loadDevices())
@@ -318,7 +324,8 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 			if (!candidate.transport.send(approvalMessage))
 				return;
 			candidate.state = "awaiting_confirmation";
-			candidate.expiresAt = clock() + 10000;
+			// The owner may approve before the device's user has compared the codes: give them the full pairing window.
+			candidate.expiresAt = clock() + DEFAULT_PENDING_MILLISECONDS;
 			candidate.approvalMessage = null;
 			candidate.deviceToken = null;
 			return;
