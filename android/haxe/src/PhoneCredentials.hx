@@ -62,11 +62,22 @@ class PhoneCredentials {
 		return null;
 	}
 
-	/** Adds or replaces the entry for the same machine and device, then stores the document. */
+	/**
+		Adds or replaces the entry for the same machine and device, then stores the document. When the host refuses to store
+		it, the entry is taken back out (and the one it replaced, if any, put back), so a later save (learn, remove) cannot
+		store a device whose pairing never completed.
+	**/
 	public function put(device:SavedDevice, done:Bool->Void):Void {
+		var previous = find(device.machineId, device.deviceId);
 		devices = [for (existing in devices) if (existing.machineId != device.machineId || existing.deviceId != device.deviceId) existing];
 		devices.push(device);
-		save(done);
+		save(function(ok) {
+			if (!ok && devices.indexOf(device) >= 0) {
+				devices = [for (existing in devices) if (existing != device) existing];
+				if (previous != null) devices.push(previous);
+			}
+			done(ok);
+		});
 	}
 
 	public function remove(machineId:String, deviceId:String, done:Bool->Void):Void {
