@@ -214,6 +214,13 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		return result;
 	}
 
+	/** Whether `deviceId` is a pending pairing that `approve` would take now: waiting for the owner, not yet a device. */
+	public function awaitingApproval(deviceId:String):Bool {
+		purgeExpired();
+		var candidate = pending.get(deviceId);
+		return candidate != null && candidate.state == "waiting" && findDevice(deviceId) == null;
+	}
+
 	/** Whether `deviceId` has its approval and the machine now waits for the device to confirm the code. */
 	public function awaitingConfirmation(deviceId:String):Bool {
 		var candidate = pending.get(deviceId);

@@ -428,6 +428,11 @@ class MachineRemote implements MachineSessionHost {
 					var id = SuitRecords.stringField(request, "deviceId");
 					var granted = workspaceGrants(request);
 					var pairing = requireManager();
+					// A repeated or stale Approve (the editor gave up waiting, or the list was old) must not touch the grants of a
+					// pairing already under way or of a paired device: only a pairing waiting for the owner gets them.
+					if (id == null || !pairing.awaitingApproval(id))
+						return {ok: false, error: "pairing_not_found"};
+					var previous = store.grantsOf(id);
 					return later(function(finish) {
 						var approval:PendingApproval = {deviceId: id, finish: finish, answered: false};
 						approvals.push(approval);
@@ -436,7 +441,7 @@ class MachineRemote implements MachineSessionHost {
 						pairing.approve(id, [MachineDirectoryProtocol.CAPABILITY], function(error) {
 							approvals.remove(approval);
 							if (error != null)
-								store.clearGrants(id);
+								store.setGrants(id, previous);
 							else
 								version++;
 							answerApproval(approval, error == null ? {ok: true} : {ok: false, error: error});
