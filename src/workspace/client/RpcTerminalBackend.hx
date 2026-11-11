@@ -86,13 +86,16 @@ class RpcTerminalBackend implements TerminalBackend {
   static final CLIENT_KEY = "EXOSUIT_TERMINAL_CLIENT_KEY";
   /** Names this client process, so the service can tell a pane that replaced an old attachment from another client.
       Random and kept in the process environment: statics do not survive a live module reload, the environment does.
-      A window started by this process gets an empty value, so it makes its own key. */
+      The value is `<pid>:<key>` and counts only in the process that made it: every child (suit, services, their
+      shells, an editor run from one of those) inherits the variable, and must not take terminal control as this
+      editor without the takeover prompt. */
   static function clientKey():String {
-    var key = Sys.getEnv(CLIENT_KEY);
-    if (key == null || key == "") {
-      key = haxe.crypto.Sha256.encode(Sys.time() + ":" + Math.random() + ":" + Sys.getPid()).substr(0, 32);
-      Sys.putEnv(CLIENT_KEY, key);
-    }
+    var owner = Sys.getPid() + ":";
+    var value = Sys.getEnv(CLIENT_KEY);
+    if (value != null && StringTools.startsWith(value, owner) && value.length > owner.length)
+      return value.substr(owner.length);
+    var key = haxe.crypto.Sha256.encode(Sys.time() + ":" + Math.random() + ":" + Sys.getPid()).substr(0, 32);
+    Sys.putEnv(CLIENT_KEY, owner + key);
     return key;
   }
   public function id():String return terminalId;
