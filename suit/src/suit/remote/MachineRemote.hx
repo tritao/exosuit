@@ -520,8 +520,17 @@ class MachineRemote implements MachineSessionHost {
 		return {
 			ok: true, enabled: endpoint != null, connected: relay != null && relay.connected, origin: endpoint == null ? null : endpoint.origin,
 			relayMachineId: endpoint == null ? null : endpoint.machineId, machineId: catalog().state.id,
-			error: setupError != null ? setupError : relay == null ? null : relay.lastError, sessions: sessions.length
+			error: setupError != null ? setupError : relay == null ? null : explainRelayError(relay.lastError), sessions: sessions.length
 		};
+	}
+
+	/** Relay errors the owner has to act on, said in words; the code stays at the front. */
+	static function explainRelayError(error:Null<String>):Null<String> {
+		if (error == "machine_identity_conflict")
+			// The relay id is the catalog id, which every invitation shows: someone else may have registered it first.
+			return error + ": this relay already has this machine's id registered with another credential, so it cannot be "
+				+ "used for this machine. Turn remote access off and use another relay (or your own).";
+		return error;
 	}
 
 	function devices():Dynamic {
