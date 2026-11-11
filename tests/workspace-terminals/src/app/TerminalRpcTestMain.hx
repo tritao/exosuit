@@ -52,6 +52,7 @@ class TerminalRpcTestMain {
       TerminalServiceTests.run(root);
       TerminalControlTests.run(root);
       TerminalCatalogTests.run(root);
+      ServesRootTests.run(root, runtime, processes);
       TerminalCloseServiceTests.run(root);
       WorkspaceGroupTests.run(root);
       WorkspaceFileTests.run(root);
