@@ -562,17 +562,27 @@ class EditorPane implements View {
 			preview.layout.style.positionX = seededX;
 			preview.layout.style.width = LayoutAxis.fixed(viewportGeometry.minimapWidth);
 		}
+		// The nodes are in the submitted tree by now: each in-place edit must be announced (willEditRetained), or the
+		// feedback pass does not see it and a newly built pane keeps its minimap at x = 0, over the text.
 		container.onResolved(function(geometry) {
 			minimapHostWidth = geometry.width;
 			var width = viewportGeometry.minimapWidth;
 			var x = Math.max(0.0, geometry.width - width);
-			if (shadowStyle.positionX != x - 8.0) { shadowStyle.positionX = x - 8.0; context.requestLayoutFeedback(); }
-			if (preview.layout.style.positionX != x) { preview.layout.style.positionX = x; context.requestLayoutFeedback(); }
-			if (preview.layout.style.width.value != width) {
-				preview.layout.style.width = LayoutAxis.fixed(width);
+			var shadowLayout = shadow.layout.style;
+			if (shadowLayout.positionX != x - 8.0) {
+				context.willEditRetained(shadow);
+				shadowLayout.positionX = x - 8.0;
 				context.requestLayoutFeedback();
 			}
-			preview.hitTestSelf = width > 0;
+			var previewLayout = preview.layout.style;
+			var hitTest = width > 0;
+			if (previewLayout.positionX != x || previewLayout.width.value != width || preview.hitTestSelf != hitTest) {
+				context.willEditRetained(preview);
+				previewLayout.positionX = x;
+				previewLayout.width = LayoutAxis.fixed(width);
+				preview.hitTestSelf = hitTest;
+				context.requestLayoutFeedback();
+			}
 		});
 		return container;
 	}
