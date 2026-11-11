@@ -307,12 +307,20 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
+    /** Back on the error screen: finish, so onDestroy ends the process and the next launch starts clean. */
+    private val closeCallback = OnBackInvokedCallback { finish() }
+
     private fun fail(error: Throwable) {
         active = false
         Choreographer.getInstance().removeFrameCallback(this)
         Log.e(TAG, "Exosuit host failed", error)
+        // The module stays failed (UiBridge.failed), so Back must not send the task to the background as it does while the
+        // app runs: relaunching would bring this same screen back. A root Activity is not finished by the system's default
+        // Back either, hence the explicit callback.
+        onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backCallback)
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, closeCallback)
         setContentView(TextView(this).apply {
-            text = "Exosuit could not start: ${error.message}"
+            text = "Exosuit could not start: ${error.message}\n\nPress Back to close it, then open it again."
             setPadding(24, 48, 24, 24)
         })
     }
