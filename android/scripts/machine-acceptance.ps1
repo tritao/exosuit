@@ -337,6 +337,8 @@ try {
         # 1. Pair from the invitation; compare the phone's code with the machine's pending one, then confirm and approve.
         Start-App @('--es', 'pairing_url', "'$($info.invitationUrl)'")
         $phoneCode = (Wait-Log 'exosuit-pairing: code [0-9 ]+' 90) -replace '\D', ''
+        # The invitation carries the machine key's fingerprint (#mk=); the phone checked it after the handshake.
+        if (-not ((Logcat) -match 'exosuit-pairing: machine key matches the invitation')) { throw 'The phone did not find the invitation''s machine key' }
         $deadline = (Get-Date).AddSeconds(60)
         do {
             Start-Sleep -Seconds 1
