@@ -60,6 +60,9 @@ class RpcTerminalBackend implements TerminalBackend {
   var replayCursor:Int64 = 0;
   var snapshotOnly:Bool = false;
   var snapshotPending:Bool = false;
+  // Expired paged snapshots in a row, and when the next attempt may start.
+  var snapshotExpiries:Int = 0;
+  var snapshotRetryAt:Float = 0;
   var replayAfterResize:Bool = false;
   // Geometry of the service's recorded stream, as last applied to the emulator.
   var streamColumns:Int = 0;
@@ -221,6 +224,7 @@ class RpcTerminalBackend implements TerminalBackend {
     var served:ServedRoots = cast endpoint;
     return served.servesRoot(root);
   }
+  static inline final SNAPSHOT_RETRIES = 6;
   static function retryable(code:String):Bool return code == "timeout" || code == "disconnected";
   function fail(message:String):Void {
     message = switch (message) {
@@ -470,7 +474,7 @@ class RpcTerminalBackend implements TerminalBackend {
         }
         );
       } else if (snapshotPending) {
-        requestScreenSnapshot(c);
+        if (Sys.time() >= snapshotRetryAt) requestScreenSnapshot(c);
       } else if ((resizePending || themePending && controller && terminalState == "running") && !replayAfterResize) {
         resizePending = false;
         themePending = false;
@@ -624,8 +628,18 @@ class RpcTerminalBackend implements TerminalBackend {
       if (connection != c) return;
       pending = false;
       replayDirty = true;
-      // A replaced or expired snapshot is taken again on the next poll.
-      if (!closed && error.code != "snapshot_expired" && !retryable(error.code)) fail(error.code == "snapshot_unavailable"
+      if (closed) return;
+      if (error.code == "snapshot_expired") {
+        // The service dropped the rest before it was read: take a new one, waiting longer each time
+        // so many views do not keep pushing out each other's snapshots.
+        snapshotExpiries += 1;
+        if (snapshotExpiries > SNAPSHOT_RETRIES) {
+          fail("Terminal screen snapshot kept expiring before it was read; reopen the terminal");
+          return;
+        }
+        snapshotRetryAt = Sys.time() + 0.1 * Math.pow(2, snapshotExpiries - 1) * (1 + Math.random());
+        nextRead = snapshotRetryAt;
+      } else if (!retryable(error.code)) fail(error.code == "snapshot_unavailable"
         ? "Terminal screen snapshot is unavailable" : error.code);
     });
   }
@@ -645,6 +659,8 @@ class RpcTerminalBackend implements TerminalBackend {
     if (!observe(value.terminal)) return;
     if (value.cursor != null) replayCursor = value.cursor;
     snapshotPending = false;
+    snapshotExpiries = 0;
+    snapshotRetryAt = 0;
     synchronizationPending = true;
     replayAfterResize = false;
     position = value.terminal.end;
