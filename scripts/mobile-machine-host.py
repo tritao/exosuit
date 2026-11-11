@@ -219,12 +219,22 @@ def start(arguments) -> int:
         log("ready", invitation=invitation["pairingSocketUrl"])
         pairing = {"pendingCode": None, "deviceId": device_id, "approved": False, "granted": {}}
         write_json(out / "pairing.json", pairing)
+        device_state = "none"
 
         while not (out / "stop").exists():
             if time.monotonic() - started > LIFETIME_SECONDS:
                 log("lifetime-exceeded", seconds=LIFETIME_SECONDS)
                 break
             devices = suit.control({"op": "remote-devices"})
+            # The machine's record of the device (none, saved, connected, revoked), logged when it changes: a pairing the machine
+            # rolled back after the approval shows as saved -> none, with the times that explain it.
+            state = "none"
+            for item in devices.get("devices", []):
+                if item.get("deviceId") == device_id:
+                    state = "revoked" if item.get("revoked") else "connected" if item.get("connected") else "saved"
+            if state != device_state:
+                device_state = state
+                log("device", state=state)
             if not pairing["approved"]:
                 for item in devices.get("pending", []):
                     if item["deviceId"] == device_id:

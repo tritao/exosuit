@@ -357,6 +357,8 @@ try {
         if ($PairOrder -eq 'approve-first') {
             Host-Command @('approve')
             Start-Sleep -Seconds $gap
+            # What the phone shows after the approval, before its user confirms: still the code and "The code matches".
+            Shot (Join-Path $OutDir '1b-approved-before-confirm.png')
             Tap-PhoneElement 'The code matches' -role 1 -after 0
         } else {
             # The phone confirms first and waits for the owner: the owner approves some seconds later.
@@ -364,7 +366,8 @@ try {
             Start-Sleep -Seconds $gap
             Host-Command @('approve')
         }
-        Wait-Log 'exosuit-machine: \S.* online \[\]' 90 | Out-Null
+        try { Wait-Log 'exosuit-machine: \S.* online \[\]' 90 | Out-Null }
+        catch { Shot (Join-Path $OutDir '2-NOT-PAIRED.png'); throw }
         Start-Sleep -Seconds 2
         Shot (Join-Path $OutDir '2-nothing-granted.png')
 

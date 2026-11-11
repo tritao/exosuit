@@ -67,12 +67,28 @@ function Get-PhoneScale {
 # Taps the centre of the first (topmost) element matching the pattern; waits for it to exist first.
 function Tap-PhoneElement([string]$pattern, [int]$wait = 30, [double]$after = 1.5, [int]$index = 0, [string]$role = '') {
     $null = Wait-PhoneElement $pattern $wait -role $role
+    Close-SystemAnrDialog
     $found = @(Find-PhoneElements $pattern $role)
     $element = $found[[Math]::Min($index, $found.Count - 1)]
     $scale = Get-PhoneScale
     $x = [int](($element.x + $element.w / 2) * $scale); $y = [int](($element.y + $element.h / 2) * $scale)
     & $script:Adb -s $script:Serial shell input tap $x $y | Out-Null
     Start-Sleep -Seconds $after
+}
+
+# A loaded emulator (the first minutes after a cold boot) shows "System UI isn't responding" and similar dialogs over the
+# app; a tap then lands on the dialog's dim area and the app never gets it (seen: "The code matches" swallowed, pairing
+# never confirmed). The app's own snapshot cannot see such a window, so look at the window focus and close it first.
+function Close-SystemAnrDialog {
+    foreach ($attempt in 1..3) {
+        $focus = (& $script:Adb -s $script:Serial shell dumpsys window) -join "`n"
+        $current = [regex]::Match($focus, 'mCurrentFocus=Window\{[^ ]+ [^ ]+ ([^}]+)\}').Groups[1].Value
+        if ($current -notmatch 'Not Responding|isn.t responding') { return }
+        Write-Host "closing a system dialog over the app: $current"
+        if ($attempt -eq 1) { & $script:Adb -s $script:Serial shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS | Out-Null }
+        else { & $script:Adb -s $script:Serial shell input keyevent KEYCODE_BACK | Out-Null }
+        Start-Sleep -Seconds 1
+    }
 }
 
 # Throws unless the app's window has the focus: another window (a keyboard sheet, a system dialog) would swallow input.
