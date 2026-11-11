@@ -15,6 +15,7 @@ import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceProtocol;
+import workspace.transport.MachineKeys;
 import workspace.transport.DeviceRpcConnector;
 import workspace.transport.StreamMultiplexer;
 import workspace.transport.StreamMultiplexer.MuxStream;
@@ -301,6 +302,9 @@ class MachineRemoteTestMain {
 		device.connection.onNotification(MachineDirectoryProtocol.CHANGED, MachineDirectoryProtocol.decodeChange, function(_) device.changes++);
 		var view = directory(device);
 		check(view.machine == machineId, "the directory names this machine");
+		check(view.relay == relayMachine, "the directory names the relay id the device paired under");
+		check(relayMachine != machineId.substr("machine-".length) && MachineKeys.relayId(machineKey) == relayMachine,
+			"a new relay gets its own relay id, derived from the machine key the device reached");
 		check(listed(view, idA) && !listed(view, idB) && view.workspaces.length == 1, "the directory shows A and not B");
 		check(view.workspaces[0].name == "Alpha", "the directory names the workspace");
 

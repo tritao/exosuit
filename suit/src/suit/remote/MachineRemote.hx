@@ -27,6 +27,7 @@ import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineGrants;
 import workspace.transport.ForwardedStream;
+import workspace.transport.MachineKeys;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.RelayMachineEndpoint;
 
@@ -61,9 +62,12 @@ private typedef PendingApproval = {
 	machine-level directory filtered to the device's grants; and, when a device opens a granted workspace, a stream
 	forwarded to that workspace's service over its local pipe with the grants attached (`MachineDeviceSession`).
 
-	Secrets: the Noise static key and the relay bearer live in the OS credential store under the machine's relay id (the
-	32 hex digits of its machine id). `machine-relay.json` in suit's home holds only the relay origin and that id;
-	`machine-devices.json` holds device pins and grants. Both are written only here.
+	Secrets: the Noise static key and the relay bearer live in the OS credential store under the machine's relay id. Each
+	relay gets its own id, derived from a Noise key made for it (`MachineKeys.relayId`); a relay set up before that keeps
+	the 32 hex digits of the catalog id (`MachineRelayIds`). Devices learn the relay id from the invitation and the
+	directory's `relay` field. `machine-relay.json` in suit's home holds only the relay origin and that id,
+	`machine-relay-ids.json` the id per relay used, `machine-devices.json` device pins and grants. All are written only
+	here.
 **/
 class MachineRemote implements MachineSessionHost {
 	static inline final START_SECONDS:Float = 45;
@@ -138,6 +142,8 @@ class MachineRemote implements MachineSessionHost {
 		var target = new RelayMachineEndpoint(origin, id);
 		if (target.isLoopbackHttp && !allowLoopbackHttp)
 			throw "relay_loopback_disabled";
+		// A relay set up before machine-relay-ids.json: remember its id, so turning remote access off and on keeps it.
+		try new MachineRelayIds(relayIdsFile()).remember(target.origin, target.machineId) catch (_:Dynamic) {}
 		var credentials = WorkspaceCredentialStores.relay();
 		var stored = credentials.read(WorkspaceCredentialStores.machineAccount(target));
 		if (stored == null)
@@ -171,28 +177,55 @@ class MachineRemote implements MachineSessionHost {
 		endpoint = null;
 	}
 
-	/** The machine's relay id: the hex digits of its catalog id, so one id names the machine to the relay and to devices. */
-	function relayId():String {
+	public static function relayIdsFile():String
+		return Path.join([SuitPaths.home(), "machine-relay-ids.json"]);
+
+	/** The hex digits of the catalog id: the relay id every relay used before each relay got its own. Null when it is not one. */
+	function legacyRelayId():Null<String> {
 		var id = catalog().state.id;
 		var hex = StringTools.startsWith(id, "machine-") ? id.substr("machine-".length) : id;
-		if (!~/^[0-9a-f]{32}$/.match(hex))
-			throw "The machine id is not a relay id";
-		return hex;
+		return MachineRelayIds.valid(hex) ? hex : null;
+	}
+
+	/**
+		The relay id for a relay (`MachineRelayIds.choose`). A new one is derived from a Noise key made for this relay
+		(`MachineKeys.relayId`), stored as the relay identity's key before the id is used, so the id is not guessable from
+		anything an invitation shows and the relay can be shown that a registration holds the key.
+	**/
+	function relayIdFor(origin:String, credentials:workspace.runtime.WorkspaceCredentialStore):String {
+		var canonical = new RelayMachineEndpoint(origin, StringTools.lpad("", "0", 32)).origin;
+		return new MachineRelayIds(relayIdsFile()).choose(canonical, legacyRelayId(), function(id) {
+			var stored = credentials.read(WorkspaceCredentialStores.machineAccount(new RelayMachineEndpoint(canonical, id)));
+			if (stored == null)
+				return false;
+			wipe(stored);
+			return true;
+		}, function() {
+			var generated = NoiseSession.generateKeypair();
+			var id = MachineKeys.relayId(generated.publicKey);
+			try credentials.write("noise-static:" + id, generated.privateKey) catch (error:Dynamic) {
+				wipe(generated.privateKey);
+				throw error;
+			}
+			wipe(generated.privateKey);
+			return id;
+		});
 	}
 
 	/** Sets up remote access with this relay: a bearer in the credential store and the machine's config. Safe to repeat for the same relay. */
 	function enable(origin:String):Void {
 		if (storeError != null)
 			throw storeError;
-		var target = new RelayMachineEndpoint(origin, relayId());
-		if (target.isLoopbackHttp && !allowLoopbackHttp)
-			throw "relay_loopback_disabled";
-		if (endpoint != null) {
-			if (endpoint.origin == target.origin)
-				return;
-			throw "Remote access is already set up with " + endpoint.origin;
-		}
 		var credentials = WorkspaceCredentialStores.relay();
+		var current = endpoint;
+		if (current != null) {
+			if (current.origin == new RelayMachineEndpoint(origin, current.machineId).origin)
+				return;
+			throw "Remote access is already set up with " + current.origin;
+		}
+		if (new RelayMachineEndpoint(origin, StringTools.lpad("", "0", 32)).isLoopbackHttp && !allowLoopbackHttp)
+			throw "relay_loopback_disabled";
+		var target = new RelayMachineEndpoint(origin, relayIdFor(origin, credentials));
 		var account = WorkspaceCredentialStores.machineAccount(target);
 		var existing = credentials.read(account);
 		if (existing == null) {
@@ -210,7 +243,10 @@ class MachineRemote implements MachineSessionHost {
 		load();
 	}
 
-	/** Stops using the relay and deletes its address. The machine's bearer stays in the credential store for the same relay later. */
+	/**
+		Stops using the relay and deletes its address. The machine's bearer and Noise key stay in the credential store, and its
+		relay id in machine-relay-ids.json, for the same relay later.
+	**/
 	function disable():Void {
 		teardown();
 		if (FileSystem.exists(configFile()))
@@ -296,7 +332,7 @@ class MachineRemote implements MachineSessionHost {
 				listed.push({workspace: entry.id, name: entry.name, status: running(entry.id) == null ? MachineDirectoryProtocol.IDLE : MachineDirectoryProtocol.RUNNING,
 					grants: grants});
 		}
-		// The relay id names the pairing to the device, apart from the machine's own id (the catalog's).
+		// The relay id names the pairing to the device; the machine's own id is the catalog's (they differ for relays set up now).
 		return {machine: machine.id, name: machine.name, revision: revision(), workspaces: listed, relay: endpoint == null ? null : endpoint.machineId};
 	}
 

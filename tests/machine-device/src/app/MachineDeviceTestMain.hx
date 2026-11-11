@@ -12,6 +12,7 @@ import haxeon.rpc.RpcPeerOptions;
 import workspace.client.DeviceMachine;
 import workspace.client.WorkspaceConnections;
 import workspace.service.MachineDirectoryProtocol;
+import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
 import workspace.service.MachineDirectoryProtocol.MachineWorkspaceEntry;
 import workspace.service.WorkspaceCatalogProtocol;
@@ -19,6 +20,7 @@ import workspace.service.WorkspaceCatalogProtocol.CatalogChange;
 import workspace.service.WorkspaceCatalogProtocol.CatalogQuery;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceCatalog;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
+import workspace.transport.MachineKeys;
 import workspace.transport.StreamMultiplexer;
 
 private class NoAttempt implements RpcConnectAttempt {
@@ -112,6 +114,8 @@ private class FakeMachine {
 	public var opens = 0;
 	public var refuseOpen:Null<String>;
 	public var lieAboutMachine = false;
+	/** The relay id the directory names (`relay`), or null to answer as a machine from before that field. */
+	public var relayId:Null<String> = null;
 	var current:Null<Served>;
 	var nextStream = 1;
 	final clock:Void->Float;
@@ -175,7 +179,7 @@ private class FakeMachine {
 				context.fail({code: "machine_mismatch", message: "machine_mismatch", ambiguous: false});
 				return;
 			}
-			context.respond({machine: lieAboutMachine ? "other" : id, name: "cube", revision: revision, workspaces: entries()});
+			context.respond({machine: lieAboutMachine ? "other" : id, name: "cube", revision: revision, workspaces: entries(), relay: relayId});
 		});
 		connection.register(MachineDirectoryProtocol.OPEN, function(request, context) {
 			opens++;
@@ -307,6 +311,7 @@ class MachineDeviceTestMain {
 		catalogsOverStreams();
 		revokeAndReconnect();
 		refusals();
+		relayIdentity();
 		print("ALL PASS");
 	}
 
@@ -602,5 +607,54 @@ class MachineDeviceTestMain {
 		require(code == "disconnected", "opening before the machine connected fails at once");
 		idle.dispose();
 		print("PASS: refusals, mismatched machines and an unconnected machine");
+	}
+
+	/**
+		A machine whose relay id is its own and differs from its catalog id (suit gives each relay one): the device accepts
+		its directory when the directory names the relay id it paired under, and an older machine (no relay id) must still
+		answer with the relay id as its own. The values derived from a machine key match the Worker's and suit's.
+	**/
+	static function relayIdentity():Void {
+		var relayHex = "5ff11fa2bc5136b8ccf63b6c679d6f8d";
+		var dir = function(machine:String, relay:Null<String>):MachineDirectory return {machine: machine, name: "cube", revision: 1, workspaces: [], relay: relay};
+		require(DeviceMachine.answersFor(dir("machine-0123", relayHex), relayHex, null), "a directory naming this relay id is accepted under any machine id");
+		require(!DeviceMachine.answersFor(dir("machine-0123", "00000000000000000000000000000000"), relayHex, null), "another relay id is refused");
+		require(DeviceMachine.answersFor(dir("machine-" + relayHex, null), relayHex, null) && DeviceMachine.answersFor(dir(relayHex, null), relayHex, null),
+			"an older machine answers with the relay id as its own");
+		require(!DeviceMachine.answersFor(dir("machine-0123", null), relayHex, null), "an older machine with another id is refused");
+		require(!DeviceMachine.answersFor(dir("machine-other", relayHex), relayHex, "machine-0123"), "the pinned machine id holds after the first answer");
+		require(!DeviceMachine.answersFor(null, relayHex, null) && !DeviceMachine.answersFor(dir("", relayHex), relayHex, null), "an empty answer is refused");
+
+		var machine = new FakeMachine("machine-0123456789abcdef0123456789abcdef", clock);
+		machine.relayId = relayHex;
+		machine.grant("A", "Alpha");
+		var phone = new DeviceMachine(new Dial(machine), relayHex, clock, function() return 0.5);
+		pump(machine, phone, null, 30);
+		require(phone.directory != null && phone.machineId == machine.id && names(phone) == "A:idle",
+			"the device reads a directory whose machine id is not its relay id: " + phone.error);
+		var opened:Null<String> = null;
+		phone.openStream({machine: machine.id, workspace: "A"}, function(stream, error) opened = stream != null ? "stream" : error == null ? "none" : error.code);
+		pump(machine, phone, null, 10);
+		require(opened == "stream", "and opens a workspace under the machine's own id: " + opened);
+		phone.dispose();
+		var stranger = new DeviceMachine(new Dial(machine), "ffffffffffffffffffffffffffffffff", clock, function() return 0.5);
+		pump(machine, stranger, null, 30);
+		require(stranger.directory == null && stranger.error != null, "a device paired under another relay id refuses it");
+		stranger.dispose();
+
+		var key = Bytes.alloc(32);
+		for (index in 0...32)
+			key.set(index, index);
+		require(MachineKeys.fingerprint(key) == "630dcd2966c4336691125448bbb25b4f", "machine key fingerprint vector: " + MachineKeys.fingerprint(key));
+		require(MachineKeys.relayId(key) == relayHex && MachineKeys.derived(relayHex, key) && !MachineKeys.derived("machine-0123", key),
+			"relay id vector: " + MachineKeys.relayId(key));
+		var shared = Bytes.alloc(32), challenge = Bytes.alloc(32);
+		for (index in 0...32) {
+			shared.set(index, 0x11);
+			challenge.set(index, 32 + index);
+		}
+		var proof = MachineKeys.registrationProof(shared, relayHex, challenge, StringTools.lpad("", "ab", 64));
+		require(proof == "bd14af04eba3b85dbfb2bca787b9a64bcf63070ec15a5e2de9170096057b1598", "registration proof vector: " + proof);
+		print("PASS: relay ids apart from machine ids, and the machine key vectors");
 	}
 }

@@ -8,6 +8,7 @@ import haxeon.rpc.RpcHandshake;
 import haxeon.rpc.RpcPeerOptions;
 import suit.remote.MachineDeviceSession;
 import suit.remote.MachineDeviceStore;
+import suit.remote.MachineRelayIds;
 import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineGrants;
@@ -32,6 +33,7 @@ class MachineRemoteUnitTests {
 		failures = 0;
 		machineGrants();
 		machineDeviceStore();
+		machineRelayIds();
 		forwardedIntro();
 		machineDeviceSession();
 		return failures;
@@ -107,6 +109,43 @@ class MachineRemoteUnitTests {
 			{ check(false, "device store: " + Std.string(error)); Sys.println(haxe.CallStack.toString(haxe.CallStack.exceptionStack())); }
 		try sys.FileSystem.deleteFile(file) catch (_:Dynamic) {}
 		try sys.FileSystem.deleteDirectory(base) catch (_:Dynamic) {}
+	}
+
+	/**
+		The relay id per relay: a new relay gets a fresh id, a relay this machine already holds a bearer for under the
+		catalog id keeps that id (its devices are paired under it), and a remembered id outlives turning remote access off.
+	**/
+	static function machineRelayIds():Void {
+		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
+		var file = haxe.io.Path.join([temp, "suit-relay-ids-" + Sys.getPid() + "-" + Std.int(Sys.time()) + ".json"]);
+		var legacy = "0123456789abcdef0123456789abcdef", fresh = "fedcba9876543210fedcba9876543210";
+		try {
+			var ids = new MachineRelayIds(file);
+			var made = 0;
+			var make = function() {
+				made++;
+				return fresh;
+			};
+			check(ids.choose("https://a.example", legacy, function(_) return false, make) == fresh && made == 1,
+				"a relay this machine never used gets a fresh id");
+			check(ids.choose("https://b.example", legacy, function(id) return id == legacy, make) == legacy && made == 1,
+				"a relay holding this machine's bearer under the catalog id keeps that id");
+			ids.remember("https://a.example", fresh);
+			var again = new MachineRelayIds(file);
+			check(again.remembered("https://a.example") == fresh && again.remembered("https://b.example") == null, "a remembered id persists");
+			check(again.choose("https://a.example", legacy, function(_) return true, make) == fresh && made == 1,
+				"a remembered id wins over the catalog id and over a new one");
+			var refused = false;
+			try again.remember("https://c.example", "machine-1") catch (_:Dynamic) refused = true;
+			check(refused, "only a 32-hex-digit id is remembered");
+			var bad = false;
+			try again.choose("https://d.example", null, function(_) return false, function() return "nope") catch (_:Dynamic) bad = true;
+			check(bad, "a malformed fresh id is refused");
+			sys.io.File.saveContent(file, "not json");
+			check(new MachineRelayIds(file).remembered("https://a.example") == null, "an unreadable file remembers nothing");
+		} catch (error:Dynamic)
+			check(false, "relay ids: " + Std.string(error));
+		try sys.FileSystem.deleteFile(file) catch (_:Dynamic) {}
 	}
 
 	static function hexBytes(hex:String):Bytes {
@@ -268,7 +307,7 @@ private class FakeMachine implements MachineSessionHost {
 
 	public function directory(deviceId:String):MachineDirectory {
 		var listed = [for (workspace => grants in MachineRemoteUnitTests.currentGrants()) {workspace: workspace, name: "Workspace " + workspace, status: "idle", grants: grants}];
-		return {machine: "machine-1", name: "test", revision: revision(), workspaces: listed};
+		return {machine: "machine-1", name: "test", revision: revision(), workspaces: listed, relay: null};
 	}
 
 	public function openService(deviceId:String, workspace:String, grants:Array<String>, done:Null<MessageTransport>->Null<String>->Void):Void {
