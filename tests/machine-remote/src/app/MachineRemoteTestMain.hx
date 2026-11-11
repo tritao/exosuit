@@ -26,6 +26,9 @@ import workspace.transport.NoisePairingCode;
 import workspace.transport.NoisePrologue;
 import workspace.transport.RelayDeviceTransport;
 import workspace.transport.RelayMachineEndpoint;
+import workspace.transport.RelayRegistrationProver;
+import workspace.transport.RelayTicketAttempt;
+import workspace.transport.RelayTicketClient;
 
 /** One RPC connection a device opened (on stream 0 or on a workspace stream), polled by the test loop. */
 private class Link {
@@ -209,8 +212,44 @@ class MachineRemoteTestMain {
 		Sys.exit(code);
 	}
 
+	/**
+		Proven registration against the real (local) Worker: a relay id someone else registered first is taken back by the
+		holder of the key it is derived from; the proof is bound to the bearer, and only a derived id can be proven.
+	**/
+	static function provenRegistration(origin:String):Void {
+		var tickets = new RelayTicketClient(runtime.events, true);
+		var register = function(what:String, start:(Null<String>->Void)->RelayTicketAttempt):Null<String> {
+			var done = false, error:Null<String> = null;
+			start(function(problem) {
+				error = problem;
+				done = true;
+			});
+			await(what, 20, function() return done);
+			return error;
+		};
+		var keys = NoiseSession.generateKeypair();
+		var id = MachineKeys.relayId(keys.publicKey);
+		var endpoint = new RelayMachineEndpoint(origin, id);
+		var squatter = hex(NoiseSession.generateKeypair().privateKey), own = hex(NoiseSession.generateKeypair().privateKey);
+		check(register("a squatter's registration", function(done) return tickets.register(endpoint, squatter, done)) == null,
+			"anyone may register a free relay id plainly");
+		check(register("the owner's plain registration", function(done) return tickets.register(endpoint, own, done)) == "machine_identity_conflict",
+			"the owner meets the squatter");
+		check(RelayRegistrationProver.forKey(StringTools.lpad("", "0", 32), keys.privateKey, keys.publicKey) == null,
+			"an id not derived from the key cannot be proven");
+		var prover = RelayRegistrationProver.forKey(id, keys.privateKey, keys.publicKey);
+		check(prover != null, "a derived id can be proven");
+		var proven = register("the owner's proven registration", function(done) return tickets.registerProven(endpoint, own, prover, done));
+		check(proven == null, "proving the key takes the relay id back" + (proven == null ? "" : " (" + proven + ")"));
+		check(register("the owner again", function(done) return tickets.register(endpoint, own, done)) == null
+			&& register("the squatter again", function(done) return tickets.register(endpoint, squatter, done)) == "machine_identity_conflict",
+			"the relay id now answers to the owner only");
+		tickets.dispose();
+	}
+
 	static function run(origin:String, folderA:String, folderB:String):Void {
 		// Two workspaces, then remote access on this machine's relay identity.
+		provenRegistration(origin);
 		var a = ctlOk("create A", function(done) machine.create("Alpha", [folderA], function(w, e) done(w, e)));
 		var b = ctlOk("create B", function(done) machine.create("Beta", [folderB], function(w, e) done(w, e)));
 		var idA:String = a.id, idB:String = b.id;
