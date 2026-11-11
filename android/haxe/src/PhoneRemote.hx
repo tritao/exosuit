@@ -38,6 +38,8 @@ import workspace.transport.RelayDeviceTransport;
 **/
 class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint {
 	static inline final NOT_PAIRED = "Paste the one-time pairing URL from the machine's Remote Access panel to pair this phone.";
+	/** A pairing gives up after this long: past the invitation's lifetime and both of the machine's pairing windows. */
+	static inline final PAIRING_MILLISECONDS:Float = 600000;
 
 	public var status(default, null):String = NOT_PAIRED;
 	public var error(default, null):Null<String>;
@@ -70,6 +72,9 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 	var confirmation:Null<Bytes>;
 	var storing = false;
 	var pendingDevice:Null<SavedDevice>;
+	/** Older pairings of the machine being paired: forgotten once the machine has the confirmation, not before. */
+	var replacing:Array<SavedDevice> = [];
+	var pairingDeadline:Float = 0;
 	var consumedCatalog = -1;
 	var shownKey = "";
 	final lastReport:Map<String, String> = [];
@@ -125,6 +130,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		}
 		invitation = parsed;
 		pairing = true;
+		pairingDeadline = clock() + PAIRING_MILLISECONDS;
 		try privateKey = NoiseSession.generateKeypair().privateKey catch (_:Dynamic) {
 			fail("Secure randomness is unavailable; pairing cannot continue.");
 			return false;
@@ -176,7 +182,11 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 
 	/** The user compared the code with the machine's. */
 	public function confirmCode():Void {
-		if (authenticationCode == null || secure == null || !secure.isOpen()) return;
+		if (authenticationCode == null || secure == null) return;
+		if (!secure.isOpen()) {
+			abandonPairing("The pairing connection closed before it was confirmed. Create a fresh invitation on the machine.");
+			return;
+		}
 		codeConfirmed = true;
 		if (approved != null) storeApproved();
 		else setStatus("Code confirmed. Waiting for the machine's owner to approve.");
@@ -216,13 +226,18 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		// A machine is paired once: an older pairing of the same machine is replaced, not kept beside the new one.
 		var replaced = [for (existing in credentials.devices) if (existing.machineId == device.machineId && existing.deviceId != device.deviceId) existing];
 		credentials.put(device, function(ok) {
-			if (disposed || token != generation) return;
+			if (disposed) return;
+			if (token != generation) {
+				// The pairing was cancelled or failed while the Keystore wrote: the machine never got the confirmation.
+				if (ok) credentials.remove(device.machineId, device.deviceId, function(_) {});
+				return;
+			}
 			storing = false;
 			if (!ok) {
 				fail("Could not store the credentials in the Android Keystore; the pairing was not completed.");
 				return;
 			}
-			for (old in replaced) forget(old.machineId, old.deviceId);
+			replacing = replaced;
 			pendingDevice = device;
 			confirmation = Bytes.ofString(Json.stringify({version: 1, type: "pairing-confirmed", deviceId: parsed.deviceId, challenge: grant.challenge}));
 			approved = null;
@@ -235,7 +250,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		var transport = secure, message = confirmation, device = pendingDevice;
 		if (transport == null || message == null || device == null || !transport.isOpen()) return;
 		if (!transport.send(message)) {
-			if (!transport.isOpen()) fail("Could not confirm the approved device.");
+			if (!transport.isOpen()) abandonPairing("Could not confirm the approved device.");
 			return;
 		}
 		var created:PhoneMachine;
@@ -246,6 +261,8 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		// The machine's connector owns the channel and the key now; the pairing state lets go of them without closing.
 		secure = null;
 		channel = null; // the secure transport sits on this relay channel: closing it would drop the machine's first connection
+		var older = replacing;
+		for (old in older) forget(old.machineId, old.deviceId);
 		machines.push(created);
 		resetPairing();
 		setStatus("Paired. Waiting for the owner to grant workspaces.");
@@ -267,6 +284,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		approved = null;
 		confirmation = null;
 		pendingDevice = null;
+		replacing = [];
 		storing = false;
 		invitation = null;
 		authenticationCode = null;
@@ -279,6 +297,27 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		error = message;
 		setStatus("Remote access needs attention.");
 		touch();
+	}
+
+	/**
+		Ends a pairing that cannot finish. Credentials already stored for it go: the machine never got the confirmation, so
+		it rolls the device back, and a restart would dial a device it does not know.
+	**/
+	function abandonPairing(message:Null<String>):Void {
+		var stored = pendingDevice;
+		if (message != null) fail(message);
+		else {
+			resetPairing();
+			error = null;
+			setStatus(machines.length == 0 ? NOT_PAIRED : "");
+			touch();
+		}
+		if (stored != null) credentials.remove(stored.machineId, stored.deviceId, function(_) {});
+	}
+
+	/** The user gave up on the pairing in progress. */
+	public function cancelPairing():Void {
+		if (pairing) abandonPairing(null);
 	}
 
 	// Machines and workspaces
@@ -352,13 +391,18 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 			}
 		}
 		var transport = secure;
-		if (transport != null && !storing && confirmation == null && pendingDevice == null && approved == null) {
-			if (transport.isOpen()) {
+		// A close in any phase before the confirmation is sent ends the pairing, also once the approval is here: nothing else would.
+		if (transport != null && !storing) {
+			if (!transport.isOpen())
+				abandonPairing(approved == null && pendingDevice == null ? "The pairing connection closed before it was confirmed."
+					: "The pairing connection closed before the machine got the confirmation. Pair again with a fresh invitation.");
+			else if (confirmation == null && pendingDevice == null && approved == null) {
 				var message = transport.receive();
 				if (message != null) receiveApproval(message);
-			} else if (error == null)
-				fail("The pairing connection closed before it was confirmed.");
+			}
 		}
+		if (pairing && !storing && clock() > pairingDeadline)
+			abandonPairing("Pairing took too long. Create a fresh invitation on the machine.");
 		if (confirmation != null) tryConfirmAndConnect();
 		var openId = open == null ? null : open.id;
 		for (machine in machines) {

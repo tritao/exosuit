@@ -67,6 +67,11 @@ class PhonePanel implements View {
 			pair.enabled = pairingUrl.length > 0;
 			rows.push(new KeyedView("pair", pair));
 		}
+		if (remote.pairing)
+			rows.push(new KeyedView("cancel", new Button("Cancel pairing", null, function() {
+				remote.cancelPairing();
+				requestFrame();
+			}, "phone-pairing-cancel")));
 		if (remote.status != "") rows.push(new KeyedView("status", new Text(remote.status, null, tokens.textSecondary)));
 		if (remote.error != null) rows.push(new KeyedView("error", new Text(remote.error, null, tokens.danger)));
 		var contentStyle = new LayoutStyle();
