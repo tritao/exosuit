@@ -201,6 +201,81 @@ and the status.
 - **Workaround:** none needed; only the report is wrong.
 - **Status:** open. Format with `Math.fround` or as a `Float` instead.
 
+## Building haxeon's own tools with haxeon (2026-11-11)
+
+Tried with the haxeon-built compiler (`hl bootstrap/compiler.hl --entry=<main> --root=src --root=stdlib
+--sources-file=<all src and stdlib .hx>`). The compiler stops at the first error, so each entry point was retried
+after a fix or a throwaway stub. Result on `exosuit-m19` (9e0a4259) plus the fixes below (haxeon branch `hx-only`):
+
+| Entry point | Compiles | Runs | Blocking |
+|---|---|---|---|
+| `FfiAuditMain` | yes | yes, identical output | none (after the `Process.run` fix) |
+| `Main` (test-program compiler) | yes | yes | none |
+| `tools.HaxeonCli` | no | - | stock `sys.io.Process` streams, `FileSystem.stat`, `Bytes.toHex`, `File.read`, null safety |
+| `compiler.tools.CompilerServer` | no | - | `sys.net.Socket`/`Host`, `File.read`, then the CLI's list |
+| `LspMain` | no | - | `Sys.stdin()`, `FileOutput.write(Bytes)`, `haxe.io.FPHelper`, then the CLI's list |
+| `build.HaxeonBuild` | no | - | the CLI's list (it shares the build executor) |
+
+### Fixed while trying
+
+- **Quoted object field names did not parse.** `{version: 1, "package": {...}}` failed with `E0002: Expected
+  Identifier, got StringLiteral` (`HaxeonCli.buildLiveHost`). Fixed in haxeon `a631f5b40`; test
+  `tests/programs/quoted-object-field.hx`.
+- **`{}` in a value branch was "Expression block requires a result expression".** `cond ? {} : value`
+  (`ProfilerService.execute`). Now an empty object literal; it was always an error there. Same commit; test
+  `object-literal-empty-branch.hx`.
+- **An unbraced catch body before another `catch` did not parse.** `try f() catch (a:A) throw a catch (_:Dynamic) {}`
+  failed with `E0002: Expected Semicolon, got Catch` (`LspProtocol`). Fixed in `f77471d17`; test
+  `try-unbraced-catches.hx`.
+- **`catch (_)` without a type did not parse** (`E0002: Expected Colon`, `BuildEnvironment`). It now catches any
+  value like `catch (_:Dynamic)`; stock Haxe types the variable as `haxe.Exception`. Same commit; test
+  `try-untyped-catch.hx`.
+- **`sys.io.Process.run` with arguments threw on Windows** ("Process arguments are not yet supported on Windows"), so
+  a haxeon-built FFI audit failed to run clang. Fixed in the runtime, `22852dab6` (quotes like the streaming spawn).
+  Needs a rebuilt `haxeon_runtime.hdll`.
+- **Missing `Path.extension`, `withoutExtension`, `withExtension`, `addTrailingSlash`, `Sys.print`, `File.copy`.**
+  Added in `6562434f6`; test `path-extension.hx`.
+
+### Open
+
+- **Rest parameters do not parse.** `static function path(...parts:String)` fails with `E0002: Expected Identifier,
+  got Dot`. The only one in haxeon's sources (`HaxeonBuild.path`) now takes an `Array<String>` (`9d986eda2`). Status:
+  open; needs parsing and `haxe.Rest`.
+- **The stock fallback idiom `@:hlNative(...) function f() return 0;` is rejected** with `E1021: @:hlNative binds
+  only an extern function`. `CompilerServer.processId` now uses `Sys.getPid()` under `#if haxeon` (`3986cfbf3`).
+  Probably deliberate; listed so nobody re-adds the idiom.
+- **`switch` over a class value with only `case _:`** fails with `E1019: Switch requires an Int, String, array, or
+  enum value` (`BuildPlanner.project`, rewritten in `3986cfbf3`). Stock Haxe accepts it. Low priority.
+- **Null safety in tool code.** `Map.get` returns `Null<T>`, and a null check on a call result
+  (`if (f() != null && f().length > 0)`) does not narrow the second call. Stock Haxe accepts both. About 175
+  `.get(` calls in `build/`, `tools/`, `project/`, `editor/`, `profiler/`, `compiler/service/` (~18k lines no haxeon
+  build has typed yet). Each needs a local, a `??` default or an explicit error. Deliberate in haxeon (see
+  "Unclear" below); the work is in the tool sources. Seen at `BuildPlan.hx:92` (fixed), `CompilerClient.hx:323`,
+  `Executor.hx:92, 148, 207, 278, 303`.
+- **An untyped `cast` needs an expected type** (`E1003: Untyped cast requires an expected type`). Deliberate; noted
+  because it rules out bulk `cast` workarounds for the item above.
+
+- **`Std.string` of an array prints `[a, b]`; stock HashLink prints `[a,b]`.** Seen as the only difference between
+  Wasm built by a stock-built and a haxeon-built compiler: the code is identical, the debug name section spells
+  function types like `Function([Bytes, Array(Bytes)], ...)`. Harmless there; anything that parses or compares such
+  strings would differ. Status: open, maybe deliberate.
+
+### Standard library needed by the tools (none of it exists in haxeon's stdlib)
+
+- `sys.net.Socket` and `sys.net.Host` (worker and client: bind, listen, accept, connect, `setTimeout`, `select`,
+  `host()`, `input`/`output`). Needs runtime natives; `CompilerServer`, `CompilerClient`, `HldiClient`,
+  `ProfileCapture`.
+- Stock `sys.io.Process`: `new Process(cmd, args)` with `stdout`/`stderr` as `haxe.io.Input`, `stdin` as
+  `haxe.io.Output`, `exitCode(block)`, `kill`, `getPid`. haxeon has `Process.run` (whole-output strings) and the
+  nonblocking `ChildProcess`. `ProcessRunner` (the build executor) and `BuildEnvironment` use the stock API; a
+  haxeon branch of `ProcessRunner` over `ChildProcess.spawn` (which already takes cwd and environment) is the likely
+  route.
+- `haxe.io.Input`, `haxe.io.Output`, `haxe.io.Eof`, `haxe.io.Error`; `Sys.stdin()`; `FileOutput.write(Bytes)` and
+  `FileOutput` usable as an `Output`; `File.read`/`File.write` streams (`sys.io.FileInput`, `FileSeek`).
+- `FileSystem.stat` and `sys.FileStat` (`mode`, `mtime`, `size`, `dev`, `ino`); haxeon has `FileSystem.metadata`
+  (size, modified, changed).
+- `haxe.Timer` (`stamp`), `haxe.SysTools` (`quoteWinArg`), `haxe.io.FPHelper`, `Bytes.toHex` (listed below too).
+
 ## Runtime: hl.exe exits with 0xC0000409 after an uncaught exception (Windows)
 
 - **Seen:** `scripts/test-workspace-terminals.py` stage `history-restore` (and once `contracts`). The Haxe stack of the
@@ -229,7 +304,8 @@ Standard Haxe APIs haxeon's standard library does not have yet. Each one forced 
   directory on POSIX), and it publishes a whole file from memory. The migration's backups therefore go through
   `AtomicFile.createBytes`, one file at a time. There is no directory fsync for a created directory.
 - **No `sys.io.File.copy`.** Workaround: `File.saveBytes(to, File.getBytes(from))`, which reads the whole file into
-  memory.
+  memory. Added in haxeon `6562434f6` (it copies through memory the same way).
+
 ## Unclear: bug or deliberate
 
 These are stricter than stock Haxe. Each needs a decision, and a better message if it is deliberate.
