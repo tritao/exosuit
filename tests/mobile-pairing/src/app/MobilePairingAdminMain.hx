@@ -251,7 +251,8 @@ class MobilePairingAdminMain {
 						done = true;
 					} else if (!started) {
 						started = true;
-						var group = groups.length > 0 ? groups[0].id : "work";
+						// No seeded group exists any more: with none, the session goes to the workspace root.
+						var group = groups.length > 0 ? groups[0].id : WorkspaceProtocol.ROOT_GROUP;
 						var h1 = 5381, h2 = 52711; for (c in 0...name.length) { h1 = ((h1 * 33) ^ name.charCodeAt(c)) & 0x7fffffff; h2 = ((h2 * 31) + name.charCodeAt(c)) & 0x7fffffff; } var id = "agent-" + StringTools.hex(h1, 8).toLowerCase() + StringTools.hex(h2, 8).toLowerCase();
 						connection.call(WorkspaceAgentProtocol.CREATE, {workspace: "workspace", instance: instance, id: id, group: group, name: name,
 							thread: null}, 20000, function(record) {
