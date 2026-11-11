@@ -177,8 +177,8 @@ The Android files are in `android/haxe/src/`:
   debug builds allow (`app/src/debug`, a network security config for 127.0.0.1 and localhost). Release builds keep
   Android's default (HTTPS only).
 - Test-rig intent extras (debug builds with `files/automation.on`, which only `adb run-as` can create; the launcher
-  activity is exported, so any app can send it extras): `--es pairing_url <url>` starts pairing, `--es open_workspace
-  <name>` opens the granted workspace with that name once a directory lists it. No extra confirms a pairing code:
+  activity is exported, so any app can send it extras): `--es pairing_url <url>` starts pairing, `--es clipboard_text <text>` sets the
+  clipboard. There is no extra that opens a workspace: the scripts tap its row in the Remote list by label. No extra confirms a pairing code:
   scripts tap "The code matches" from the automation snapshot.
 
 ### Tests, desktop test host and acceptance run
@@ -208,7 +208,7 @@ pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-x86_6
 
 The script builds, starts the host and the emulator, pairs once (checking the phone's code equals the machine's before
 approving), shows the machine granted nothing, grants Alpha, then Beta (the pairing code must not be asked for again),
-opens each by tapping its row in the Remote list (no debug intent), works the Claude Code terminal (below), restarts
+opens each by tapping its row in the Remote list (there is no intent for it), works the Claude Code terminal (below), restarts
 the app (it reconnects from the Keystore), and revokes Beta. Screenshots `1-pairing-code.png` to `14-new-claude.png`
 are in the output directory; look at them. Every tap is by label from the phone's automation snapshot (no pixel positions).
 Pairing works in either order: the phone shows "Code confirmed. Waiting for the machine's owner to approve." and keeps

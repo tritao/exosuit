@@ -59,12 +59,6 @@ class UiBridge {
 					var remote = AndroidExosuitFactory.remote;
 					if (remote == null) return 0;
 					return remote.beginPairing(text(command, "url")) ? 1 : 0;
-				case "open":
-					// Debug builds: open the workspace with this name as soon as a paired machine lists it.
-					var remote = AndroidExosuitFactory.remote;
-					if (remote == null) return 0;
-					remote.openByName(text(command, "name"));
-					return 1;
 				case "close":
 					if (host != null) host.close();
 					host = null;

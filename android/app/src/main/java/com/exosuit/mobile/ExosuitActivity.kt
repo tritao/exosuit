@@ -37,7 +37,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
      * debuggable alone is no gate while debug APKs are the ones installed.
      */
     private fun automated() = debuggable && File(filesDir, "automation.on").exists()
-    /** Test-rig commands from the launching intent (pairing_url, open_workspace), held until the module has started. */
+    /** Test-rig commands from the launching intent (pairing_url, clipboard_text), held until the module has started. */
     private val pendingCommands = ArrayDeque<JSONObject>()
 
     override fun onCreate(state: Bundle?) {
@@ -230,8 +230,8 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         android.util.Log.i("ExosuitLive", if (status == 0) "exosuit-live: patched in $millis ms" else "exosuit-live: refused (status $status)")
     }
 
-    /** Test rig only (see automated): `--es pairing_url <url>` starts pairing, `--es open_workspace <name>` opens the
-     * granted workspace with that name once the machine lists it, `--es clipboard_text <text>` sets the clipboard.
+    /** Test rig only (see automated): `--es pairing_url <url>` starts pairing, `--es clipboard_text <text>` sets the clipboard.
+     * Opening a workspace is a tap on its row in the Remote list, like a person's; there is no extra for it.
      * Confirming the pairing code is never an intent: the rig taps "The code matches" like a person, so no other app
      * can skip the code comparison. */
     private fun queueIntentCommands(source: Intent?) {
@@ -241,7 +241,6 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         source.getStringExtra("clipboard_text")?.let {
             (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("test", it))
         }
-        source.getStringExtra("open_workspace")?.let { pendingCommands.addLast(JSONObject().put("type", "open").put("name", it)) }
     }
 
     private fun command(value: JSONObject) {

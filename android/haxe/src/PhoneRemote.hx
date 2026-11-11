@@ -90,8 +90,6 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 	var consumedCatalog = -1;
 	var shownKey = "";
 	final lastReport:Map<String, String> = [];
-	/** A debug command asked for the workspace with this name; it opens once a directory lists it. */
-	var wanted:Null<String>;
 	var disposed = false;
 
 	public function new(events:EventPump, clock:Void->Float, credentials:PhoneCredentials, changed:Void->Void) {
@@ -375,27 +373,6 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		touch();
 	}
 
-	/** Debug and automation: open the workspace with this name as soon as a directory lists it. */
-	public function openByName(name:String):Void {
-		wanted = name;
-		tryWanted();
-	}
-
-	function tryWanted():Void {
-		var name = wanted;
-		if (name == null) return;
-		for (machine in machines) {
-			var directory = machine.machine.directory;
-			if (directory == null) continue;
-			for (entry in directory.workspaces)
-				if (entry.name == name) {
-					wanted = null;
-					openWorkspace(machine, entry.workspace);
-					return;
-				}
-		}
-	}
-
 	/** Forgets a paired machine on this phone (its owner still lists the device until they revoke it there). */
 	public function forget(machineId:String, deviceId:String):Void {
 		for (machine in machines.copy()) {
@@ -442,7 +419,6 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 			var directory = machine.machine.directory;
 			if (directory != null) credentials.learn(machine.device.machineId, machine.device.deviceId, directory.name);
 		}
-		tryWanted();
 		var current = open;
 		if (current != null) {
 			current.poll();
