@@ -191,6 +191,28 @@ and the status.
 - **Status:** fixed in haxeon `59b9c786` (cherry-picked from `bb576ede`): a packed type's kind only. Regression test
   `HotReloadMain.testPackedTypeInPrefix`. The runtime is unchanged.
 
+### A resumed live build fails on a lambda whose captures changed: "Unknown IR object $lambda-env"
+
+- **Symptom:** after the minimap fix (`bb6d77ed`, which changes what `EditorPane.build`'s `container.onResolved` closure
+  captures), every live rebuild (`scripts/run.py --live`) failed:
+  `resuming the published live module ...` then
+  `HashLink lowering failed for $lambda:ui.EditorPane.build:build#onResolved(0)@2CCE83B3#1: Unknown IR object "$lambda-env:ui.EditorPane.build:build#onResolved(0)@2CCE83B3#1"`,
+  and haxeon kept the old app open. A full build of the same tree passes.
+- **Found:** 2026-11-11, the user's live session.
+- **Repro:** publish a live module where a closure captures `x`, edit it to capture `y`, then compile in a compiler resumed
+  from the published history (`new Compiler(exportIdentityState())`, what `CompilerSession.resumeLiveModule` does).
+  Haxeon test `resumed-capture-change-patch` (`tests/runtime/ResumedCaptureChangePatchMain.hx`).
+- **Cause:** a lambda whose captures change is a new function with a new environment. The module keeps the old lambda for
+  closures the running app may hold, but its environment object is gone from the program. A resident compiler reuses the old
+  lambda's lowered code; a resumed one has only its IR, lowers it again, and lowering knew only the program's objects. A
+  deleted capturing lambda failed the same way.
+- **Workaround (before the fix):** move `graphical/build/host/live.hl.live.state` aside, so the next live run starts a new
+  module instead of resuming.
+- **Status:** fixed in haxeon `9cd306a7`: lowering resolves an object the program no longer has to the type the running
+  module published, and its fields to their published slots. The resumed build patches; no reload needed. Checked on the
+  real case: graphical published before `bb6d77ed`, compiler stopped, then built with it: `resuming the published live
+  module`, patch revision 2, 46 functions changed, no reload reasons.
+
 ### The compiler worker reports negative allocation bytes for a large compile
 
 - **Symptom:** `worker allocations: bytes=-2147483648 count=459867574 heap=-2147483648` after the graphical app's
