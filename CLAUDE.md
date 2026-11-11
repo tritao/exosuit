@@ -26,3 +26,9 @@ Rules:
   `Import-Module docs/benchmarks/perf-harness/guard.psm1; [PerfHarness.Windows]::Visible() | ? ClassName -eq '#32770'`
 - GUI captures (which move the real mouse) run only through `docs/benchmarks/perf-harness/measure.ps1` or the capture
   queue (`request-capture.ps1`), one at a time.
+
+## Live mode
+
+- After a live edit (`scripts/run.py --live`), run `python scripts/live-status.py` instead of guessing from
+  `live.hl.live.patch.json`: that file changes only on success, while the status names a failed build's errors or a
+  patch the app refused (exit 1). It reads `live.hl.watch-events.jsonl`, which the watcher writes.

@@ -65,6 +65,16 @@ An edit live mode cannot patch (a new runtime native, a changed class layout) re
 and the console says why. To catch reloads an edit should not need, run with `--strict-live`: it refuses such an
 edit with a banner naming the cause and keeps the app on its running revision.
 
+The watcher also writes what it does with each edit to `graphical/build/host/live.hl.watch-events.jsonl` (one JSON
+event per line), and the editor follows it: **Build Output** gets a "Live build" entry with the compiler's lines
+(`path:line:` ones open the file), the errors go to **Problems** until the next successful build, and a failed build or
+a patch the app refused raises a notification with a Show output action. From a terminal:
+
+```sh
+python scripts/live-status.py              # the last rebuild: state, revision, errors; exits 1 after a failure
+python scripts/live-status.py --history 20 # the last 20 events too
+```
+
 > **Warning: a watch or live session keeps the Haxeon compiler it started with.** If you change Haxeon's own
 > compiler (`haxeon/src`, `haxeon/stdlib`) while the session runs, later rebuilds still use the old compiler and
 > nothing reports it. **Restart `run.py` after changing the compiler** before judging whether the change worked.
