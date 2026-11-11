@@ -160,6 +160,8 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         var encoded: ByteArray? = null
         var message: ByteArray? = null
         try {
+            // Saved pairings exist but could not be opened: the app says so instead of showing an unpaired phone.
+            if (vault.unreadable) value.put("credentialsUnreadable", true)
             val head = value.toString().toByteArray(Charsets.UTF_8)
             if (document == null) {
                 message = head

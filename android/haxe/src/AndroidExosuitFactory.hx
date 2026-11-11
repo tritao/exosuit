@@ -19,7 +19,8 @@ class AndroidExosuitFactory {
 	/** The app, for the live-patch hooks (UiBridge.liveRelease, liveRebuild). */
 	public static var app(default, null):Null<ExosuitApp>;
 
-	public static function create(context:UiHostContext, appFilesRoot:String, credentialDocument:Null<Bytes>):UiApplication {
+	/** `credentialsUnreadable`: the host has a credential file it could not open (`credentialDocument` is then null). */
+	public static function create(context:UiHostContext, appFilesRoot:String, credentialDocument:Null<Bytes>, credentialsUnreadable:Bool):UiApplication {
 		if (!Path.isAbsolute(appFilesRoot) || !FileSystem.isDirectory(appFilesRoot))
 			throw "An existing absolute app-files directory is required";
 		var root = appFilesRoot;
@@ -32,7 +33,7 @@ class AndroidExosuitFactory {
 			if (app == null) context.requestFrame(); else app.requestFrame();
 		};
 		var credentials = new PhoneCredentials();
-		credentials.load(credentialDocument);
+		credentials.load(credentialDocument, credentialsUnreadable);
 		if (credentialDocument != null) for (index in 0...credentialDocument.length) credentialDocument.set(index, 0);
 		var phone = new PhoneRemote(context.events, function() return NativeKit.nk_time_seconds() * 1000, credentials, redraw);
 		// A workspace terminal is a service-owned PTY the phone attaches to (never a local shell); the pane gets the touch

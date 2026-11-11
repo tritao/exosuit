@@ -31,7 +31,8 @@ class UiBridge {
 					if (host != null) return 0;
 					host = new AndroidUiHost(integer(command, "surface"), integer(command, "width"), integer(command, "height"),
 						integer(command, "fbWidth"), integer(command, "fbHeight"), number(command, "scale"), text(command, "regular"),
-						text(command, "mono"), text(command, "appFilesRoot"), credentials(command));
+						text(command, "mono"), text(command, "appFilesRoot"), credentials(command),
+							flag(command, "credentialsUnreadable"));
 					return 1;
 				case "resize":
 					if (host == null) return 0;
@@ -128,6 +129,11 @@ class UiBridge {
 		var value:Dynamic = Reflect.field(command, key);
 		if (!Std.isOfType(value, Int) && !Std.isOfType(value, Float)) throw 'invalid number "$key"';
 		return value;
+	}
+
+	static function flag(command:Dynamic, key:String):Bool {
+		var value:Dynamic = Reflect.field(command, key);
+		return Std.isOfType(value, Bool) ? value : false;
 	}
 
 	static function text(command:Dynamic, key:String):String {

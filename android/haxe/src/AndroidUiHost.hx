@@ -30,7 +30,7 @@ class AndroidUiHost {
 	var now = 0.0;
 
 	public function new(surfaceId:Int, width:Int, height:Int, framebufferWidth:Int, framebufferHeight:Int, scale:Float, regular:String,
-			mono:String, appFilesRoot:String, credentials:Null<haxe.io.Bytes>) {
+			mono:String, appFilesRoot:String, credentials:Null<haxe.io.Bytes>, credentialsUnreadable:Bool) {
 		surface = new SurfaceHandle(surfaceId);
 		if (!surface.isValid()) throw "invalid surface";
 		events = new EventPump();
@@ -53,7 +53,7 @@ class AndroidUiHost {
 		runtime = new UiHostRuntime(session, context, WindowHandle.invalid(), surface, width, height);
 		subscription = events.listen(handleEvent);
 		try {
-			runtime.start(function(created) return AndroidExosuitFactory.create(created, appFilesRoot, credentials));
+			runtime.start(function(created) return AndroidExosuitFactory.create(created, appFilesRoot, credentials, credentialsUnreadable));
 			if (session.state == UiHostLifecycle.Failed) throw session.error;
 			resize(width, height, framebufferWidth, framebufferHeight, scale);
 		} catch (error:Dynamic) {

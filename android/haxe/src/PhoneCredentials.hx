@@ -23,11 +23,14 @@ class PhoneCredentials {
 	public static inline final MAX_DEVICES = 16;
 
 	public var devices(default, null):Array<SavedDevice> = [];
+	/** The host has saved pairings it could not open (Keystore or file failure); `devices` is empty but nothing was lost yet. */
+	public var unreadable(default, null):Bool = false;
 
 	public function new() {}
 
-	public function load(document:Null<Bytes>):Void {
+	public function load(document:Null<Bytes>, unreadable:Bool = false):Void {
 		devices = [];
+		this.unreadable = unreadable;
 		if (document == null || document.length == 0) return;
 		try {
 			var value:Dynamic = Json.parse(document.toString());

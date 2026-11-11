@@ -115,7 +115,11 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		for (device in credentials.devices) {
 			try machines.push(new PhoneMachine(events, hub, clock, device, null)) catch (_:Dynamic) damaged++;
 		}
-		if (damaged > 0) {
+		if (credentials.unreadable) {
+			// The host keeps the file it could not open (it moves it aside before saving a new pairing), so nothing is lost.
+			error = "Saved pairings could not be opened. Restart the app to try again. Pairing a machine now starts a new list; the old file is kept.";
+			status = "Remote access needs attention.";
+		} else if (damaged > 0) {
 			error = damaged == 1 ? "A saved pairing is damaged. Forget it and pair that machine again." : "Saved pairings are damaged. Forget them and pair those machines again.";
 			status = "Remote access needs attention.";
 		} else if (machines.length > 0)

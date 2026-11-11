@@ -22,13 +22,24 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class CredentialVault(context: Context) {
     private val owner: Thread = Looper.getMainLooper().thread
-    private val file = AtomicFile(File(context.filesDir, "credentials.bin"))
+    private val directory = context.filesDir
+    private val file = AtomicFile(File(directory, "credentials.bin"))
+
+    /**
+     * The last [read] found a stored document it could not open (a missing or failing key, a damaged file). It is not the
+     * same as no document: the next [write] first moves that file aside, so saving a new pairing never destroys it.
+     */
+    var unreadable = false
+        private set
 
     private fun check() = check(Thread.currentThread() === owner) { "Credential vault used off the UI thread" }
 
     private fun key(create: Boolean): SecretKey? {
         val store = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        // A key that exists but did not come back is a failure, never a reason to generate one: a new key under the same
+        // alias would make the stored document impossible to open.
+        if (store.containsAlias(ALIAS)) throw IllegalStateException("The credential key exists but could not be read")
         if (!create) return null
         val spec = KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -38,29 +49,44 @@ class CredentialVault(context: Context) {
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE).apply { init(spec) }.generateKey()
     }
 
-    /** The stored document, or null when none is stored or it cannot be opened (a wiped key, a damaged file). */
+    /**
+     * The stored document, or null when none is stored or it cannot be opened (a wiped key, a damaged file); [unreadable]
+     * tells those two apart.
+     */
     fun read(): ByteArray? {
         check()
+        unreadable = false
         if (!file.baseFile.exists()) return null
-        return try {
+        val document = try {
             val data = file.readFully()
-            if (data.size <= IV_BYTES + TAG_BYTES) return null
-            val secret = key(false) ?: return null
-            val cipher = Cipher.getInstance(TRANSFORM)
-            cipher.init(Cipher.DECRYPT_MODE, secret, GCMParameterSpec(TAG_BYTES * 8, data, 0, IV_BYTES))
-            cipher.doFinal(data, IV_BYTES, data.size - IV_BYTES)
+            val secret = if (data.size <= IV_BYTES + TAG_BYTES) null else key(false)
+            if (secret == null) null else {
+                val cipher = Cipher.getInstance(TRANSFORM)
+                cipher.init(Cipher.DECRYPT_MODE, secret, GCMParameterSpec(TAG_BYTES * 8, data, 0, IV_BYTES))
+                cipher.doFinal(data, IV_BYTES, data.size - IV_BYTES)
+            }
         } catch (_: Exception) {
             null
         }
+        unreadable = document == null
+        return document
     }
 
-    /** Replaces the stored document. False when the Keystore or the file refused it. */
+    /**
+     * Replaces the stored document. False when the Keystore or the file refused it. A document the last [read] could not
+     * open is first renamed to `credentials.unreadable-<time>.bin`, so it can still be recovered.
+     */
     fun write(document: ByteArray): Boolean {
         check()
         return try {
             val cipher = Cipher.getInstance(TRANSFORM)
             cipher.init(Cipher.ENCRYPT_MODE, key(true))
             val sealed = cipher.doFinal(document)
+            if (unreadable) {
+                val aside = File(directory, "credentials.unreadable-${System.currentTimeMillis()}.bin")
+                if (!file.baseFile.renameTo(aside)) return false
+                unreadable = false
+            }
             val out = file.startWrite()
             try {
                 out.write(cipher.iv)
