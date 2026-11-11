@@ -216,6 +216,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 			return;
 		}
 		codeConfirmed = true;
+		Sys.println("exosuit-pairing: the user confirmed the code" + (approved != null ? ", storing the credentials" : ", waiting for the machine's approval"));
 		if (approved != null) storeApproved();
 		else setStatus("Code confirmed. Waiting for the machine's owner to approve.");
 		touch();
@@ -237,6 +238,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 			var granted:Array<String> = cast value.grants;
 			if (granted.indexOf(MachineDirectoryProtocol.CAPABILITY) < 0) throw "missing_required_grant";
 			approved = {deviceToken: value.deviceToken, challenge: value.challenge};
+			Sys.println("exosuit-pairing: approved by the machine" + (codeConfirmed ? "" : ", waiting for the code confirmation"));
 			setStatus(codeConfirmed ? "The machine approved. Storing the credentials…" : "The machine approved. Confirm the matching code to finish.");
 			if (codeConfirmed) storeApproved();
 		} catch (_:Dynamic) {
@@ -323,6 +325,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 	}
 
 	function fail(message:String):Void {
+		if (pairing) Sys.println("exosuit-pairing: failed: " + message);
 		resetPairing();
 		error = message;
 		setStatus("Remote access needs attention.");
@@ -403,8 +406,12 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		// A close in any phase before the confirmation is sent ends the pairing, also once the approval is here: nothing else would.
 		if (transport != null && !storing) {
 			if (!transport.isOpen())
-				abandonPairing(approved == null && pendingDevice == null ? "The pairing connection closed before it was confirmed."
-					: "The pairing connection closed before the machine got the confirmation. Pair again with a fresh invitation.");
+				// The machine closes the channel when it gives the pairing up (declined, or 2 minutes without approval or confirmation).
+				abandonPairing(approved == null && pendingDevice == null
+					? "The pairing ended before the machine approved it: it was declined, it waited longer than 2 minutes, or the connection dropped. "
+						+ "Create a fresh invitation on the machine and pair again."
+					: "The pairing ended before the code was confirmed here: the machine waits 2 minutes after approving, or the connection dropped. "
+						+ "Create a fresh invitation on the machine and pair again.");
 			else if (confirmation == null && pendingDevice == null && approved == null) {
 				var message = transport.receive();
 				if (message != null) receiveApproval(message);
