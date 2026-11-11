@@ -88,6 +88,21 @@ class MachineRemoteUnitTests {
 			check(!again.forgetWorkspace("w1"), "forgetting a workspace nobody holds changes nothing");
 			var third = new MachineDeviceStore(file);
 			check(third.grantsFor("d2", "w1") == null && third.loadDevices()[0].revoked, "a forgotten grant and a revocation persist");
+			// A bad entry is skipped, not the whole file; a file of another version is refused and never written.
+			sys.io.File.saveContent(file, '{"version":1,"devices":[{"deviceId":"bad","key":"zz"},{"deviceId":"short","key":"0102"},'
+				+ '{"deviceId":"good","key":"' + StringTools.lpad("", "0", 64) + '"}],"workspaces":{"good":{"w1":["workspace.read"]},"bad":7}}');
+			var tolerant = new MachineDeviceStore(file);
+			check(tolerant.loadDevices().length == 1 && tolerant.loadDevices()[0].deviceId == "good" && tolerant.grantsFor("good", "w1") != null,
+				"bad device and grant entries are skipped");
+			sys.io.File.saveContent(file, '{"version":2,"devices":[]}');
+			var refused = false;
+			try new MachineDeviceStore(file) catch (_:Dynamic) refused = true;
+			check(refused, "a file of another version is refused");
+			var unreadable = new MachineDeviceStore(file, false);
+			var wrote = true;
+			try unreadable.saveDevice({deviceId: "d3", staticPublicKey: key, grants: [], revoked: false}) catch (_:Dynamic) wrote = false;
+			check(unreadable.unreadable && !wrote && sys.io.File.getContent(file) == '{"version":2,"devices":[]}',
+				"a store over an unreadable file leaves the file alone");
 		} catch (error:Dynamic)
 			{ check(false, "device store: " + Std.string(error)); Sys.println(haxe.CallStack.toString(haxe.CallStack.exceptionStack())); }
 		try sys.FileSystem.deleteFile(file) catch (_:Dynamic) {}

@@ -83,6 +83,8 @@ class MachineRemote implements MachineSessionHost {
 	var identity:Null<WorkspaceNoiseIdentity> = null;
 	var manager:Null<WorkspacePairingManager> = null;
 	var setupError:Null<String> = null;
+	/** Why machine-devices.json could not be read at startup; remote access stays off while it is set. */
+	var storeError:Null<String> = null;
 	var version:Int = 0;
 
 	public function new(events:EventPump, hub:NativeRpcHub, catalog:Void->MachineCatalog) {
@@ -90,8 +92,17 @@ class MachineRemote implements MachineSessionHost {
 		this.hub = hub;
 		this.catalog = catalog;
 		allowLoopbackHttp = Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") == "1";
-		store = new MachineDeviceStore(Path.join([SuitPaths.home(), "machine-devices.json"]));
-		if (FileSystem.exists(configFile()))
+		// An unreadable device file (another build's version, a hand edit) turns remote access off, not suit: the file is
+		// left as it is for the build that wrote it, and nothing here writes it.
+		var devicesFile = Path.join([SuitPaths.home(), "machine-devices.json"]);
+		var opened:Null<MachineDeviceStore> = null;
+		var readError:Null<String> = null;
+		try opened = new MachineDeviceStore(devicesFile) catch (error:Dynamic) readError = Std.string(error);
+		store = opened != null ? opened : new MachineDeviceStore(devicesFile, false);
+		if (readError != null)
+			storeError = "machine-devices.json cannot be read (" + readError + "); remote access is off until it is fixed or removed";
+		setupError = storeError;
+		if (storeError == null && FileSystem.exists(configFile()))
 			try load() catch (error:Dynamic) {
 				setupError = Std.string(error);
 				teardown();
@@ -115,6 +126,8 @@ class MachineRemote implements MachineSessionHost {
 	// ---- setup
 
 	function load():Void {
+		if (storeError != null)
+			throw storeError;
 		var info = FileSystem.metadata(configFile());
 		if (info == null || info.size > 4096)
 			throw "machine-relay.json is not valid";
@@ -169,6 +182,8 @@ class MachineRemote implements MachineSessionHost {
 
 	/** Sets up remote access with this relay: a bearer in the credential store and the machine's config. Safe to repeat for the same relay. */
 	function enable(origin:String):Void {
+		if (storeError != null)
+			throw storeError;
 		var target = new RelayMachineEndpoint(origin, relayId());
 		if (target.isLoopbackHttp && !allowLoopbackHttp)
 			throw "relay_loopback_disabled";
@@ -200,7 +215,7 @@ class MachineRemote implements MachineSessionHost {
 		teardown();
 		if (FileSystem.exists(configFile()))
 			FileSystem.deleteFile(configFile());
-		setupError = null;
+		setupError = storeError;
 		version++;
 	}
 

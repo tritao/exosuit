@@ -27,9 +27,17 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 	var grants:Array<DeviceWorkspaceGrant> = [];
 	var names:Map<String, String> = [];
 
-	public function new(path:String) {
+	/** True when the file could not be read: the store is then empty and never writes, so the file stays as it is. */
+	public final unreadable:Bool;
+
+	/**
+		Reads the file, skipping device and grant entries that are not valid. Throws when the file as a whole cannot be
+		used (too large, not JSON, another version), unless `readFile` is false: then the store is empty and `unreadable`.
+	**/
+	public function new(path:String, readFile:Bool = true) {
 		this.path = path;
-		if (!FileSystem.exists(path))
+		unreadable = !readFile;
+		if (!readFile || !FileSystem.exists(path))
 			return;
 		var info = FileSystem.metadata(path);
 		if (info == null || info.size > FILE_LIMIT)
@@ -37,20 +45,25 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 		var value:Dynamic = Json.parse(File.getContent(path));
 		if (SuitRecords.intField(value, "version") != VERSION)
 			throw "machine-devices.json has an unknown version";
-		for (item in (Reflect.field(value, "devices") : Array<Dynamic>)) {
-			var id = SuitRecords.stringField(item, "deviceId"), key = SuitRecords.stringField(item, "key");
-			if (id == null || key == null)
-				continue;
-			devices.push({deviceId: id, staticPublicKey: fromHex(key), grants: strings(Reflect.field(item, "grants")),
-				revoked: Reflect.field(item, "revoked") == true});
-			var given = SuitRecords.stringField(item, "name");
-			if (given != null)
-				names.set(id, given);
-		}
+		var listed:Dynamic = Reflect.field(value, "devices");
+		if (Std.isOfType(listed, Array))
+			for (item in (listed : Array<Dynamic>)) {
+				var id = SuitRecords.stringField(item, "deviceId"), key = SuitRecords.stringField(item, "key");
+				// A Noise static key is 32 bytes.
+				if (id == null || key == null || key.length != 64 || !~/^[0-9a-f]+$/.match(key))
+					continue;
+				devices.push({deviceId: id, staticPublicKey: fromHex(key), grants: strings(Reflect.field(item, "grants")),
+					revoked: Reflect.field(item, "revoked") == true});
+				var given = SuitRecords.stringField(item, "name");
+				if (given != null)
+					names.set(id, given);
+			}
 		var granted:Dynamic = Reflect.field(value, "workspaces");
-		if (granted != null)
+		if (granted != null && Reflect.isObject(granted))
 			for (device in Reflect.fields(granted)) {
 				var entries:Dynamic = Reflect.field(granted, device);
+				if (entries == null || !Reflect.isObject(entries) || Std.isOfType(entries, Array))
+					continue;
 				for (workspace in Reflect.fields(entries))
 					grants.push({device: device, workspace: workspace, grants: strings(Reflect.field(entries, workspace))});
 			}
@@ -82,6 +95,8 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 	}
 
 	function save():Void {
+		if (unreadable)
+			throw "machine-devices.json could not be read; it is left as it is";
 		var listed:Array<Dynamic> = [];
 		for (record in devices)
 			listed.push({deviceId: record.deviceId, key: toHex(record.staticPublicKey), grants: record.grants, revoked: record.revoked,
