@@ -81,8 +81,12 @@ class TerminalSnapshotTests {
 		var one = pages.start(viewer, "t", shot, info, 7, 2), two = pages.start(viewer, "t", shot, info, 8, 2);
 		require(pages.next(viewer, "t", int(one.token), TerminalSnapshotPages.PAGE_BYTES, 2) != null
 			&& pages.next(viewer, "t", int(two.token), TerminalSnapshotPages.PAGE_BYTES, 2) != null, "A second snapshot replaced the first");
+		// One connection asking again and again pushes out only its own snapshots, never another connection's.
+		var others = pages.start(other, "t", shot, info, 9, 3);
 		for (_ in 0...8) pages.start(viewer, "t", shot, info, 9, 3);
 		require(pages.next(viewer, "t", int(one.token), 2 * TerminalSnapshotPages.PAGE_BYTES, 3) == null, "Snapshots are unbounded");
+		require(pages.next(other, "t", int(others.token), TerminalSnapshotPages.PAGE_BYTES, 3) != null,
+			"One connection's snapshots pushed out another's");
 		var idle = pages.start(viewer, "t", shot, info, 9, 4);
 		pages.prune(100);
 		require(pages.next(viewer, "t", int(idle.token), TerminalSnapshotPages.PAGE_BYTES, 100) == null, "Idle snapshot kept");
