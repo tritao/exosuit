@@ -98,6 +98,13 @@ class RpcTerminalBackend implements TerminalBackend {
     Sys.putEnv(CLIENT_KEY, owner + key);
     return key;
   }
+  /** For a host whose app process is killed and started again (the phone): the key persists across processes, so the
+      service sees a restarted client as the same one and lets it replace its own old control lease. It still counts only
+      in this process (see clientKey), like a generated one. Call before the first terminal opens. */
+  public static function adoptClientKey(key:String):Void {
+    if (key == null || key.length < 16 || key.length > 128) return;
+    Sys.putEnv(CLIENT_KEY, Sys.getPid() + ":" + key);
+  }
   public function id():String return terminalId;
   public function configureAgent(provider:String):Void {
     if (!create || attached || pending || ["codex","claude","pi"].indexOf(provider) < 0)
@@ -143,6 +150,18 @@ class RpcTerminalBackend implements TerminalBackend {
     return "Read only · no client is controlling this terminal";
   }
   public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || terminalState == "starting" ? "" : terminalState != "running" ? (restartable ? "Restart Terminal" : "") : controller ? "Release" : "Take control";
+  /** This view holds the terminal's control lease. */
+  public function isController():Bool return attached && controller;
+  /** A host that held control before its process was killed asks for it back once the view is attached and has its history:
+      the editor (or another client) may have claimed the freed lease meanwhile, and the person's own phone returning is
+      the intent. Returns true when the request was made or nothing is left to ask (already in control). False: not ready yet. */
+  public function reclaimControl():Bool {
+    if (controller) return true;
+    if (!attached || !synchronized || controlPending || terminalState != "running" || controlUnavailable || !hasControlGrant()) return false;
+    controlReleased = false;
+    setControl(true, true);
+    return true;
+  }
   public function activateControl():Void {
     if (terminalState != "running") { restartShell(); return; }
     controlReleased = controller;

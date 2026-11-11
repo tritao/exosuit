@@ -20,7 +20,9 @@ class PhoneLastView {
 	final remote:PhoneRemote;
 	final app:ExosuitApp;
 	final clock:Void->Float;
-	var pending:Null<{machine:String, workspace:String, kind:String, id:String}>;
+	var pending:Null<{machine:String, workspace:String, kind:String, id:String, controlling:Bool}>;
+	/** A restored terminal that was controlled by this phone when it was killed: control is asked back once it is attached. */
+	var reclaiming:Null<{id:String, since:Float}>;
 	var startedAt = -1.0;
 	var saved = "";
 	var terminalShown = false;
@@ -34,7 +36,8 @@ class PhoneLastView {
 			if (FileSystem.exists(path)) {
 				var value:Dynamic = Json.parse(File.getContent(path));
 				if (value != null && value.machine != null && value.workspace != null) {
-					pending = {machine: value.machine, workspace: value.workspace, kind: value.kind == null ? "" : value.kind, id: value.id == null ? "" : value.id};
+					pending = {machine: value.machine, workspace: value.workspace, kind: value.kind == null ? "" : value.kind, id: value.id == null ? "" : value.id,
+						controlling: value.controlling == true};
 					saved = File.getContent(path);
 				}
 			}
@@ -44,7 +47,10 @@ class PhoneLastView {
 	public function poll():Void {
 		releaseKeyboard();
 		if (pending != null) restore();
-		else save();
+		else {
+			reclaim();
+			save();
+		}
 	}
 
 	/** Closing the terminal view must close the soft keyboard: the terminal's blur does not run when its view leaves the tree. */
@@ -56,6 +62,24 @@ class PhoneLastView {
 	}
 
 	function give_up():Void pending = null;
+
+	/** Seconds the restored terminal gets to attach before control is no longer asked for. */
+	static inline final RECLAIM_SECONDS = 30.0;
+
+	/** The terminal the phone controlled before it was killed asks for control back once. Someone else may hold it by now (the
+	    editor claims a free lease); that client keeps its own pane's Take control, and this phone is the one whose person came back. */
+	function reclaim():Void {
+		var wanted = reclaiming;
+		if (wanted == null) return;
+		var tab = app.host.activeTab();
+		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
+		if (clock() - wanted.since > RECLAIM_SECONDS * 1000 || terminal == null || terminal.resourceId != wanted.id) {
+			reclaiming = null;
+			return;
+		}
+		if (Std.isOfType(terminal.panel, ui.TerminalPane) && !cast(terminal.panel, ui.TerminalPane).reclaimControl()) return;
+		reclaiming = null;
+	}
 
 	function restore():Void {
 		var wanted = pending;
@@ -79,7 +103,10 @@ class PhoneLastView {
 			var catalog = client.terminalCatalog();
 			if (catalog == null || !client.canReadTerminals()) return;
 			for (record in catalog.terminals) if (record.id == wanted.id) {
-				if (app.openCatalogTerminal(record)) give_up();
+				if (app.openCatalogTerminal(record)) {
+					if (wanted.controlling) reclaiming = {id: wanted.id, since: clock()};
+					give_up();
+				}
 				return;
 			}
 			give_up();
@@ -99,15 +126,18 @@ class PhoneLastView {
 		var machine = remote.openMachine;
 		var text = "";
 		if (open != null && machine != null) {
-			var kind = "", id = "";
+			var kind = "", id = "", controlling = false;
 			var tab = app.host.activeTab();
 			if (tab != null) {
 				var terminal = UiEditorTabs.terminal(tab);
 				var agent = UiEditorTabs.agent(tab);
-				if (terminal != null && terminal.remote) { kind = "terminal"; id = terminal.resourceId; }
+				if (terminal != null && terminal.remote) {
+					kind = "terminal"; id = terminal.resourceId;
+					controlling = reclaiming != null || Std.isOfType(terminal.panel, ui.TerminalPane) && cast(terminal.panel, ui.TerminalPane).controlling();
+				}
 				else if (agent != null) { kind = "agent"; id = agent.resource; }
 			}
-			text = Json.stringify({machine: machine.device.machineId, workspace: open.id, kind: kind, id: id});
+			text = Json.stringify({machine: machine.device.machineId, workspace: open.id, kind: kind, id: id, controlling: controlling});
 		}
 		if (text == saved) return;
 		saved = text;

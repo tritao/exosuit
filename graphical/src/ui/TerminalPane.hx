@@ -145,6 +145,10 @@ class TerminalPane implements AgentTerminalPanel {
 		remoteBackend.configureAgent(provider);
 	}
 	public function controlStatus():Null<String> return remoteBackend == null ? null : remoteBackend.controlStatus();
+	/** A workspace terminal whose view holds the control lease. */
+	public function controlling():Bool return remoteBackend != null && remoteBackend.isController();
+	/** Asks the service for control back (takeover); see RpcTerminalBackend.reclaimControl. False: not attached yet. */
+	public function reclaimControl():Bool return remoteBackend == null || remoteBackend.reclaimControl();
 
 	public function status():String
 		return session.status;

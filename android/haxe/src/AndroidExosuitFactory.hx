@@ -32,6 +32,10 @@ class AndroidExosuitFactory {
 		var redraw = function() {
 			if (app == null) context.requestFrame(); else app.requestFrame();
 		};
+		// The terminal service tells "the same client came back" from "another client" by this key. The desktop makes a random
+		// one per process; a phone whose process was killed must come back with the same key, or the service keeps the old
+		// attachment's control lease and the phone returns as an observer. RpcTerminalBackend keeps it bound to this process's pid.
+		workspace.client.RpcTerminalBackend.adoptClientKey(persistentClientKey(root));
 		var credentials = new PhoneCredentials();
 		credentials.load(credentialDocument, credentialsUnreadable);
 		if (credentialDocument != null) for (index in 0...credentialDocument.length) credentialDocument.set(index, 0);
@@ -94,5 +98,19 @@ class AndroidExosuitFactory {
 		created.showSidebarMode("remote-access");
 		phone.connectSaved();
 		return created;
+	}
+
+	/** A random key kept in the app's files: the same for every process of this installation. */
+	static function persistentClientKey(root:String):String {
+		var path = root + "/terminal-client-key";
+		try {
+			if (FileSystem.exists(path)) {
+				var key = StringTools.trim(sys.io.File.getContent(path));
+				if (key.length >= 16 && key.length <= 128) return key;
+			}
+		} catch (_:Dynamic) {}
+		var key = haxe.crypto.Sha256.encode(Sys.time() + ":" + Math.random() + ":" + Sys.getPid()).substr(0, 32);
+		try sys.io.File.saveContent(path, key) catch (_:Dynamic) {}
+		return key;
 	}
 }
