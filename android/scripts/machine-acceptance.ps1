@@ -349,14 +349,17 @@ try {
         Shot (Join-Path $OutDir '1-pairing-code.png')
         # The machine's approval and the phone's confirmation race a short timeout on the phone; approve first (the host acts on its
         # next 0.5 s poll), then confirm the shown code. The phone confirms by a tap: no intent extra can confirm a code.
+        # EXOSUIT_E2E_ORDER_GAP sets the seconds between the two sides (default 3 approve-first, 12 confirm-first). The machine
+        # keeps an early approval for 120 s, so a gap of 30 must still pair.
+        $gap = if ($env:EXOSUIT_E2E_ORDER_GAP) { [int]$env:EXOSUIT_E2E_ORDER_GAP } elseif ($PairOrder -eq 'approve-first') { 3 } else { 12 }
         if ($PairOrder -eq 'approve-first') {
             Host-Command @('approve')
-            Start-Sleep -Seconds 3
+            Start-Sleep -Seconds $gap
             Tap-PhoneElement 'The code matches' -role 1 -after 0
         } else {
             # The phone confirms first and waits for the owner: the owner approves some seconds later.
             Tap-PhoneElement 'The code matches' -role 1 -after 0
-            Start-Sleep -Seconds 12
+            Start-Sleep -Seconds $gap
             Host-Command @('approve')
         }
         Wait-Log 'exosuit-machine: \S.* online \[\]' 90 | Out-Null
