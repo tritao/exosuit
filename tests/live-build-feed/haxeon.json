@@ -1,0 +1,12 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-live-build-feed-test" },
+	"entry": "app.LiveBuildFeedTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." },
+		"exosuit-model-tests": { "path": "../support" }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

@@ -303,6 +303,10 @@ Standard Haxe APIs haxeon's standard library does not have yet. Each one forced 
   `FileOutput` give no durability. Only `sys.io.AtomicFile` flushes (fsync, or FlushFileBuffers, plus the parent
   directory on POSIX), and it publishes a whole file from memory. The migration's backups therefore go through
   `AtomicFile.createBytes`, one file at a time. There is no directory fsync for a created directory.
+- **No `sys.FileSystem.stat`, and no `sys.io.File.read` / `FileInput`** ("E1007: Unknown instance method
+  sys.FileSystem.stat", seen 2026-11-11). `FileSystem.metadata(path)` gives the size and a whole-second modification
+  time. Workaround: `controller.LiveBuildFeed` tails an append-only file by its size and reads it whole when it grows,
+  since it cannot seek.
 - **No `sys.io.File.copy`.** Workaround: `File.saveBytes(to, File.getBytes(from))`, which reads the whole file into
   memory. Added in haxeon `6562434f6` (it copies through memory the same way).
 

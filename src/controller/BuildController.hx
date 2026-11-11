@@ -22,6 +22,8 @@ class BuildController {
 	public final available:Bool;
 	public final output:BuildOutput = new BuildOutput();
 	public var active(default, null):Null<OwnedProcess>;
+	/** In live mode, the watcher's rebuilds and patches (LiveBuildFeed); null otherwise. */
+	public var live(default, null):Null<LiveBuildFeed>;
 
 	final workspace:Workspace;
 	final root:WorkbenchHost;
@@ -29,6 +31,7 @@ class BuildController {
 	final processes:ProcessManager;
 	final openDocument:String->View;
 	final reportError:(String, String)->Void;
+	final commandRegistry:CommandRegistry;
 	var emptyDrains:Int = 0;
 	var activeProjectRoot:String = "";
 
@@ -41,12 +44,21 @@ class BuildController {
 		this.processes = processes;
 		this.openDocument = openDocument;
 		this.reportError = reportError;
+		this.commandRegistry = commands;
 		root.setBuildDiagnosticHandler(activateDiagnostic);
 		if (this.available) {
 			commands.add("build:show-output", context -> root.showBuildOutput("Build Output", output));
 			commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.buildProject() != null);
 			commands.add("build:cancel-task", context -> cancel(), context -> active != null);
 		}
+		var feed = LiveBuildFeed.fromEnvironment(root);
+		if (feed != null) watchLive(feed);
+	}
+
+	/** Shows the live watcher's rebuilds in Build Output, Problems and notifications (`LiveBuildFeed`). */
+	public function watchLive(feed:LiveBuildFeed):Void {
+		live = feed;
+		commandRegistry.add(LiveBuildFeed.SHOW_OUTPUT, context -> feed.showOutput(), null, "Show Live Build Output");
 	}
 
 	/** Reads project-defined tasks only after this deliberate user command. */
@@ -96,6 +108,8 @@ class BuildController {
 	}
 
 	public function update():Void {
+		var feed = live;
+		if (feed != null) feed.update(Sys.time());
 		var process = active;
 		if (process == null) return;
 		var received = false;

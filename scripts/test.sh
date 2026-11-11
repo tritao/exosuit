@@ -97,6 +97,7 @@ check pi-inputs python3 "$root_dir/scripts/test-pi-agents.py" --inputs
 check workspace-rpc-wasm bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
 run_test application-test
 run_test problems
+run_test live-build-feed
 capabilities_state=$(mktemp -d)
 PRAGTICAL_PORTABLE="$capabilities_state" run_test host-capabilities-test
 rm -rf "$capabilities_state"

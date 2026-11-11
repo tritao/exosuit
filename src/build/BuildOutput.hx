@@ -51,17 +51,20 @@ class BuildOutput {
 	}
 
 	function parseDiagnostic(text:String):Null<BuildDiagnostic> {
-		var first = text.indexOf(":"), second = first < 0 ? -1 : text.indexOf(":", first + 1), third = second < 0 ? -1 : text.indexOf(":", second + 1);
+		// A Windows path starts with its drive ("C:\src\Main.hx:3:5: ..."), whose colon is not the line's.
+		var drive = text.length > 2 && text.charAt(1) == ":" && (text.charAt(2) == "\\" || text.charAt(2) == "/")
+			&& text.charAt(0).toLowerCase() != text.charAt(0).toUpperCase();
+		var first = text.indexOf(":", drive ? 2 : 0), second = first < 0 ? -1 : text.indexOf(":", first + 1), third = second < 0 ? -1 : text.indexOf(":", second + 1);
 		if (first <= 0 || second <= first + 1) return null;
 		var line = Std.parseInt(text.substring(first + 1, second));
-		if (line <= 0) return null;
+		if (line == null || line <= 0) return null;
 		var column = 1;
 		if (third > second + 1) {
 			var parsed = Std.parseInt(text.substring(second + 1, third));
-			if (parsed > 0) column = parsed;
+			if (parsed != null && parsed > 0) column = parsed;
 		}
 		var path = text.substring(0, first);
-		if (!StringTools.startsWith(path, "/") && cwd.length > 0) path = cwd + "/" + path;
+		if (!drive && !StringTools.startsWith(path, "/") && cwd.length > 0) path = cwd + "/" + path;
 		return new BuildDiagnostic(path, line - 1, column - 1);
 	}
 }

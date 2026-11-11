@@ -3580,6 +3580,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var previousProblems = host.getProblems().revision;
 		var previousNotification = visibleNotification;
 		var previousBuildBytes = application.build.output.byteCount;
+		var liveFeed = application.build.live;
+		var previousLiveEvents = liveFeed == null ? 0 : liveFeed.applied;
 		var previousBuild = application.build.active;
 		var previousDecorations = host.getPluginDecorations().revision;
 		var previousPluginStatus = host.getPluginStatusItems().revision;
@@ -3684,6 +3686,7 @@ class ExosuitApp implements DesktopUiApplication {
 			previousProblems != host.getProblems().revision ||
 			previousNotification != host.getNotifications().current() ||
 			previousBuildBytes != application.build.output.byteCount || previousBuild != application.build.active ||
+			(liveFeed != null && previousLiveEvents != liveFeed.applied) ||
 			previousDecorations != host.getPluginDecorations().revision ||
 			previousPluginStatus != host.getPluginStatusItems().revision ||
 			previousPluginPanels != host.getPluginPanels().revision ||
