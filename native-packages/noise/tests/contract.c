@@ -37,6 +37,14 @@ int main(void)
     key_size = public_size = 32;
     REQUIRE(noisekit_keypair_generate(responder_private, &key_size, responder_public, &public_size) == 0);
     REQUIRE(key_size == 32 && public_size == 32);
+    {
+        uint8_t left[32], right[32], zero[32] = {0};
+        uint32_t left_size = 32, right_size = 32, zero_size = 32;
+        REQUIRE(noisekit_shared_secret(initiator_private, 32, responder_public, 32, left, &left_size) == 0);
+        REQUIRE(noisekit_shared_secret(responder_private, 32, initiator_public, 32, right, &right_size) == 0);
+        REQUIRE(left_size == 32 && right_size == 32 && memcmp(left, right, 32) == 0);
+        REQUIRE(noisekit_shared_secret(initiator_private, 32, zero, 32, left, &zero_size) != 0);
+    }
     REQUIRE(noisekit_handshake_create(NOISEKIT_INITIATOR, initiator_private,
         sizeof(initiator_private), prologue, sizeof(prologue) - 1, &initiator) == 0);
     REQUIRE(noisekit_handshake_create(NOISEKIT_RESPONDER, responder_private,

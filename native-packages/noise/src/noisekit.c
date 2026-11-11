@@ -69,6 +69,46 @@ int noisekit_public_key(const uint8_t *private_key, uint32_t private_size,
     return result;
 }
 
+int noisekit_shared_secret(const uint8_t *private_key, uint32_t private_size,
+    const uint8_t *peer_public_key, uint32_t peer_size, uint8_t *shared, uint32_t *shared_size)
+{
+    NoiseDHState *local = 0, *peer = 0;
+    uint8_t any = 0;
+    uint32_t index;
+    int result;
+    if (!private_key || private_size != NOISEKIT_KEY_BYTES || !peer_public_key || peer_size != NOISEKIT_KEY_BYTES ||
+        !shared || !shared_size)
+        return NOISE_ERROR_INVALID_PARAM;
+    if (*shared_size < NOISEKIT_KEY_BYTES) {
+        *shared_size = NOISEKIT_KEY_BYTES;
+        return NOISE_ERROR_INVALID_LENGTH;
+    }
+    result = noise_dhstate_new_by_id(&local, NOISE_DH_CURVE25519);
+    if (result == NOISE_ERROR_NONE)
+        result = noise_dhstate_new_by_id(&peer, NOISE_DH_CURVE25519);
+    if (result == NOISE_ERROR_NONE)
+        result = noise_dhstate_set_keypair_private(local, private_key, NOISEKIT_KEY_BYTES);
+    if (result == NOISE_ERROR_NONE)
+        result = noise_dhstate_set_public_key(peer, peer_public_key, NOISEKIT_KEY_BYTES);
+    if (result == NOISE_ERROR_NONE)
+        result = noise_dhstate_calculate(local, peer, shared, NOISEKIT_KEY_BYTES);
+    if (local)
+        noise_dhstate_free(local);
+    if (peer)
+        noise_dhstate_free(peer);
+    if (result == NOISE_ERROR_NONE) {
+        for (index = 0; index < NOISEKIT_KEY_BYTES; index++)
+            any |= shared[index];
+        if (!any)
+            result = NOISE_ERROR_INVALID_PUBLIC_KEY;
+    }
+    if (result != NOISE_ERROR_NONE)
+        noise_clean(shared, NOISEKIT_KEY_BYTES);
+    else
+        *shared_size = NOISEKIT_KEY_BYTES;
+    return result;
+}
+
 int noisekit_handshake_create(int role, const uint8_t *static_private_key,
     uint32_t static_private_key_size, const uint8_t *prologue, uint32_t prologue_size,
     noisekit_handshake **out_state)

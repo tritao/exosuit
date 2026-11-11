@@ -54,6 +54,13 @@ NOISEKIT_API int noisekit_public_key(
     const uint8_t *private_key NKNOISE_IN_ARRAY(private_size), uint32_t private_size,
     uint8_t *public_key NKNOISE_OUT_BUFFER(public_size) NKNOISE_INITIAL_CAPACITY(32),
     uint32_t *public_size NKNOISE_INOUT);
+/* X25519 of a static private key and a peer's public key, for proving the key to a peer that runs no Noise (the
+   relay's registration challenge). Fails on an all-zero result (a low-order peer key). */
+NOISEKIT_API int noisekit_shared_secret(
+    const uint8_t *private_key NKNOISE_IN_ARRAY(private_size), uint32_t private_size,
+    const uint8_t *peer_public_key NKNOISE_IN_ARRAY(peer_size), uint32_t peer_size,
+    uint8_t *shared NKNOISE_OUT_BUFFER(shared_size) NKNOISE_INITIAL_CAPACITY(32),
+    uint32_t *shared_size NKNOISE_INOUT);
 
 /* Prologue is hashed by Noise and must be byte-identical at both endpoints. */
 NOISEKIT_API int noisekit_handshake_create(int role,

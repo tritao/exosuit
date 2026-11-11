@@ -38,6 +38,17 @@ class NoiseSession {
         return result.public_key;
     }
 
+    /** X25519 of this private key and a peer's public key (both 32 bytes); throws on a low-order peer key. Wipe the result after use. */
+    public static function sharedSecret(privateKey:Bytes, peerPublicKey:Bytes):Bytes {
+        if (privateKey == null || privateKey.length != 32 || peerPublicKey == null || peerPublicKey.length != 32)
+            throw "Invalid X25519 input";
+        var result = NoiseKit.noisekit_shared_secret(privateKey, peerPublicKey);
+        check(result.status, "sharedSecret");
+        if (result.shared.length != 32)
+            throw "NoiseKit returned an invalid shared secret size";
+        return result.shared;
+    }
+
     public static function create(role:Int, staticPrivateKey:Bytes, prologue:Bytes):NoiseSession {
         if (staticPrivateKey == null || staticPrivateKey.length != 32 || prologue == null || prologue.length > 1024)
             throw "Invalid Noise handshake input";
