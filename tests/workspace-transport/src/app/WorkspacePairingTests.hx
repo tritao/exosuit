@@ -265,6 +265,35 @@ class WorkspacePairingTests {
 			&& store.loadDevices().length == 0 && relay.registered.get(pendingInvite.deviceId) == null,
 			'unapproved candidate expires and closes without relay registration');
 
+		// The owner approves first and the device's user confirms the code much later, inside the pending window.
+		var lateInvite = invitation(pairing), lateDevice = NoiseSession.generateKeypair();
+		var latePair = MemoryTransport.pair(), lateSecure:Null<NoiseMessageTransport> = null;
+		pairing.acceptChannel(lateInvite.deviceId, latePair.server);
+		var lateNoise = new NoiseClientHandshake(latePair.client, lateDevice.privateKey, null,
+			NoisePrologue.encode(relay.endpoint.machineId, lateInvite.deviceId), now,
+			function(transport) lateSecure = transport);
+		for (_ in 0...12) {
+			pairing.poll();
+			lateNoise.poll();
+		}
+		var lateError:Null<String> = 'callback_missing';
+		pairing.approve(lateInvite.deviceId, [WorkspaceProtocol.READ], function(error) lateError = error);
+		var lateApproval = lateSecure.receive();
+		require(lateApproval != null && pairing.awaitingConfirmation(lateInvite.deviceId), 'approval reaches the device first');
+		for (_ in 0...11) {
+			nowValue += 10000;
+			pairing.poll();
+		}
+		require(lateError == 'callback_missing' && latePair.server.isOpen() && pairing.awaitingConfirmation(lateInvite.deviceId)
+			&& relay.revoked.indexOf(lateInvite.deviceId) < 0,
+			'an approved device that has not confirmed yet is kept for 110 s');
+		var lateApproved:Dynamic = Json.parse(lateApproval.toString());
+		require(lateSecure.send(Bytes.ofString(Json.stringify({version: 1, type: 'pairing-confirmed',
+			deviceId: lateInvite.deviceId, challenge: lateApproved.challenge}))), 'late device sends its confirmation');
+		pairing.poll();
+		require(lateError == null && !pairing.awaitingConfirmation(lateInvite.deviceId) && pairing.listDevices().length == 1,
+			'a confirmation 110 s after the approval completes the pairing');
+
 		var confirmationInvite = invitation(pairing), confirmationDevice = NoiseSession.generateKeypair();
 		var confirmationPair = MemoryTransport.pair(), confirmationSecure:Null<NoiseMessageTransport> = null;
 		pairing.acceptChannel(confirmationInvite.deviceId, confirmationPair.server);
@@ -279,10 +308,10 @@ class WorkspacePairingTests {
 		pairing.approve(confirmationInvite.deviceId, [WorkspaceProtocol.READ], function(error) confirmationError = error);
 		require(confirmationSecure.receive() != null && confirmationError == 'callback_missing',
 			'approved bearer waits for encrypted device receipt confirmation');
-		nowValue += 10001;
+		nowValue += 120001;
 		pairing.poll();
 		require(confirmationError == 'pairing_expired' && !confirmationPair.server.isOpen()
-			&& store.loadDevices().length == 0 && relay.registered.get(confirmationInvite.deviceId) == null
+			&& store.loadDevices().length == 1 && relay.registered.get(confirmationInvite.deviceId) == null
 			&& relay.revoked.indexOf(confirmationInvite.deviceId) >= 0,
 			'missing receipt confirmation expires, closes the channel and rolls back local/relay trust');
 		pairing.dispose();
@@ -290,6 +319,7 @@ class WorkspacePairingTests {
 		wipe(rejectedDevice.privateKey);
 		wipe(pendingDevice.privateKey);
 		wipe(confirmationDevice.privateKey);
+		wipe(lateDevice.privateKey);
 	}
 
 	static function mitmCodeComparison():Void {
