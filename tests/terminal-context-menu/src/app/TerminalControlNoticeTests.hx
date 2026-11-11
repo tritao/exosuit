@@ -25,6 +25,7 @@ class TerminalControlNoticeTests {
   server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) ctx.respond(info()));
   function changed():Void server.notify(WorkspaceTerminalProtocol.CHANGED,{workspace:"workspace",instance:"owner",id:"shared"},WorkspaceTerminalProtocol.encodeChange);
   server.register(WorkspaceTerminalProtocol.UNWATCH,function(q,ctx) ctx.respond(q));
+  FakeTerminalSnapshots.register(server,info);
   function pump():Void {server.poll();connection.poll();}
   var backend=new RpcTerminalBackend(function() return endpoint,"shared","/tmp",false);
   var session=new terminalsession.TerminalSession(backend,terminalkit.Emulator.open(80,24),false);
@@ -72,6 +73,7 @@ class TerminalControlNoticeTests {
    server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) ctx.respond(info()));
    function changed():Void server.notify(WorkspaceTerminalProtocol.CHANGED,{workspace:"workspace",instance:"owner",id:"shared"},WorkspaceTerminalProtocol.encodeChange);
    server.register(WorkspaceTerminalProtocol.UNWATCH,function(q,ctx) ctx.respond(q));
+   FakeTerminalSnapshots.register(server,info);
    var label=(inEditor?"editor":"panel")+" "+size[0]+"x"+size[1];
    var app=new ui.ExosuitApp(fonts,ui.ExosuitPalette.theme(false),null,null,null,null,false,function(_,_,_) return new StubTerminal());
    var backend=new RpcTerminalBackend(function() return endpoint,"shared","/tmp",false,null,null,true,true); // as the phone opens it: claims control, waits for its size

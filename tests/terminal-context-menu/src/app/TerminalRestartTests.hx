@@ -34,6 +34,7 @@ class TerminalRestartTests {
   server.register(WorkspaceTerminalProtocol.SET_CONTROL,function(q,ctx) ctx.respond(info()));
   server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) ctx.respond(info()));
   server.register(WorkspaceTerminalProtocol.UNWATCH,function(q,ctx) ctx.respond(q));
+  FakeTerminalSnapshots.register(server,info);
   var client=new RpcWorkspaceWorkbenchClient(endpoint,clock);
   function pump():Void {server.poll();connection.poll();}
   client.poll();client.refreshTerminals(true);for(_ in 0...3) pump();
