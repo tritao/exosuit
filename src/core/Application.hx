@@ -230,6 +230,8 @@ class Application {
 		var normalized = workspace.fileSystem.normalize(path);
 		var projectSettings = settings.forProject(ConfigurationPaths.projectSettings(normalized));
 		var project = workspace.addProject(normalized, projectSettings.current.excludedNames);
+		// An open project in another spelling of this folder (separators, case) is the same folder: use its spelling.
+		normalized = project.root;
 		project.setSettings(projectSettings);
 		scm.discover(normalized, _ -> {});
 		configuration.apply(projectSettings.current);

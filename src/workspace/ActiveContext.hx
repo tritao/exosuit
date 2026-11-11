@@ -170,7 +170,7 @@ class ActiveContext {
 		var result:Array<Project> = [];
 		for (root in roots) {
 			var match:Null<Project> = null;
-			for (project in workspace.projects) if (project.root == root) match = project;
+			for (project in workspace.projects) if (PathKey.same(project.root, root)) match = project;
 			if (match == null && isAvailable(root)) {
 				match = groupProjects.get(root);
 				if (match == null) { match = new Project(root, workspace.fileSystem, workspace.jobs); groupProjects.set(root, match); }

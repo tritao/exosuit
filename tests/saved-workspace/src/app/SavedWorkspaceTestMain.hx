@@ -88,6 +88,22 @@ class SavedWorkspaceTestMain {
 		n.savedWorkspaces.addFolder(roots[0]);
 		n.savedWorkspaces.adoptMachineWorkspace("ws-again", "Again");
 		require(n.activeContext.contextWorkspaceId == "ws-again", "an adopted id was not taken after Close");
+		// One folder in another spelling is the same folder: Add Folder to Workspace neither adds a project nor a saved root.
+		var spellings = [StringTools.replace(roots[0], "/", "\\"), roots[0] + "/"];
+		if (workspace.PathKey.IGNORE_CASE) spellings.push(roots[0].toUpperCase());
+		else spellings = [roots[0] + "/"];
+		var spelled = app(); spelled.savedWorkspaces.addFolder(roots[0]);
+		require(spelled.savedWorkspaces.saveAs(root + "/Spelled.exosuit-workspace"), "could not save the spelling workspace");
+		for (spelling in spellings) {
+			require(spelled.savedWorkspaces.addFolder(spelling), "adding a second spelling failed: " + spelling);
+			require(spelled.workspace.projects.length == 1 && spelled.workspace.projects[0].root == roots[0], "a second spelling added a project: " + spelling);
+			require(record(spelled).roots.length == 1 && record(spelled).roots[0] == roots[0], "a second spelling added a saved root: " + spelling);
+		}
+		var folded = new SavedWorkspace("spelled", "Spelled", [roots[0], roots[0] + "/", roots[1]]);
+		require(folded.roots.length == 2 && folded.roots[0] == roots[0], "a saved workspace kept a root twice");
+		spelled.savedWorkspaces.removeFolder(spellings[0]);
+		require(spelled.workspace.projects.length == 0 && record(spelled).roots.length == 0, "removing a folder by another spelling left it behind");
+		spelled.shutdown();
 		m.shutdown(); n.shutdown();
 		a.shutdown(); b.shutdown(); restored.shutdown(); reopened.shutdown();
 		trace("PASS: saved workspace identity, 1/3 ordered roots, explicit saves, two-window conflict, unavailable root, session, recents and close");

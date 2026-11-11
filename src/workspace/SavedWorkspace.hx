@@ -13,8 +13,13 @@ class SavedWorkspace {
 		this.id = id; this.name = name; this.roots = [];
 		for (root in roots) {
 			if (!haxe.io.Path.isAbsolute(root)) throw 'Workspace root must be absolute: "' + root + '"';
-			if (this.roots.indexOf(root) < 0) this.roots.push(root);
+			if (!hasRoot(this.roots, root)) this.roots.push(root);
 		}
+	}
+	/** Whether `roots` has `root` in any spelling (separators, trailing separator, Windows case). */
+	public static function hasRoot(roots:Array<String>, root:String):Bool {
+		for (existing in roots) if (PathKey.same(existing, root)) return true;
+		return false;
 	}
 	public static function create(name:String, roots:Array<String>):SavedWorkspace
 		return new SavedWorkspace(haxe.crypto.Sha256.encode(Std.string(Sys.time()) + ":" + Math.random()).substring(0, 24), name, roots);

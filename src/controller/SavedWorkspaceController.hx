@@ -99,7 +99,8 @@ class SavedWorkspaceController {
 	public function folderOpened(root:String):Void {
 		// A folder joining an adopted machine workspace makes the window a plain multi-folder one, as it always did.
 		if (current == null && machineId != null && !hasRoot(root)) releaseMachineWorkspace();
-		if (current != null && current.roots.indexOf(root) < 0) { current.roots.push(root); dirty = true; }
+		var record = current;
+		if (record != null && !SavedWorkspace.hasRoot(record.roots, root)) { record.roots.push(root); dirty = true; }
 		changed();
 	}
 	public function restore(record:SavedWorkspace, file:String):Void {
@@ -148,8 +149,9 @@ class SavedWorkspaceController {
 		app.attachFolder(folder); return true;
 	}
 	public function removeFolder(folder:String):Void {
-		for (project in app.workspace.projects.copy()) if (project.root == folder) app.workspace.removeProject(project);
-		if (current != null) { current.roots.remove(folder); dirty = true; }
+		for (project in app.workspace.projects.copy()) if (workspace.PathKey.same(project.root, folder)) app.workspace.removeProject(project);
+		var record = current;
+		if (record != null) { for (root in record.roots.copy()) if (workspace.PathKey.same(root, folder)) record.roots.remove(root); dirty = true; }
 		changed();
 	}
 	public function close():Void {

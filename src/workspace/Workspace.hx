@@ -31,7 +31,7 @@ class Workspace {
 	public function addProject(path:String, ?ignoredNames:Array<String>):Project {
 		var normalized = fileSystem.normalize(path);
 		for (project in projects)
-			if (project.root == normalized) {
+			if (PathKey.same(project.root, normalized)) {
 				activeProject = project;
 				return project;
 			}
