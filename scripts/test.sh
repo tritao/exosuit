@@ -8,6 +8,9 @@
 set -euo pipefail
 # What tests start neither registers with the user's suit nor starts it (see suit/README.md).
 export EXOSUIT_SUIT=${EXOSUIT_SUIT:-off}
+# Headless UI tests check, on every frame that did work, that the retained tree equals a fresh build and that no
+# submitted node was edited in place without BuildContext.willEditRetained (UiContext.verifyRetentionEvery). 0 turns it off.
+export HAXEON_UI_VERIFY_RETENTION=${HAXEON_UI_VERIFY_RETENTION:-1}
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
