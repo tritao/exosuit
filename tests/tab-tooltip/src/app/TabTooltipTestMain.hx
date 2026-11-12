@@ -130,6 +130,8 @@ private class FeedbackFixture implements haxeon.ui.core.View {
 		style.height = haxeon.ui.LayoutAxis.fixed(20);
 		var node = new haxeon.ui.core.RenderNode(context.id("feedback-fixture"), haxeon.ui.LayoutVisualKind.Box, style);
 		node.onResolved(function(_) {
+			// Layouts after the first quiet one belong to the retention check's rebuild, not to the feedback being counted.
+			if (changes >= 0 && passes > changes) return;
 			passes++;
 			if (changes < 0 || passes <= changes) {
 				// The node is in the submitted tree by now: announce the in-place edit or the feedback pass does not see it.
