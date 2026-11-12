@@ -464,7 +464,7 @@ esume"
     # 4d. Create a Claude Code terminal from the phone: the Workbench menu, New Agent Session, Claude.
     Tap-PhoneElement '^Workbench$' -role 1 -after 2
     Shot (Join-Path $OutDir '14a-workbench.png')
-    Tap-PhoneElement 'Workbench menu|More|Actions' -role 1 -after 1
+    Tap-PhoneElement 'Workbench actions|Workbench menu' -role 1 -after 1
     Shot (Join-Path $OutDir '14b-menu.png')
     Tap-PhoneElement 'New Agent Session' -after 2
     Tap-PhoneElement '^Claude' -after 1
