@@ -330,14 +330,24 @@ def hold_control(out: Path, arguments) -> int:
     if not socket_path:
         raise SystemExit(f"no local socket recorded for {arguments.workspace}")
     runtime, _ = runtime_paths(ROOT)
-    process = subprocess.Popen([str(runtime), str(ADMIN), "--socket", socket_path, "--hold-control", arguments.terminal, "--hold-seconds", str(arguments.seconds),
-                                "--columns", str(arguments.columns), "--rows", str(arguments.rows)], env=manager_environment(ROOT), cwd=str(ROOT),
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=NO_WINDOW)
-    line = process.stdout.readline()
-    if not line:
-        raise SystemExit("the controller failed: " + process.stderr.read())
-    print(line.strip())
-    return 0
+    # The controller outlives this command, so its output goes to a file, never to a pipe: once this process exits a pipe has
+    # no reader, and the controller's next write to it would end the controller and with it the control it holds.
+    log_path = out / f"hold-control-{time.time_ns()}.log"
+    with open(log_path, "w", encoding="utf-8") as log:
+        process = subprocess.Popen([str(runtime), str(ADMIN), "--socket", socket_path, "--hold-control", arguments.terminal,
+                                    "--hold-seconds", str(arguments.seconds), "--columns", str(arguments.columns), "--rows", str(arguments.rows)],
+                                   env=manager_environment(ROOT), cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            if line.startswith("{") and '"holding"' in line:
+                print(line.strip())
+                return 0
+        if process.poll() is not None:
+            raise SystemExit(f"the controller failed (exit {process.returncode}); its output ({log_path.name}): " + text[-2000:])
+        time.sleep(0.2)
+    raise SystemExit(f"the controller did not take control within 60 s; its output ({log_path.name}): " + log_path.read_text(errors="replace")[-2000:])
 
 
 def main() -> int:

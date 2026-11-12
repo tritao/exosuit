@@ -78,7 +78,14 @@ function Wait-Log([string]$pattern, [int]$seconds) {
     }
     throw "Timed out after $seconds s waiting for '$pattern' in logcat"
 }
-function Host-Command([string[]]$arguments) { & $python $hostScript @arguments --out $hostDir | Out-Null }
+# A host command that fails (the stand-in viewer could not attach or take control, a grant was refused) stops the run with
+# the tool's own words; its output is kept in host\commands.log either way.
+function Host-Command([string[]]$arguments) {
+    $output = (& $python $hostScript @arguments --out $hostDir 2>&1 | ForEach-Object { "$_" }) -join "`n"
+    $code = $LASTEXITCODE
+    Add-Content (Join-Path $hostDir 'commands.log') ("{0:HH:mm:ss} {1} -> exit {2}`n{3}" -f (Get-Date), ($arguments -join ' '), $code, $output)
+    if ($code -ne 0) { throw "host command '$($arguments -join ' ')' failed (exit $code): $output" }
+}
 function Start-App([string[]]$extras) {
     & $script:Adb -s $script:Serial shell am start -n $activity @extras | Out-Null
 }
