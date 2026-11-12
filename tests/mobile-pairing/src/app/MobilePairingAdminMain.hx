@@ -241,13 +241,13 @@ class MobilePairingAdminMain {
 			}
 			switch mode {
 				case "list":
-					Sys.println(Json.stringify(describe(catalog, workspaceId, instance, groups, sessions)));
+					emit(Json.stringify(describe(catalog, workspaceId, instance, groups, sessions)));
 					done = true;
 				case "ensure":
 					var existing:Dynamic = null;
 					for (item in sessions) if (item.name == name) existing = item;
 					if (existing != null) {
-						Sys.println(Json.stringify({created: false, id: existing.id, name: existing.name, workspace: workspaceId}));
+						emit(Json.stringify({created: false, id: existing.id, name: existing.name, workspace: workspaceId}));
 						done = true;
 					} else if (!started) {
 						started = true;
@@ -256,7 +256,7 @@ class MobilePairingAdminMain {
 						var h1 = 5381, h2 = 52711; for (c in 0...name.length) { h1 = ((h1 * 33) ^ name.charCodeAt(c)) & 0x7fffffff; h2 = ((h2 * 31) + name.charCodeAt(c)) & 0x7fffffff; } var id = "agent-" + StringTools.hex(h1, 8).toLowerCase() + StringTools.hex(h2, 8).toLowerCase();
 						connection.call(WorkspaceAgentProtocol.CREATE, {workspace: "workspace", instance: instance, id: id, group: group, name: name,
 							thread: null}, 20000, function(record) {
-							Sys.println(Json.stringify({created: true, id: record.id, name: record.name, group: record.group, cwd: record.cwd,
+							emit(Json.stringify({created: true, id: record.id, name: record.name, group: record.group, cwd: record.cwd,
 								workspace: workspaceId}));
 							done = true;
 						}, function(error) failure = "session creation failed: " + error.code + " " + error.message);
@@ -268,11 +268,11 @@ class MobilePairingAdminMain {
 						var id = "workspace-terminal-" + StringTools.hex(h1, 8).toLowerCase() + StringTools.hex(h2, 8).toLowerCase();
 						connection.call(WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: id, create: true, columns: 80, rows: 24,
 							group: null, directory: null, watch: null, theme: null, agentProvider: provider}, 20000, function(info) {
-							Sys.println(Json.stringify({created: true, id: info.id, state: info.state, agentProvider: info.agentProvider, workspace: workspaceId}));
+							emit(Json.stringify({created: true, id: info.id, state: info.state, agentProvider: info.agentProvider, workspace: workspaceId}));
 							done = true;
 						}, function(error) {
 							if (error.code == "terminal_unavailable") {
-								Sys.println(Json.stringify({created: false, id: id, workspace: workspaceId}));
+								emit(Json.stringify({created: false, id: id, workspace: workspaceId}));
 								done = true;
 							} else failure = "terminal creation failed: " + error.code + " " + error.message;
 						});
@@ -297,7 +297,7 @@ class MobilePairingAdminMain {
 							rows: holdRows, theme: null}, 5000, function(_) {
 							holdStep = 6;
 							holdUntil = clock() + holdSeconds * 1000;
-							Sys.println(Json.stringify({holding: true, id: terminalId, columns: holdColumns, rows: holdRows}));
+							emit(Json.stringify({holding: true, id: terminalId, columns: holdColumns, rows: holdRows}));
 						}, function(error) failure = "resize failed: " + error.code);
 					} else if (holdStep == 6 && clock() >= holdUntil) done = true;
 				case "prompt":
@@ -328,12 +328,21 @@ class MobilePairingAdminMain {
 		if (mode == "prompt") {
 			var items:Array<Dynamic> = [];
 			if (view != null && view.items != null) items = view.items;
-			Sys.println(Json.stringify({session: sessionId, replied: done, activity: view == null ? null : view.activity,
+			emit(Json.stringify({session: sessionId, replied: done, activity: view == null ? null : view.activity,
 				items: [for (item in items) {kind: item.kind, text: item.text}]}));
 		}
 		if (failure != null) throw failure;
 		if (!done) throw "timed out";
 		return 0;
+	}
+
+	/**
+		One result line, flushed at once. Into a pipe or a file stdout is buffered until exit, and `--hold-control` stays running
+		for its whole hold: unflushed, its "holding" line reached the test host only when the hold had already ended.
+	**/
+	static function emit(line:String):Void {
+		Sys.println(line);
+		Sys.stdout().flush();
 	}
 
 	static function describe(catalog:Dynamic, workspaceId:String, instance:String, groups:Array<Dynamic>, sessions:Array<Dynamic>):Dynamic {
