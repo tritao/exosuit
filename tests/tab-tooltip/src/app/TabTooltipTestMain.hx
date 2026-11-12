@@ -120,17 +120,22 @@ private class EllipsisFixture implements haxeon.ui.core.View {
 
 private class FeedbackFixture implements haxeon.ui.core.View {
 	public var passes:Int = 0;
+	// What the last layout settled on; a rebuild starts from it, as EditorPane does with the width it remembers.
+	var extra:Int = 0;
 	final changes:Int;
 	public function new(changes:Int) this.changes = changes;
 	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
 		var style = new haxeon.ui.LayoutStyle();
-		style.width = haxeon.ui.LayoutAxis.fixed(20);
+		style.width = haxeon.ui.LayoutAxis.fixed(20 + extra);
 		style.height = haxeon.ui.LayoutAxis.fixed(20);
 		var node = new haxeon.ui.core.RenderNode(context.id("feedback-fixture"), haxeon.ui.LayoutVisualKind.Box, style);
 		node.onResolved(function(_) {
 			passes++;
 			if (changes < 0 || passes <= changes) {
-				node.layout.style.width = haxeon.ui.LayoutAxis.fixed(20 + passes % 2);
+				// The node is in the submitted tree by now: announce the in-place edit or the feedback pass does not see it.
+				context.willEditRetained(node);
+				extra = passes % 2;
+				node.layout.style.width = haxeon.ui.LayoutAxis.fixed(20 + extra);
 				context.requestLayoutFeedback();
 			}
 		});
