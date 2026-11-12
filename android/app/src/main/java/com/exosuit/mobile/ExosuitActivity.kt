@@ -317,8 +317,16 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
      */
     private fun restartProcess() {
         Log.i(TAG, "Activity recreated in a process whose runtime belongs to an earlier instance; restarting the process")
-        startActivity(Intent(this, RestartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(RestartActivity.EXTRA_PID, android.os.Process.myPid()))
+        val restart = Intent(this, RestartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(RestartActivity.EXTRA_PID, android.os.Process.myPid())
+        // A test rig's commands (pairing_url, clipboard_text) came with the launch that is being recreated: the new process
+        // gets them again (and applies the same automation.on gate), or a recreation right after `am start` loses them.
+        if (automated()) {
+            val commands = Bundle()
+            for (key in RIG_EXTRAS) intent?.getStringExtra(key)?.let { commands.putString(key, it) }
+            if (!commands.isEmpty) restart.putExtra(RestartActivity.EXTRA_LAUNCH, commands)
+        }
+        startActivity(restart)
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
@@ -343,6 +351,8 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     private companion object {
         const val TAG = "Exosuit"
         const val REQUEST_SAVE_CREDENTIALS = 1
+        /** Test-rig intent extras (queueIntentCommands) that a process restart carries to the new instance. */
+        val RIG_EXTRAS = listOf("pairing_url", "clipboard_text")
         /** The process's runtime is bound to an Activity instance's views (one per process; see restartProcess). */
         @Volatile var runtimeBound = false
     }

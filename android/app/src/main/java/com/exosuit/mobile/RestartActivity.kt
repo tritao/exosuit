@@ -14,12 +14,16 @@ class RestartActivity : Activity() {
         super.onCreate(state)
         val pid = intent.getIntExtra(EXTRA_PID, -1)
         if (pid > 0 && pid != android.os.Process.myPid()) android.os.Process.killProcess(pid)
-        startActivity(Intent(this, ExosuitActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        val launch = Intent(this, ExosuitActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        intent.getBundleExtra(EXTRA_LAUNCH)?.let { launch.putExtras(it) }
+        startActivity(launch)
         finish()
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     companion object {
         const val EXTRA_PID = "pid"
+        /** The extras of the launch being restarted, given to the new ExosuitActivity (only a test rig's commands). */
+        const val EXTRA_LAUNCH = "launch"
     }
 }
