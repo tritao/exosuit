@@ -73,10 +73,15 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     this.clock = clock;
   }
 
+  var replacing = false;
+
   function rpc():Null < RpcConnection > return disposed ? null : endpoint.rpcConnection();
   function root():Null < String > return endpoint.rootPath();
   function instance():String return endpoint.serviceGeneration();
   function has(capability:String):Bool return endpoint.hasCapability(capability);
+
+  /** The owner is about to drop this connection on purpose and attach another; the next change is not an error. */
+  public function expectReplacement():Void replacing = observedConnection != null;
 
   public function poll():Void {
     var current = rpc();
@@ -87,7 +92,9 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         pendingModels = null;
         cancelled.done(null, "Workspace connection changed");
       }
-      var lost = observedConnection != null;
+      // A connection the user replaced (another workspace, another service) is not one that was lost: nothing to report.
+      var lost = observedConnection != null && !replacing;
+      replacing = false;
       // The connection went away while a send was waiting for its reply: the service may have applied it.
       if (pendingDelivery != null) {
         uncertainAgentDeliveries.set(pendingDelivery, pendingDeliveryAction == null ? "prompt" : pendingDeliveryAction);
@@ -756,7 +763,11 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   function publishLatestAgentView(connection:RpcConnection,id:String,selected:Int,value:AgentView):Void {
     var state=historyWindow(id), previous=agentViews.get(id);
     state.remember(value);
-    if (previous == null || previous.items == null || value.items == null) {
+    // A window that holds only the latest page (no older page loaded, not detached) follows a history that changed
+    // (a session reconnected after a restart reloads its conversation): there is nothing older to lose or reconcile.
+    var onlyLatest=!state.seen.keys().hasNext() && !state.detached && !state.resetRequired;
+    if (previous == null || previous.items == null || value.items == null
+      || (onlyLatest && value.historyEpoch != null && state.epoch != value.historyEpoch)) {
       state.cursor=value.itemsNext; state.epoch=value.historyEpoch; state.seen=[]; state.detached=false; state.resetRequired=false; state.error=null;
       finishAgentRead(id); publishAgentView(id,value); return;
     }

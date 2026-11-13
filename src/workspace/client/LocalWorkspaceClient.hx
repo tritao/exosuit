@@ -54,6 +54,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var choiceRevision:Int = -1;
   /** The attached manager's launcher, from discovery; empty for a manager from before it was reported. */
   var managerLauncher:String = "";
+  /** What a connection made from the descriptor displaced (root, launcher, expected build) until its identity is verified. */
+  var directPrior:Null<{root:Null<String>, launcher:String, build:String}> = null;
   var client:Null<RpcClient>;
   var fileApiConnection:Null<RpcConnection>;
   var fileApiClient:Null<WorkspaceFileClient>;
@@ -74,6 +76,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var verified:Bool = false;
   var wasReady:Bool = false;
   var spawned:Bool = false;
+  /** True while `client` was connected from the service's own descriptor and the launcher has not confirmed it yet. */
+  var direct:Bool = false;
+  /** When the descriptor may be read again. */
+  var directAt:Float = 0;
+  /** Generations a connection from the descriptor, or the launcher, turned down: not tried again in this attachment. */
+  final directRefused:Map<String, Bool> = [];
   var disposed:Bool = false;
   var pairings:Null<PairingList>;
   var pairingsError:Null<String>;
@@ -100,6 +108,15 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var updateRequestPending = false;
   var autoUpdateAttempted = false;
   var recoveringUntil:Float = 0;
+  final events:EventPump;
+  /** Which client the current connection's callbacks act on: the one that made it, or the one it was handed to. */
+  var owner:Null<ConnectionOwner>;
+  /**
+    Told just before this client leaves the service it is ready on (for another folder, workspace or state), while its
+    connection still works: the terminal pool takes that connection over with `handOver`, so terminals of the service
+    the window leaves stay connected.
+  **/
+  public var leaving:Null<LocalWorkspaceClient->Void>;
 
   public function new(
     events:EventPump,
@@ -112,6 +129,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   >,
     ? choices:WorkspaceManagerChoices
   ) {
+    this.events = events;
     this.hub = new NativeRpcHub(events);
     this.processes = processes;
     this.launcher = launcher;
@@ -156,6 +174,16 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     return target != null && (target.folders.indexOf(path) >= 0 || target.scratch == path);
   }
   public function serviceGeneration():String return instance;
+  /**
+    Whether this client is attached (or attaching) to the service a terminal pool would use for `target`, or for the
+    folder `path` when `target` is null: the same workspace or folder on the same state.
+  **/
+  public function attachedTo(target:Null<WorkspaceServiceTarget>, path:String):Bool {
+    if (disposed || error != null || root == null) return false;
+    var active = serviceTarget;
+    if (target == null) return active == null && root == path && stateDir == choices.stateFor(path);
+    return active != null && active.workspace == target.workspace && stateDir == choices.stateFor(target.choiceKey());
+  }
   var terminalEventRouter:Null<WorkspaceTerminalEvents>;
   public function terminalEvents():Null<WorkspaceTerminalEvents> {
     var c = rpc();
@@ -340,9 +368,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     });
   }
   public function remoteAccessStatus():Null<workspace.service.WorkspacePairingProtocol.RemoteAccessStatus> return relayStatus;
-  public function canConfigureRelay():Bool return ready && hasCapability(WorkspacePairingProtocol.STATUS_CAPABILITY);
+  /** Not while a launcher helper runs: the client can be ready from the descriptor before its discover helper exits,
+    and configuring starts a helper of its own. */
+  public function canConfigureRelay():Bool
+    return ready && helper == null && hasCapability(WorkspacePairingProtocol.STATUS_CAPABILITY);
   public function configureRelay(origin:String):Void {
-    if (!canConfigureRelay() || helper != null || relayStatus != null && relayStatus.configured) return;
+    if (!canConfigureRelay() || relayStatus != null && relayStatus.configured) return;
     // Match the transport's origin validation before passing a structured process argument.
     try {
       var endpoint = new workspace.transport.RelayMachineEndpoint(StringTools.trim(origin), "00000000000000000000000000000000");
@@ -558,6 +589,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     selectedTarget = null;
     var canonical:Null<String> = null;
     try canonical = path == null ? null : FileSystem.fullPath(path) catch (failure : Dynamic) {
+      leave();
       selection++;
       stopConnection();
       stopHelper();
@@ -566,6 +598,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       return;
     }
     if (canonical == root && serviceTarget == null) return;
+    leave();
     serviceTarget = null;
     attach(canonical, canonical == null ? null : choices.stateFor(canonical));
   }
@@ -577,6 +610,15 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function selectWorkspace(next:WorkspaceServiceTarget):Void {
     var signature = next.signature();
     if (disposed || signature == selectedTarget) return;
+    // The same workspace's service, already attached: only its folders changed, which the service follows without a
+    // restart (`setServedFolders`). The connection stays, and with it the catalog, the terminals and the sessions.
+    var attached = serviceTarget;
+    if (ready && attached != null && attached.workspace == next.workspace) {
+      selectedTarget = signature;
+      serviceTarget = next;
+      return;
+    }
+    leave();
     selectedTarget = signature;
     selectedPath = null;
     serviceTarget = next;
@@ -608,9 +650,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   /** Starts over on `path`'s manager on `state` (null: the default state). */
   function attach(path:Null<String>, state:Null<String>):Void {
+    leave();
     selection++;
     if (updateHelper != null) processes.release(updateHelper);
     updateHelper = null; updateFailure = null; autoUpdateAttempted = false; recoveringUntil = 0;
+    workbench.expectReplacement();
     stopConnection();
     stopHelper();
     root = path;
@@ -625,10 +669,73 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     wasReady = false;
     spawned = false;
     retryAt = 0;
+    directAt = 0;
+    directRefused.clear();
     if (path == null) return;
     startupDeadline = clock() + 120000;
     ConnectTimeline.mark("attach", timelineName(), path);
-    startHelper("discover");
+    // With no descriptor in the state folder no service runs there, which is all a discovery would report (about 0.2 s
+    // later, as a process of its own): start one at once. A start finds a manager that is already coming up by itself.
+    var directory = descriptorDirectory();
+    if (directory != null && !FileSystem.exists(haxe.io.Path.join([directory, "endpoint.json"])) && canStart()) {
+      spawned = true;
+      startHelper("launch");
+    } else startHelper("discover");
+  }
+
+  /** About to leave the service this client is ready on: `leaving` may take its connection (`handOver`). */
+  function leave():Void {
+    var notify = leaving;
+    if (notify != null && !disposed && ready) notify(this);
+  }
+
+  /**
+    A new client that goes on with this one's attachment on the same live connection: the RPC client, the terminal
+    event router and the catalog replica move to it, so a terminal that reaches the service through it sees the same
+    connection and service generation and keeps its screen and history. This client is left with no connection; the
+    caller attaches it elsewhere next. Null unless this client is ready: the caller then lets a client of its own attach
+    as before. A launcher helper still running (a connection from the descriptor is ready before its discovery answers)
+    stays with this client, which stops it: the service's identity is verified already, and the new client goes without
+    what only the launcher reports (the expected build), as with a launcher that reported none.
+
+    The moved connection stays on this client's transport hub until it reconnects, so this client must outlive it:
+    the window's client does, it is disposed only when the window closes.
+  **/
+  public function handOver():Null<LocalWorkspaceClient> {
+    var link = owner;
+    // Only a connection whose identity is verified moves: root, launcher and build are then committed (`directPrior` is
+    // cleared), never the values a descriptor connection set before its verification.
+    if (disposed || !ready || !verified || directPrior != null || link == null) return null;
+    var next = new LocalWorkspaceClient(events, processes, launcher, clock, environment, choices);
+    next.root = root;
+    next.stateDir = stateDir;
+    // Checked again on its first poll: a new manager choice is what may have made this client leave.
+    next.choiceRevision = -1;
+    next.managerLauncher = managerLauncher;
+    next.expectedBuild = expectedBuild;
+    next.serviceTarget = serviceTarget;
+    var target = serviceTarget;
+    next.selectedTarget = target == null ? null : target.signature();
+    next.selectedPath = target == null ? root : null;
+    next.instance = instance;
+    next.client = client;
+    next.replica = replica;
+    next.terminalEventRouter = terminalEventRouter;
+    next.verified = true;
+    next.wasReady = true;
+    next.autoUpdateAttempted = autoUpdateAttempted;
+    next.deadline = deadline;
+    next.startupDeadline = startupDeadline;
+    next.selection = selection;
+    next.owner = link;
+    link.client = next;
+    owner = null;
+    client = null;
+    replica = null;
+    terminalEventRouter = null;
+    verified = false;
+    ConnectTimeline.mark("handed-over", timelineName());
+    return next;
   }
 
   /**
@@ -636,11 +743,25 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     from another build stays that build's, even after its manager stops.
   **/
   function mayStart():Bool {
-    if (stateDir == null) return true;
-    var name = haxe.io.Path.withoutDirectory(MachineWorkspaces.normalPath(stateDir));
-    if (StringTools.endsWith(name, "-" + MachineWorkspaces.launcherKey(launcher))) return true;
+    if (canStart()) return true;
     fail("The workspace service chosen for this folder has stopped. Choose another in the Machine view.");
     return false;
+  }
+
+  function canStart():Bool {
+    if (stateDir == null) return true;
+    var name = haxe.io.Path.withoutDirectory(MachineWorkspaces.normalPath(stateDir));
+    return StringTools.endsWith(name, "-" + MachineWorkspaces.launcherKey(launcher));
+  }
+
+  /** The state folder of the service this attachment follows: the chosen one, else the default; null with nothing selected. */
+  function descriptorDirectory():Null<String> {
+    var path = root, chosen = stateDir;
+    if (path == null) return null;
+    if (chosen != null) return chosen;
+    var active = serviceTarget;
+    var home = environment == null ? null : environment.get("EXOSUIT_AGENT_STATE_HOME");
+    return LocalServiceDescriptor.defaultStateDirectory(active == null ? null : active.workspace, path, home);
   }
 
   function stateArguments():Array<String> return stateDir == null ? [] : ["--state-dir", stateDir];
@@ -655,6 +776,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   }
 
   function stopConnection():Void {
+    // A descriptor connection that never verified must not leave the descriptor's (possibly stale) root behind.
+    var prior = directPrior;
+    directPrior = null;
+    if (prior != null && !verified) { root = prior.root; managerLauncher = prior.launcher; expectedBuild = prior.build; }
     terminalEventRouter = null;
     lifecycle = null; lifecyclePending = false; lifecycleNext = 0; updateRequestPending = false;
     relayStatus = null; relayStatusPending = false; relayStatusNext = 0;
@@ -662,7 +787,46 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     if (client != null) client.close();
     client = null;
     verified = false;
+    direct = false;
     workbench.poll();
+  }
+
+  /**
+    While the launcher runs, connects to the service its own descriptor names (LocalServiceDescriptor), if there is one:
+    a running service is reached without waiting about a second for the launcher's answer, and a starting one as soon
+    as it listens. The launcher's answer then confirms the connection and adds what only it knows (`confirmDirect`), or
+    replaces it. Nothing here is final: a connection that fails is dropped and the launcher decides, as before.
+  **/
+  function connectFromDescriptor(now:Float):Void {
+    var directory = descriptorDirectory();
+    if (directory == null || now < directAt || helperMode != "discover" && helperMode != "launch") return;
+    directAt = now + 25;
+    var endpoint = LocalServiceDescriptor.read(directory);
+    if (endpoint == null || directRefused.exists(endpoint.generation)) return;
+    if (now < retryAt) return;
+    try {
+      ConnectTimeline.mark("descriptor", timelineName(), helperMode);
+      install(endpoint, true);
+    } catch (failure:Dynamic) {
+      directRefused.set(endpoint.generation, true);
+    }
+  }
+
+  /** A connection made from the descriptor did not work out: forget it and let the launcher's answer decide. */
+  function refuseDirect():Void {
+    if (instance.length > 0) directRefused.set(instance, true);
+    ConnectTimeline.mark("descriptor-refused", timelineName());
+    stopConnection();
+  }
+
+  /** The launcher named the service the window already connected to: keep the connection, take what only the launcher knows. */
+  function confirmDirect(endpoint:LocalWorkspaceEndpoint):Void {
+    direct = false;
+    expectedBuild = endpoint.expectedBuild == null ? "" : endpoint.expectedBuild;
+    managerLauncher = endpoint.launcher == null ? "" : endpoint.launcher;
+    lifecycleNext = 0;
+    pairingsRevision++;
+    ConnectTimeline.mark("descriptor-confirmed", timelineName());
   }
 
   function stopHelper():Void {
@@ -763,13 +927,14 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       directories.push(path);
   }
 
-  function install(endpoint:LocalWorkspaceEndpoint):Void {
+  function install(endpoint:LocalWorkspaceEndpoint, fromDescriptor:Bool = false):Void {
     var path = root;
     if (path == null || endpoint.version != 1 || endpoint.protocol != 1 || endpoint.codec != 1
       || endpoint.workspace != "workspace" || endpoint.generation.length != 32
       || endpoint.socket.length == 0) throw "Invalid workspace discovery descriptor";
     var problem = WorkspaceServiceTarget.endpointProblem(serviceTarget, path, endpoint.workspaceId, endpoint.root);
     if (problem != null) throw problem;
+    directPrior = fromDescriptor ? {root: root, launcher: managerLauncher, build: expectedBuild} : null;
     // A workspace's service keeps the root it started in, which later changes to the workspace's folders do not move.
     if (serviceTarget != null) { root = endpoint.root; path = endpoint.root; }
     var expectedInstance = endpoint.generation, expectedRoot = path, selected = selection;
@@ -796,6 +961,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     caps.push(workspace.service.WorkspaceFoldersProtocol.CAPABILITY);
     deadline = clock() + 12000;
     ConnectTimeline.mark("discovered", timelineName());
+    direct = fromDescriptor;
+    var link = new ConnectionOwner(this);
+    owner = link;
     client = new RpcClient(new NativeRpcConnector(hub,
       NativeRpcHub.local(endpoint.socket)), clock, function() return Math.random(), new RpcPeerOptions(
         "exosuit-editor/1",
@@ -805,48 +973,57 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         262144,
         32,
         1048576
-      ), function(
-        connection,
-        token,
-        _
-      ) {
-      var current = client;
-      if (current == null || selected != selection) return;
-      verified = false;
-      if (current.remoteApplication != "exosuit-agent/1") {
-        fail("Unexpected workspace service");
+      ), function(connection, token, _) link.client.connected(connection, token, expectedInstance, expectedRoot, selected, link),
+      100, 1000, 2000);
+  }
+
+  /**
+    The connection made in `install` (or after it reconnected by itself) completed its handshake: checks the service's
+    identity and restores the catalog. Runs on the client that owns the connection now (`handOver`).
+  **/
+  function connected(connection:RpcConnection, token:Int, expectedInstance:String, expectedRoot:String, selected:Int,
+      link:ConnectionOwner):Void {
+    var current = client;
+    if (current == null || selected != selection) return;
+    verified = false;
+    if (current.remoteApplication != "exosuit-agent/1") {
+      if (direct) refuseDirect() else fail("Unexpected workspace service");
+      return;
+    }
+    connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 2000, function(identity) {
+      if (selected != selection || !current.isCurrent(token)) return;
+      // Another generation means the descriptor was stale (a service restarted on the same pipe, perhaps in another
+      // of its workspace's folders): discover it again. Only the generation it named may disagree about its root.
+      if (identity.instance != expectedInstance) {
+        if (direct) { refuseDirect(); return; }
+        stopConnection();
+        retryAt = clock() + 100;
         return;
       }
-      connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 2000, function(identity) {
-        if (selected != selection || !current.isCurrent(token)) return;
-        // Another generation means the descriptor was stale (a service restarted on the same pipe, perhaps in another
-        // of its workspace's folders): discover it again. Only the generation it named may disagree about its root.
-        if (identity.instance != expectedInstance) {
-          stopConnection();
-          retryAt = clock() + 100;
-          return;
-        }
-        if (identity.workspace != "workspace" || identity.root != expectedRoot) {
-          fail("Workspace service identity mismatch");
-          return;
-        }
-        verified = true;
-        ConnectTimeline.mark("identity-verified", timelineName());
-        var key = choiceKey();
-        if (stateDir != null && key != null) choices.connected(key);
-        deadline = clock() + 6000;
-        spawned = false;
-        var view = replica;
-        if (view != null) view.restore(
-          connection,
-          function() return selected == selection && verified && current.isCurrent(token)
-        );
-      }, function(failure) {
-        if (selected == selection
-          && current.isCurrent(token)) fail("Workspace identity validation failed: " + failure.code);
+      if (identity.workspace != "workspace" || identity.root != expectedRoot) {
+        if (direct) refuseDirect() else fail("Workspace service identity mismatch");
+        return;
       }
+      verified = true;
+      directPrior = null;
+      ConnectTimeline.mark("identity-verified", timelineName());
+      var key = choiceKey();
+      if (stateDir != null && key != null) choices.connected(key);
+      deadline = clock() + 6000;
+      spawned = false;
+      var view = replica;
+      if (view != null) view.restore(
+        connection,
+        function() {
+          var active = link.client;
+          return selected == active.selection && active.verified && current.isCurrent(token);
+        }
       );
-    }, 100, 1000, 2000);
+    }, function(failure) {
+      if (selected != selection || !current.isCurrent(token)) return;
+      if (direct) refuseDirect() else fail("Workspace identity validation failed: " + failure.code);
+    }
+    );
   }
 
   public function poll():Void {
@@ -872,7 +1049,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         fail("Workspace startup helper exceeded its limit");
         return;
       }
-      if (process.running()) return;
+      if (process.running()) {
+        if (client == null) connectFromDescriptor(now);
+        if (client == null) return;
+        pollConnection(now);
+        return;
+      }
       // Drain after exit so the final descriptor cannot be lost to a process-state race.
       output += process.readStdout();
       errors += process.readStderr();
@@ -886,7 +1068,13 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       if (code == 0) {
         try {
           var endpoint:LocalWorkspaceEndpoint = JsonWire.decode(output);
-          install(endpoint);
+          if (direct && client != null && endpoint.generation == instance) confirmDirect(endpoint);
+          else {
+            // The launcher names another service than the one the descriptor led to (which may already be in use):
+            // the connection is replaced, not lost.
+            if (client != null) { workbench.expectReplacement(); stopConnection(); }
+            install(endpoint);
+          }
         } catch (failure:Dynamic) {
           fail(Std.string(failure));
         }
@@ -896,6 +1084,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         pairingsError = message;
         pairingsRevision++;
       } else if (mode == "discover" && code == 4) {
+        // The launcher found no running service: a descriptor still there is a stopped service's.
+        if (direct && instance.length > 0) directRefused.set(instance, true);
+        if (client != null) workbench.expectReplacement();
         spawned = true;
         if (mayStart()) startHelper("launch");
       } else if (mode == "launch" && code == 3) {
@@ -905,16 +1096,24 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       }
       return;
     }
+    pollConnection(now);
+  }
+
+  /** Drives the connection to the service: the handshake, the catalog replica, readiness and its loss. */
+  function pollConnection(now:Float):Void {
     var current = client;
     if (current == null) {
-      if (now >= retryAt) startHelper("discover");
+      if (helper == null && now >= retryAt) startHelper("discover");
       return;
     }
     current.poll();
     workbench.poll();
     if (client != current || error != null) return;
     if (current.state == Closed) {
+      if (direct && !wasReady) { refuseDirect(); return; }
       if (wasReady) {
+        // A dropped descriptor connection is not tried again while the launcher still runs; its answer decides.
+        if (direct && instance.length > 0) directRefused.set(instance, true);
         stopConnection(); retryAt = now + 250;
         if (recoveringUntil == 0) recoveringUntil = now + 120000;
         pairingsRevision++;
@@ -940,7 +1139,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       return;
     }
     if (now >= deadline) {
-      if (!spawned) {
+      if (helper != null) {
+        // Connected from the descriptor but never ready, and the launcher still runs: its answer decides.
+        if (direct) refuseDirect();
+      } else if (!spawned) {
         spawned = true;
         if (mayStart()) startHelper("launch");
       } else {
@@ -962,4 +1164,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     hub.dispose();
     root = null;
   }
+}
+
+/** Which client a connection's callbacks act on; `LocalWorkspaceClient.handOver` moves it to another client. */
+private class ConnectionOwner {
+  public var client:LocalWorkspaceClient;
+  public function new(client:LocalWorkspaceClient) this.client = client;
 }

@@ -576,7 +576,112 @@ class AgentManager {
 		return result.toLowerCase();
 	}
 
+	/** This process's answer: a manager asks when it spawns its service and again when it reports it. */
+	static var knownBuildId:Null<String> = null;
+
 	static function agentBuildId():String {
+		if (knownBuildId == null) knownBuildId = computeBuildId();
+		return knownBuildId;
+	}
+
+	/**
+		A key for the build output the launcher runs: the build's own stamp (`main.hl.build-id`, which the compiler writes
+		with every build) and the names, sizes and times of the files beside the launcher and in `native/<package>`. While it
+		holds, the identity last computed for it stands and no source file is listed. Null when there is no build stamp.
+	**/
+	/** Files of the build identity that are used without a build: a script, a lock, a manifest. */
+	static final buildInputFiles = ["agent/haxeon.json", "haxeon.json", "release.lock", "scripts/run-codex-proxy.py",
+		"scripts/run-agent.py", "agent/naming/claude-session-names.mjs", "agent/naming/package.json", "agent/naming/package-lock.json",
+		"haxeon/vendor/nativekit/CMakeLists.txt"];
+
+	static function outputKey(launcher:String):Null<String> {
+		var stamp = launcher + ".build-id";
+		if (!FileSystem.exists(stamp)) return null;
+		var seen = new haxe.io.BytesBuffer();
+		seen.addString("exosuit-agent-build-output-v2\n" + StringTools.trim(File.getContent(stamp)) + "\n");
+		var directory = Path.directory(launcher);
+		var folders = [directory], native = Path.join([directory, "native"]);
+		if (FileSystem.exists(native) && FileSystem.isDirectory(native)) {
+			folders.push(native);
+			for (name in FileSystem.readDirectory(native)) {
+				var inner = Path.join([native, name]);
+				if (FileSystem.isDirectory(inner)) folders.push(inner);
+			}
+		}
+		for (folder in folders) {
+			var names = FileSystem.readDirectory(folder);
+			names.sort(Reflect.compare);
+			for (name in names) {
+				var path = Path.join([folder, name]);
+				if (FileSystem.isDirectory(path)) continue;
+				var info = FileSystem.metadata(path);
+				if (info == null) throw "unreadable build output: " + path;
+				seen.addString(path + "\t" + info.size + "\t" + info.modified + "\n");
+			}
+		}
+		// Sources the build identity covers but a build does not produce: editing one must not be hidden by this key.
+		var repository = repositoryRoot();
+		if (repository != null) {
+			var inputs = buildInputFiles.copy();
+			var naming = Path.join([repository, "agent", "naming"]);
+			if (FileSystem.exists(naming) && FileSystem.isDirectory(naming))
+				for (name in FileSystem.readDirectory(naming))
+					if (StringTools.endsWith(name, ".mjs") && inputs.indexOf("agent/naming/" + name) < 0) inputs.push("agent/naming/" + name);
+			inputs.sort(Reflect.compare);
+			for (relative in inputs) {
+				var path = Path.join([repository, relative]);
+				if (!FileSystem.exists(path)) {
+					seen.addString(path + "	absent
+");
+					continue;
+				}
+				var info = FileSystem.metadata(path);
+				if (info == null) throw "unreadable build input: " + path;
+				seen.addString(path + "	" + info.size + "	" + info.modified + "
+");
+			}
+		}
+		return hexOf(Sha256.make(seen.getBytes()));
+	}
+
+	/**
+		Every discovery asks, and listing the build's files takes 0.2 to 0.3 s: in a source checkout, while the build output
+		is the one the last identity was computed for, that identity stands. A source edit therefore counts once it is built.
+	**/
+	static function computeBuildId():String {
+		var repository = nonempty(Sys.getEnv("EXOSUIT_AGENT_BUILD_ID_FILE")) == null ? repositoryRoot() : null;
+		var quickPath:Null<String> = null, quickKey:Null<String> = null;
+		if (repository != null) {
+			try {
+				quickKey = outputKey(managerBytecode());
+				if (quickKey != null) {
+					quickPath = Path.join([stateBase(), "build-id.output"]);
+					if (FileSystem.exists(quickPath)) {
+						var lines = File.getContent(quickPath).split("\n");
+						if (lines.length >= 2 && lines[0] == quickKey && isHex(StringTools.trim(lines[1]), 64)) {
+							phase("build output unchanged");
+							return StringTools.trim(lines[1]);
+						}
+					}
+				}
+			} catch (_:Dynamic) {
+				quickPath = null;
+			}
+		}
+		var identity = walkedBuildId();
+		if (quickPath != null && quickKey != null) {
+			var temporary = quickPath + "." + Std.random(1000000000) + ".tmp";
+			try {
+				File.saveContent(temporary, quickKey + "\n" + identity + "\n");
+				FileSystem.rename(temporary, quickPath);
+			} catch (_:Dynamic) {
+				try FileSystem.deleteFile(temporary) catch (_:Dynamic) {}
+			}
+		}
+		return identity;
+	}
+
+	static function walkedBuildId():String {
 		var overridePath = nonempty(Sys.getEnv("EXOSUIT_AGENT_BUILD_ID_FILE"));
 		if (overridePath != null) {
 			var value = StringTools.trim(File.getContent(overridePath));
@@ -587,9 +692,7 @@ class AgentManager {
 		var collector = new BuildFileCollector();
 		var files = collector.files;
 		if (repository != null) {
-			for (relative in ["agent/haxeon.json", "haxeon.json", "release.lock", "scripts/run-codex-proxy.py",
-				"scripts/run-agent.py", "agent/naming/claude-session-names.mjs", "agent/naming/package.json", "agent/naming/package-lock.json",
-				"haxeon/vendor/nativekit/CMakeLists.txt"])
+			for (relative in buildInputFiles)
 				collector.add(Path.join([repository, relative]));
 			for (relative in ["agent/src", "agent/native", "src", "native-packages", "haxeon/src", "haxeon/stdlib",
 				"haxeon/native", "haxeon/packages/platform", "haxeon/packages/credentials", "haxeon/packages/filesystem",
@@ -619,6 +722,7 @@ class AgentManager {
 			collector.collect(Path.join([installRoot, "lib"]), true);
 		}
 		files.sort(Reflect.compare);
+		phase("build files listed");
 		var identityRoot = repository == null ? installRoot : repository;
 		// Hashing every source file takes seconds, and every launcher run (each discovery, each start) asks. A source
 		// checkout therefore keeps the answer keyed by the files' names, sizes and times, which a stat reads in a moment.
@@ -633,6 +737,7 @@ class AgentManager {
 					seen.addString(path + "\t" + info.size + "\t" + info.modified + "\t" + info.changed + "\n");
 				}
 				fingerprint = hexOf(Sha256.make(seen.getBytes()));
+				phase("build files compared");
 				cachePath = Path.join([stateBase(), "build-id.cache"]);
 				if (FileSystem.exists(cachePath)) {
 					var lines = File.getContent(cachePath).split("\n");
@@ -828,7 +933,8 @@ class AgentManager {
 					if (endpoint != null && endpoint.generation == generation) {
 						for (notice in AgentWorkspaceMigration.readNotices(directory)) Sys.stderr().writeString("Workspace start warning: " + notice + "\n");
 						Sys.stderr().flush();
-						emitDiscovery(endpoint, options.wire);
+						// The manager settled the build identity while its service started: no second walk of the build files.
+						emitDiscovery(endpoint, options.wire, recordedBuild(directory, generation));
 						result = 0;
 						complete = true;
 						break;
@@ -906,6 +1012,8 @@ class AgentManager {
 		var idleShutdown = false;
 		var updateShutdown = false;
 		var restartRequested = false;
+		// Why this generation ended, for manager.log: every exit from the loop below names its cause.
+		var stopReason = "unknown";
 		var ready = false;
 		var databaseIdentity:Null<String> = null;
 		var registryRecord:Null<String> = null;
@@ -943,22 +1051,37 @@ class AgentManager {
 			if (Sys.systemName() != "Windows" && socket.length > 100)
 				throw "State directory path is too long for a local socket; use --state-dir";
 			var launcher = managerBytecode();
+			note(logPath, 'service starting: generation $generation, manager pid ${Sys.getPid()}, launcher $launcher');
 			var daemonArgs = [socket, Std.string(port), credentialPath, AgentManagerNative.randomToken().substr(0, 32),
 				database, options.root, generation, Std.string(options.alwaysAvailable ? 0 : options.idleSeconds * 1000)];
 			if (relayBootstrap != null) daemonArgs.push(relayBootstrap);
-			var environment = daemonEnvironment(lock, launcher);
+			var buildPath = Path.join([directory, BUILD_RECORD]);
+			var environment = daemonEnvironment(lock, launcher, buildPath);
 			var keys = [for (key in environment.keys()) key];
 			var values = [for (key in keys) environment.get(key)];
 			var daemon = sys.io.Process.spawn(Sys.executablePath(), [launcher].concat(daemonArgs), options.root, keys, values);
 			child = daemon;
+			// The build identity walks the build's files (0.25 s, seconds when they must be hashed again): it is settled
+			// while the daemon starts, not before. The daemon reads it when first asked, and nobody can ask before the
+			// descriptor is written, below, after this.
+			var settled = generation + "\n" + agentBuildId() + "\n";
+			if (FileSystem.exists(buildPath)) AtomicFile.write(buildPath, settled) else AtomicFile.create(buildPath, settled);
 			var outputBytes = Bytes.alloc(16384), deadline = Sys.time() + 90.0;
+			var startErrors = "";
 			while (true) {
 				// Polled before reading: once the daemon has exited, all it wrote is readable now, so its last lines (an
 				// idle or update stop) are seen before its exit is judged.
 				var status = daemon.pollExit();
 				var output = readAvailable(daemon, outputBytes, false, logPath);
-				copyOutput(daemon, outputBytes, true, logPath);
+				var complaints = readAvailable(daemon, outputBytes, true, logPath, true);
 				pending += output;
+				// A daemon that fails while starting says so on stderr, and on Windows its process can stay behind (seen:
+				// an uncaught exception left it running for the full 90 s). The start fails now, with what it said.
+				if (!ready && startErrors.length < 8192) {
+					startErrors += complaints;
+					var failed = startFailure(startErrors);
+					if (failed != null) throw "The workspace service failed while starting: " + failed;
+				}
 				if (pending.length > MAX_OUTPUT_LINE && pending.indexOf("\n") < 0)
 					throw "Workspace daemon output line exceeds limit";
 				var newline = pending.indexOf("\n");
@@ -995,13 +1118,14 @@ class AgentManager {
 					newline = pending.indexOf("\n");
 				}
 				if (status >= 0) {
-					if (status == 0 && idleShutdown) { exitCode = 0; break; }
-					if (status == 0 && updateShutdown) { restartRequested = true; exitCode = 0; break; }
-					throw 'Workspace daemon exited with status $status';
+					if (status == 0 && idleShutdown) { stopReason = "the service was idle (no clients, terminals or sessions)"; exitCode = 0; break; }
+					if (status == 0 && updateShutdown) { stopReason = "the service restarted itself for an update"; restartRequested = true; exitCode = 0; break; }
+					var said = ready ? null : lastLine(startErrors);
+					throw 'Workspace daemon exited with status $status' + (said == null ? "" : ": " + said);
 				}
-				if (AgentManagerNative.stopRequested()) { exitCode = 0; break; }
-				if (consumeRestartRequest(directory, generation)) { restartRequested = true; exitCode = 0; break; }
-				if (consumeStopRequest(directory, generation)) { exitCode = 0; break; }
+				if (AgentManagerNative.stopRequested()) { stopReason = "the manager got a stop signal (console close, Ctrl+C or logoff)"; exitCode = 0; break; }
+				if (consumeRestartRequest(directory, generation)) { stopReason = "an editor asked for a restart now (Restart workspace service)"; restartRequested = true; exitCode = 0; break; }
+				if (consumeStopRequest(directory, generation)) { stopReason = "a stop request (suit Stop or Quit, or a workspace migration)"; exitCode = 0; break; }
 				if (!ready && Sys.time() >= deadline)
 					throw "Workspace daemon did not become ready";
 				if (ready && AgentManagerNative.fileIdentity(database) != databaseIdentity)
@@ -1010,6 +1134,7 @@ class AgentManager {
 			}
 		} catch (error:Dynamic) {
 			exitCode = 1;
+			stopReason = "failure: " + Std.string(error);
 			if (options.background) {
 				try File.appendContent(logPath, "Workspace startup failed: " + Std.string(error) + "\n") catch (_:Dynamic) {}
 			} else {
@@ -1029,6 +1154,9 @@ class AgentManager {
 				try File.appendContent(logPath, "Workspace daemon handle cleanup failed: " + Std.string(cleanupError) + "\n") catch (_:Dynamic) {}
 			}
 		}
+		// A generation with no such line was killed from outside (Task Manager, a script, suit after its grace period, a crash of
+		// the manager itself): nothing else ends a manager without passing here.
+		note(logPath, 'service stopped: generation $generation, reason: $stopReason' + (ready ? "" : " (it never became ready)"));
 		cleanupEndpoint(endpointPath, generation);
 		if (registryRecord != null) AgentMachine.unregister(registryRecord, generation);
 		suit.SuitClient.unregister();
@@ -1122,9 +1250,14 @@ class AgentManager {
 		}
 	}
 
-	static function daemonEnvironment(lock:AgentManagerNative.AgentLockHandle, launcher:String):Map<String, String> {
+	/** In the state folder: the generation of the service the manager last spawned and, on the next line, its build identity. */
+	static inline final BUILD_RECORD = "service-build.txt";
+
+	static function daemonEnvironment(lock:AgentManagerNative.AgentLockHandle, launcher:String, buildPath:String):Map<String, String> {
 		var environment = new Map<String, String>();
-		environment.set("EXOSUIT_AGENT_BUILD_ID", agentBuildId());
+		environment.set("EXOSUIT_AGENT_BUILD_FILE", buildPath);
+		// One inherited from a service this manager was started under is not this build's.
+		environment.set("EXOSUIT_AGENT_BUILD_ID", "");
 		environment.set("EXOSUIT_AGENT_MANAGED_UPDATES", Sys.getEnv("EXOSUIT_AGENT_MANAGED_UPDATES") == "0" ? "0" : "1");
 		var stableBundle = nonempty(Sys.getEnv("EXOSUIT_STABLE_BUNDLE"));
 		if (stableBundle != null) environment.set("EXOSUIT_STABLE_BUNDLE", stableBundle);
@@ -1186,16 +1319,39 @@ class AgentManager {
 		readAvailable(child, buffer, stderr, logPath);
 	}
 
-	static function readAvailable(child:ChildProcess, buffer:Bytes, stderr:Bool, logPath:String):String {
+	/** The message of an uncaught exception in a daemon's stderr so far (its line must be complete), or null. */
+	static function startFailure(errors:String):Null<String> {
+		var marker = "Uncaught exception: ";
+		var at = errors.indexOf(marker);
+		if (at < 0 || at > 0 && errors.charAt(at - 1) != "\n") return null;
+		var end = errors.indexOf("\n", at);
+		if (end < 0) return null;
+		var message = StringTools.trim(errors.substring(at + marker.length, end));
+		return message.length > 300 ? message.substr(0, 300) + "..." : message;
+	}
+
+	static function lastLine(text:String):Null<String> {
+		var lines = [for (line in text.split("\n")) if (StringTools.trim(line).length > 0) StringTools.trim(line)];
+		if (lines.length == 0) return null;
+		var last = lines[lines.length - 1];
+		return last.length > 300 ? last.substr(0, 300) + "..." : last;
+	}
+
+	static function readAvailable(child:ChildProcess, buffer:Bytes, stderr:Bool, logPath:String, keep:Bool = false):String {
 		var output = "";
 		while (true) {
 			var count = stderr ? child.readStderr(buffer, 0, buffer.length) : child.readStdout(buffer, 0, buffer.length);
 			if (count <= 0) break;
 			var chunk = buffer.sub(0, count).toString();
 			File.appendContent(logPath, chunk);
-			if (!stderr) output += chunk;
+			if (!stderr || keep) output += chunk;
 		}
 		return output;
+	}
+
+	/** One dated line in manager.log saying why a service started or stopped; never fails the manager. */
+	static function note(logPath:String, message:String):Void {
+		try File.appendContent(logPath, workspace.runtime.ServiceLog.line(message) + "\n") catch (_:Dynamic) {}
 	}
 
 	static function prepareLog(path:String):Void {
@@ -1218,8 +1374,22 @@ class AgentManager {
 		} catch (_:Dynamic) {}
 	}
 
-	static function emitDiscovery(endpoint:Dynamic, wire:Bool):Void {
-		Reflect.setField(endpoint, "expectedBuild", agentBuildId());
+	/**
+		The build identity the manager of `generation` recorded (BUILD_RECORD) for the service it spawned, or null. A launcher
+		that started that manager runs the same build, so this is its own identity too, without walking the build files.
+	**/
+	static function recordedBuild(directory:String, generation:Null<String>):Null<String> {
+		if (generation == null) return null;
+		try {
+			var lines = File.getContent(Path.join([directory, BUILD_RECORD])).split("\n");
+			var build = lines.length >= 2 ? StringTools.trim(lines[1]) : "";
+			if (StringTools.trim(lines[0]) == generation && isHex(build, 64)) return build;
+		} catch (_:Dynamic) {}
+		return null;
+	}
+
+	static function emitDiscovery(endpoint:Dynamic, wire:Bool, ?build:String):Void {
+		Reflect.setField(endpoint, "expectedBuild", build != null ? build : agentBuildId());
 		if (!wire) {
 			Sys.println(Json.stringify(endpoint));
 		} else {

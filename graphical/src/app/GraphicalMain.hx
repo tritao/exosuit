@@ -91,6 +91,8 @@ class GraphicalMain {
 	}
 
 	static function open(arguments:Array<String>):Void {
+		// Startup in the connect timeline (seconds since the process began): window, app built, first frame.
+		workspace.client.ConnectTimeline.mark("startup-main");
 		var startupMemory = Sys.getEnv("EXOSUIT_STARTUP_MEMORY_DIR");
 		if (startupMemory != null) StartupMemory.sample(startupMemory, "01-runtime");
 		var pluginManifest:Null<String> = null;
@@ -163,6 +165,7 @@ class GraphicalMain {
 		var reportedFirstFrame = false;
 		var memoryFrames = 0;
 		host.captureReady = function() {
+			workspace.client.ConnectTimeline.markOnce("startup-first-frame", "first-frame");
 			if (inspection != null) inspection.recordFrame();
 			if (startupMemory != null) {
 				memoryFrames++;
@@ -193,6 +196,7 @@ class GraphicalMain {
 			};
 		session = DesktopUiHost.open(host, function(context) {
 			placementReader = context.windowPlacement;
+			workspace.client.ConnectTimeline.mark("window-open");
 			var dark = prefersDark(themeChoice);
 			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
@@ -207,6 +211,7 @@ class GraphicalMain {
 					terminalWorkspaces = new workspace.client.LocalTerminalWorkspacePool(context.events, instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000,
 						function(root) return instance.terminalServiceTarget(root), function() return instance.machineWorkspacesPending());
+					terminalWorkspaces.shared = workspaceClient;
 					instance.attachWorkspace(workspaceClient);
 					instance.attachWorkbench(workspaceClient);
 					instance.attachRemoteAccess(workspaceClient);
@@ -274,6 +279,7 @@ class GraphicalMain {
 			};
 			if (arguments.indexOf("--open-devtools") >= 0) instance.context().commands.execute("devtools.open");
 			app = instance;
+			workspace.client.ConnectTimeline.mark("app-built");
 			if (startupMemory != null) StartupMemory.sample(startupMemory, "02-app-created");
 			return instance;
 		});

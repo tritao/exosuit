@@ -54,6 +54,24 @@ class AutomationProbe {
 		} catch (_:Dynamic) return null;
 	}
 
+	/**
+		A command a test run wrote to `command.txt` in the automation folder, for steps that must not depend on which
+		window is in front (timing runs on a busy desktop): one line, e.g. `open-workspace <id>`. Read once, then deleted;
+		null when automation is off or nothing was written. The app decides what a command does (ExosuitApp.runAutomationCommand).
+	**/
+	public static function takeCommand():Null<String> {
+		var directory = directoryFromEnvironment();
+		if (directory == null) return null;
+		var path = directory + "/command.txt";
+		try {
+			if (!preparePrivateDirectory(directory)) return null;
+			if (!sys.FileSystem.exists(path)) return null;
+			var command = StringTools.trim(sys.io.File.getContent(path));
+			sys.FileSystem.deleteFile(path);
+			return command.length == 0 ? null : command;
+		} catch (_:Dynamic) return null;
+	}
+
 	public function new(directory:String, ui:UiContext, state:Void->Dynamic) {
 		this.directory = directory; this.ui = ui; this.state = state;
 		// The snapshot holds the app's state and file names: the folder is owner-only, or nothing is written.

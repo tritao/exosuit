@@ -100,11 +100,28 @@ class AttachmentTestMain {
         try missing.pollEvents(function(_) {}) catch (_:Dynamic) {}
       }
       require(missing.controlStatus().indexOf("Terminal unavailable:") == 0, "Missing restored terminal still shows connecting");
+      // A failed view offers a retry, which asks the service again instead of staying failed until the pane is reopened.
+      require(missing.controlAction() == "Retry", "A failed terminal offered no retry");
+      missing.activateControl();
+      require(missing.controlStatus().indexOf("Terminal unavailable:") != 0 && missing.controlAction() == "", "Retry left the failure in place");
+      deadline = clock() + 5000;
+      while (missing.controlStatus().indexOf("Terminal unavailable:") != 0 && clock() < deadline) {
+        runtime.events.wait(0.005);
+        for (_ in 0...128) if (!runtime.events.poll()) break;
+        pool.poll();
+        try missing.pollEvents(function(_) {}) catch (_:Dynamic) {}
+      }
+      require(missing.controlStatus().indexOf("Terminal unavailable:") == 0 && missing.controlAction() == "Retry", "A retried missing terminal did not report its failure again");
       missing.close();
+      require(missing.controlAction() == "", "A closed view still offered a retry");
       pool.retainRoots([other]);
       require(first.rpcConnection() == null && second.rpcConnection() != null, "Closing one root disconnected another or retained its unused client");
       one.close(); two.close(); pool.dispose(); processes.shutdown(); runtime.dispose();
       Sys.println("PASS: terminals attach to independent workspace daemons and retain endpoints across root switches");
+      return;
+    }
+    if (mode == "terminal-handover") {
+      terminalHandover(runtime, processes, clock, root, launcher);
       return;
     }
     if (mode == "manager-choice") {
@@ -125,6 +142,8 @@ class AttachmentTestMain {
     };
     a.select(root);
     b.select(root);
+    // A new catalog has no groups (ADR 0006), so the folder a client is served from is the service's root, not a first group's.
+    var same = workspace.client.MachineWorkspaces.normalPath;
     var deadline = clock() + 115000;
     if (mode == "relay-persist-inspect") {
       while ((!a.ready || !b.ready) && clock() < deadline) {
@@ -153,7 +172,7 @@ class AttachmentTestMain {
         step();
       }
       require(
-        a.ready && b.ready && a.instance == b.instance && a.view()[0].cwd == sys.FileSystem.fullPath(root),
+        a.ready && b.ready && a.instance == b.instance && same(a.rootPath()) == same(root),
         "Concurrent clients did not attach to one validated daemon"
       );
       if (mode == "update-idle" || mode == "update-busy" || mode == "update-now" || mode == "update-legacy") {
@@ -300,13 +319,17 @@ class AttachmentTestMain {
       }
       if (mode == "remote-setup") {
         var instance = a.instance;
-        deadline = clock() + 5000;
-        while (a.remoteAccessStatus() == null && clock() < deadline) { a.refreshPairings(false); step(); }
+        // The client may be ready from the descriptor while its discover helper still runs; it can configure once that ends.
+        deadline = clock() + 30000;
+        while ((a.remoteAccessStatus() == null || !a.canConfigureRelay()) && clock() < deadline) { a.refreshPairings(false); step(); }
         var initialStatus = a.remoteAccessStatus();
         require(initialStatus != null && !initialStatus.configured && a.canConfigureRelay(),
-          "Connected local daemon did not expose unconfigured remote access");
+          "Connected local daemon did not expose unconfigured remote access: status " + initialStatus + ", can configure " + a.canConfigureRelay());
         a.configureRelay("https://relay.example/path?token=secret");
-        require(a.pairingError() != null && a.ready && b.ready, "Invalid relay address disturbed the workspace");
+        var refused = try { new workspace.transport.RelayMachineEndpoint("https://relay.example/path?token=secret", "00000000000000000000000000000000"); false; } catch (_:Dynamic) true;
+        require(a.pairingError() != null && a.ready && b.ready, "Invalid relay address disturbed the workspace: refusal " + a.pairingError()
+          + ", ready " + a.ready + "/" + b.ready + ", can configure " + a.canConfigureRelay() + ", update busy " + a.serviceUpdateBusy()
+          + ", RelayMachineEndpoint refuses the address " + refused);
         a.configureRelay("https://127.0.0.1:1");
         deadline = clock() + 15000;
         while (clock() < deadline) {
@@ -350,7 +373,7 @@ class AttachmentTestMain {
         step();
       }
       require(
-        b.ready && b.instance != previousInstance && b.view()[0].cwd == sys.FileSystem.fullPath(root + "/other"),
+        b.ready && b.instance != previousInstance && same(b.rootPath()) == same(root + "/other"),
         "Folder switch kept the old catalog"
       );
       b.select(root);
@@ -372,6 +395,60 @@ class AttachmentTestMain {
     require(processes.activeCount() == 0, "Attachment helper leaked");
     runtime.dispose();
 
+  }
+
+  /**
+    A terminal of folder A reaches A's service through the window's own client (the pool's `shared`). The window then
+    opens folder B: the terminal's connection moves to a client of the pool's before the window's client closes it, so
+    the terminal never shows "Connecting to workspace terminal…" and keeps its screen and history (args: root A, launcher;
+    B is A/other).
+  **/
+  static function terminalHandover(runtime:Runtime, processes:ProcessManager, clock:Void->Float, root:String, launcher:String):Void {
+    var first = sys.FileSystem.fullPath(root), second = sys.FileSystem.fullPath(root + "/other");
+    var window = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
+    var pool = new workspace.client.LocalTerminalWorkspacePool(runtime.events, processes, launcher, clock);
+    pool.shared = window;
+    window.select(first);
+    var terminal = new workspace.client.RpcTerminalBackend(function() return pool.endpoint(first), "handover", first, true);
+    var tick = function() {
+      runtime.events.wait(0.005);
+      for (_ in 0...128) if (!runtime.events.poll()) break;
+      window.poll(); pool.poll();
+      terminal.pollEvents(function(_) {});
+    };
+    var deadline = clock() + 90000;
+    while (!(terminal.isAttached() && terminal.isSynchronized()) && clock() < deadline) {
+      require(window.error == null, "Window attachment failed: " + window.error);
+      tick();
+    }
+    require(terminal.isAttached() && terminal.isSynchronized(), "The terminal did not attach: " + terminal.controlStatus());
+    require(pool.endpoint(first) == window, "The terminal did not use the window's client");
+    var connection = window.rpcConnection(), generation = window.serviceGeneration();
+    require(connection != null, "The window's client has no connection");
+
+    window.select(second);
+    var moved = pool.endpoint(first);
+    require(moved != null && moved != window, "The terminal's service was not handed to a client of the pool's");
+    require(moved.rpcConnection() == connection && moved.serviceGeneration() == generation,
+      "The handed-over client does not hold the window's connection");
+    function steady(when:String):Void {
+      require(pool.endpoint(first) == moved, "The terminal's client changed " + when);
+      require(terminal.isAttached() && terminal.isSynchronized(), "The terminal reported " + terminal.controlStatus() + " " + when);
+      require(moved.rpcConnection() == connection, "The terminal's connection was replaced " + when);
+    }
+    steady("right after the window left");
+    deadline = clock() + 90000;
+    while (!(window.ready && window.rootPath() == second) && clock() < deadline) {
+      require(window.error == null, "Window attachment to B failed: " + window.error);
+      tick();
+      steady("while the window opened B");
+    }
+    require(window.ready && window.rootPath() == second, "The window did not open B");
+    require(window.rpcConnection() != connection, "The window kept A's connection");
+    deadline = clock() + 1500;
+    while (clock() < deadline) { tick(); steady("after the window opened B"); }
+    terminal.close(); pool.dispose(); window.dispose(); processes.shutdown(); runtime.dispose();
+    Sys.println("PASS: a terminal attached through the window's client keeps its connection and history when the window opens another folder");
   }
 
   /**

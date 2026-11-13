@@ -5,7 +5,8 @@ scenario starts with. Writes ENV.json (environment for the editor) and prints no
 
 A scenario module may define FIXTURE = {"workspaces": ["alpha", "beta"], "open": "alpha"} (and "env": {NAME: value} and "settings": {preference: value} for the editor): each name is a folder under
 RUNDIR/fixture holding a1.txt, a2.txt, ... and becomes a suit workspace called Alpha, Beta, ...; `open` is the folder
-the editor starts in. Nothing here touches the user's suit, agent state, scratch folders or sessions: every root is under
+the editor starts in. A module may also define prepare(out, root, env), called after the state folders exist and before suit
+starts, to seed them (ws_open_real copies a saved state there). Nothing here touches the user's suit, agent state, scratch folders or sessions: every root is under
 RUNDIR, and suit runs in `isolated` mode with its own home."""
 import importlib.util
 import json
@@ -49,6 +50,8 @@ def main():
         (out / key).mkdir(parents=True, exist_ok=True)
     if fixture.get("settings"):  # preference values the editor starts with, e.g. {"workbench/agents/session_mode": "integrated"}
         (out / "state" / "settings.json").write_text(json.dumps({"values": fixture["settings"]}))
+    if hasattr(module, "prepare"):
+        module.prepare(out, root, env)
     folders = {}
     for name in fixture["workspaces"]:
         folder = out / "fixture" / name

@@ -75,6 +75,8 @@ class WorkspaceFileLoader {
 				jobs.remove(job.id);
 				completedReads++;
 				lastReadMs = (Sys.time() - started) * 1000;
+				// A document tab's (or a preview's) contents read from the workspace service, in the connect timeline.
+				workspace.client.ConnectTimeline.mark("tab-file-read", null, job.key + (result.error == null ? "" : " failed") + " " + Std.int(lastReadMs) + " ms");
 				if (job.epoch == epoch && result.error == null && result.contents != null && result.revision != null)
 					remember(job.key, result);
 				for (listener in job.listeners) if (listener.wanted()) listener.complete(result);

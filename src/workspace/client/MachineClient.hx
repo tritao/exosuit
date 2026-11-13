@@ -66,6 +66,26 @@ class MachineClient {
 		hub = new NativeRpcHub(events);
 		this.clock = clock;
 		enabled = SuitClient.current() != Off;
+		if (enabled)
+			seedFromCatalog();
+	}
+
+	/**
+		Starts from suit's saved catalog (the file suit keeps it in), so the window can open its last workspace and show the
+		tree before suit's first reply (0.45 s or more, seconds when suit must start first). The reply replaces it, and
+		with it adds the services, which the file does not hold. A missing or unreadable file leaves the machine unknown.
+	**/
+	function seedFromCatalog():Void {
+		try {
+			var path = MachineCatalog.file();
+			if (!sys.FileSystem.exists(path))
+				return;
+			machine = MachineCatalog.decode(sys.io.File.getContent(path));
+			revision++;
+			ConnectTimeline.mark("machine-seeded", null, machine.workspaces.length + " workspaces");
+		} catch (_:Dynamic) {
+			machine = null;
+		}
 	}
 
 	public function refresh():Void {

@@ -195,6 +195,12 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		watchingChanges = false;
 	}
 
+	/** Whether the root's first listing has come (the tree shows the workspace's files, not "Loading"). */
+	public function rootListed():Bool {
+		var listing = listings.get(pathForKey(rootKey()));
+		return listing != null && listing.loaded;
+	}
+
 	public function childCount(parentKey:String):Int {
 		var special = specialLabels.get(parentKey);
 		if (special != null) return 0;

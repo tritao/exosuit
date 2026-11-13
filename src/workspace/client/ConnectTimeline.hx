@@ -36,6 +36,10 @@ class ConnectTimeline {
 		mark(event, workspace, detail);
 	}
 
+	/** Whether `markOnce` recorded `key` (and it was not rearmed since). */
+	public static function marked(key:String):Bool
+		return once.exists(key);
+
 	/** Forgets that `key` was marked, so its next markOnce records again (a state that begins anew). */
 	public static function rearm(key:String):Void
 		once.remove(key);
