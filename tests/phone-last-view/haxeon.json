@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-phone-last-view-test"},
+  "entry": "app.PhoneLastViewTestMain",
+  "sourceRoots": ["src", "../terminal-context-menu/src", "../../android/haxe/src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

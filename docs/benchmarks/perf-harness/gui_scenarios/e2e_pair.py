@@ -88,7 +88,9 @@ class Phone:
 
     def ensure_automation(self):
         """The debug app writes the snapshot only when files/automation.on existed at launch (ExosuitActivity), so a
-        rig paired without it is relaunched once; it reconnects from its stored credentials."""
+        rig paired without it is relaunched once; it reconnects from its stored credentials. The marker is left in place
+        on purpose: the persistent rig needs it for the next step. The rig's keeper removes it when the rig stops
+        (Stop-Rig in scripts/e2e-local.ps1), also when a step failed."""
         if self.snapshot():
             return
         self.run("shell", "run-as", "com.exosuit.mobile", "touch", "files/automation.on")
@@ -549,9 +551,11 @@ def step_coldstart(gui, ctx):
 
 
 def step_recontrol(gui, ctx):
-    """A phone that held control of the terminal gets it back after the app was killed (nobody else took it). Precondition: the
-    phone shows the Claude terminal and controls it. Kills and starts the app; there must be no Take control button, and an
-    extra key must reach the fake TUI."""
+    """A phone that held control of the terminal asks before taking it back after the app was killed. Precondition: the phone
+    shows the Claude terminal and controls it. Kills and starts the app. When another client (the editor) took the freed lease,
+    the phone must come back read only with the question (Take control / Not now) and must not have taken control by itself;
+    Take control then gives it back. When nobody took the lease the phone controls at once and there is no strip. Either
+    way an extra key must reach the fake TUI at the end."""
     phone, config = ctx["phone"], ctx["config"]
     phone.ensure_automation()
     if phone.wait_element(r"^S-Tab$", 10) is None or phone.elements(r"^Take control$")[0]:
@@ -568,8 +572,24 @@ def step_recontrol(gui, ctx):
     time.sleep(3)
     phone.shot("rc-2-after-kill")
     if phone.elements(r"^Take control$")[0]:
-        phone.shot("failure-observer-after-kill")
-        raise Failure("the phone came back as an observer (Take control is offered)")
+        if not phone.elements(r"^Not now$")[0]:
+            phone.shot("failure-observer-without-question")
+            raise Failure("the phone came back as an observer without the Take control back? question (no Not now button)")
+        # The question must stay until it is answered: nothing takes control meanwhile.
+        time.sleep(5)
+        if not phone.elements(r"^Not now$")[0]:
+            phone.shot("failure-question-went-away")
+            raise Failure("the Take control back? question went away without an answer")
+        log("the phone came back read only and asks before taking control back")
+        phone.tap_element(r"^Take control$", 10, after=1)
+        end = time.monotonic() + 10
+        while time.monotonic() < end and phone.elements(r"^Take control$")[0]:
+            time.sleep(0.5)
+        phone.shot("rc-3-after-take-control")
+        if phone.elements(r"^Take control$")[0]:
+            raise Failure("the strip did not go away within 10 s of Take control")
+    else:
+        log("nobody took the lease while the phone was gone: it controls the terminal again without a question")
     before = len(fake_key_lines(config))
     phone.tap_element(r"^↑$", 10, after=0)
     end = time.monotonic() + 15

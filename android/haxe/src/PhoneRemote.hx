@@ -36,7 +36,7 @@ import workspace.transport.RelayDeviceTransport;
 	  ExosuitApp as the attachment (files, terminals, the Workbench's `RpcWorkspaceWorkbenchClient`); with none open, the
 	  attachment is empty and the Remote panel lists machines and their workspaces.
 **/
-class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint {
+class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements PhoneViewSource {
 	static inline final NOT_PAIRED = "Paste the one-time pairing URL from the machine's Remote Access panel to pair this phone.";
 	/** A pairing gives up after this long: past the invitation's lifetime and both of the machine's pairing windows. */
 	static inline final PAIRING_MILLISECONDS:Float = 600000;
@@ -363,6 +363,25 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 		open = new PhoneWorkspace(machine.machine, workspace, clock);
 		consumedCatalog = -1;
 		touch();
+	}
+
+	public function openView():Null<{machine:String, workspace:String}> {
+		var current = open, machine = openMachine;
+		return current == null || machine == null ? null : {machine: machine.device.machineId, workspace: current.id};
+	}
+
+	public function reopen(machineId:String, workspace:String):PhoneViewSource.PhoneReopen {
+		var machine:Null<PhoneMachine> = null;
+		for (candidate in machines) if (candidate.device.machineId == machineId) machine = candidate;
+		if (machine == null) return PhoneViewSource.PhoneReopen.Gone;
+		if (machine.machine.directory == null) return PhoneViewSource.PhoneReopen.Waiting;
+		var current = open;
+		if (current == null) {
+			if (machine.machine.workspaceById(workspace) == null) return PhoneViewSource.PhoneReopen.Gone;
+			openWorkspace(machine, workspace);
+			return PhoneViewSource.PhoneReopen.Waiting;
+		}
+		return current.id == workspace ? PhoneViewSource.PhoneReopen.Open : PhoneViewSource.PhoneReopen.Gone;   // else the user chose something else meanwhile
 	}
 
 	/** Detaches the open workspace (its stream closes); the machines stay connected. */

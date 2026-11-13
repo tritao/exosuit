@@ -3,6 +3,7 @@ import sys.FileSystem;
 import sys.io.File;
 import ui.ExosuitApp;
 import ui.UiEditorTabs;
+import PhoneViewSource.PhoneReopen;
 
 /**
 	Remembers the phone's last view (machine, workspace, and the terminal or session that was open) in the app's
@@ -11,23 +12,25 @@ import ui.UiEditorTabs;
 	Polled once per frame. While a saved view is waiting to be restored nothing is written, so a start that never
 	reaches the target does not overwrite it; once the restore finished (or gave up) the view that is on screen is
 	what gets saved, and leaving the workspace clears it.
+
+	The saved view also says whether this phone controlled the terminal. A reopened terminal never takes control from
+	another client by itself: when the phone held control before, its pane asks "Take control back?" (Take control /
+	Not now) and the person decides. A phone that was an observer comes back as one, with no question.
 **/
 class PhoneLastView {
 	/** Seconds a restore waits for the machine, its directory and the workspace catalog before giving up. */
 	static inline final RESTORE_SECONDS = 40.0;
 
 	final path:String;
-	final remote:PhoneRemote;
+	final remote:PhoneViewSource;
 	final app:ExosuitApp;
 	final clock:Void->Float;
 	var pending:Null<{machine:String, workspace:String, kind:String, id:String, controlling:Bool}>;
-	/** A restored terminal that was controlled by this phone when it was killed: control is asked back once it is attached. */
-	var reclaiming:Null<{id:String, since:Float}>;
 	var startedAt = -1.0;
 	var saved = "";
 	var terminalShown = false;
 
-	public function new(filesRoot:String, remote:PhoneRemote, app:ExosuitApp, clock:Void->Float) {
+	public function new(filesRoot:String, remote:PhoneViewSource, app:ExosuitApp, clock:Void->Float) {
 		this.path = filesRoot + "/last-view.json";
 		this.remote = remote;
 		this.app = app;
@@ -47,10 +50,7 @@ class PhoneLastView {
 	public function poll():Void {
 		releaseKeyboard();
 		if (pending != null) restore();
-		else {
-			reclaim();
-			save();
-		}
+		else save();
 	}
 
 	/** Closing the terminal view must close the soft keyboard: the terminal's blur does not run when its view leaves the tree. */
@@ -63,22 +63,12 @@ class PhoneLastView {
 
 	function give_up():Void pending = null;
 
-	/** Seconds the restored terminal gets to attach before control is no longer asked for. */
-	static inline final RECLAIM_SECONDS = 30.0;
-
-	/** The terminal the phone controlled before it was killed asks for control back once. Someone else may hold it by now (the
-	    editor claims a free lease); that client keeps its own pane's Take control, and this phone is the one whose person came back. */
-	function reclaim():Void {
-		var wanted = reclaiming;
-		if (wanted == null) return;
-		var tab = app.host.activeTab();
-		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
-		if (clock() - wanted.since > RECLAIM_SECONDS * 1000 || terminal == null || terminal.resourceId != wanted.id) {
-			reclaiming = null;
-			return;
-		}
-		if (Std.isOfType(terminal.panel, ui.TerminalPane) && !cast(terminal.panel, ui.TerminalPane).reclaimControl()) return;
-		reclaiming = null;
+	/** The pane of an open workspace terminal, wherever it is shown: an editor tab, or the terminal panel when the Workbench
+	    was not the sidebar's page as it opened. */
+	function terminalPane(id:String):Null<ui.TerminalPane> {
+		for (tab in app.host.allTerminalTabs())
+			if (tab.remote && !tab.disposed && tab.resourceId == id && Std.isOfType(tab.panel, ui.TerminalPane)) return cast tab.panel;
+		return null;
 	}
 
 	function restore():Void {
@@ -86,17 +76,11 @@ class PhoneLastView {
 		if (wanted == null) return;
 		if (startedAt < 0) startedAt = clock();
 		if (clock() - startedAt > RESTORE_SECONDS * 1000) return give_up();
-		var machine:Null<PhoneMachine> = null;
-		for (candidate in remote.machines) if (candidate.device.machineId == wanted.machine) machine = candidate;
-		if (machine == null) return give_up();
-		var directory = machine.machine.directory;
-		if (directory == null) return;
-		if (remote.open == null) {
-			if (machine.machine.workspaceById(wanted.workspace) == null) return give_up();
-			remote.openWorkspace(machine, wanted.workspace);
-			return;
+		switch remote.reopen(wanted.machine, wanted.workspace) {
+			case Gone: return give_up();
+			case Waiting: return;
+			case Open:
 		}
-		if (remote.open.id != wanted.workspace) return give_up();   // the user chose something else meanwhile
 		if (wanted.kind == "") return give_up();
 		var client = remote.workbenchService();
 		if (wanted.kind == "terminal") {
@@ -104,7 +88,9 @@ class PhoneLastView {
 			if (catalog == null || !client.canReadTerminals()) return;
 			for (record in catalog.terminals) if (record.id == wanted.id) {
 				if (app.openCatalogTerminal(record)) {
-					if (wanted.controlling) reclaiming = {id: wanted.id, since: clock()};
+					// It opens as any terminal does. If another client took control while this phone was gone, the person is asked.
+					var pane = wanted.controlling ? terminalPane(wanted.id) : null;
+					if (pane != null) pane.offerControlBack();
 					give_up();
 				}
 				return;
@@ -122,10 +108,9 @@ class PhoneLastView {
 	}
 
 	function save():Void {
-		var open = remote.open;
-		var machine = remote.openMachine;
+		var open = remote.openView();
 		var text = "";
-		if (open != null && machine != null) {
+		if (open != null) {
 			var kind = "", id = "", controlling = false;
 			var tab = app.host.activeTab();
 			if (tab != null) {
@@ -133,11 +118,15 @@ class PhoneLastView {
 				var agent = UiEditorTabs.agent(tab);
 				if (terminal != null && terminal.remote) {
 					kind = "terminal"; id = terminal.resourceId;
-					controlling = reclaiming != null || Std.isOfType(terminal.panel, ui.TerminalPane) && cast(terminal.panel, ui.TerminalPane).controlling();
+					// An unanswered question counts as control: a phone killed again before the answer asks again.
+					if (Std.isOfType(terminal.panel, ui.TerminalPane)) {
+						var pane:ui.TerminalPane = cast terminal.panel;
+						controlling = pane.controlling() || pane.controlOfferOpen();
+					}
 				}
 				else if (agent != null) { kind = "agent"; id = agent.resource; }
 			}
-			text = Json.stringify({machine: machine.device.machineId, workspace: open.id, kind: kind, id: id, controlling: controlling});
+			text = Json.stringify({machine: open.machine, workspace: open.workspace, kind: kind, id: id, controlling: controlling});
 		}
 		if (text == saved) return;
 		saved = text;

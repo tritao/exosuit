@@ -170,7 +170,7 @@ The Android files are in `android/haxe/src/`:
 - Credentials live in an AES-GCM blob (`credentials.bin`) under a key in the Android Keystore
   (`CredentialVault.kt`). The vault is confined to the main thread; Haxe hands save requests to the host through
   `HostBridge` and `takeRequest()`, and every byte array is wiped after use. The Haxe side receives the decrypted
-  document in the start command only.
+  document in the start command only. A file that does not open, or opens but is not a document this version reads, is never replaced: the next save moves it to `credentials.unreadable-<time>.bin` first. On a later start with no current file (or an empty one), the newest such file that opens again is moved back and used.
 - `TlsTrust.kt` exports the system CA roots to `files/native-tls/android-roots.pem` and calls
   `setenv NK_ANDROID_TLS_CA_FILE` before the first connection. This is implemented but NOT yet exercised against a
   real `wss` relay: the acceptance run uses plain `ws`/`http` to a loopback relay (through `adb reverse`), which
@@ -178,7 +178,8 @@ The Android files are in `android/haxe/src/`:
   Android's default (HTTPS only).
 - Test-rig intent extras (debug builds with `files/automation.on`, which only `adb run-as` can create; the launcher
   activity is exported, so any app can send it extras): `--es pairing_url <url>` starts pairing, `--es clipboard_text <text>` sets the
-  clipboard. There is no extra that opens a workspace: the scripts tap its row in the Remote list by label. No extra confirms a pairing code:
+  clipboard. A `pairing_url` that is not a pairing link is logged (`exosuit-rig: ... refused and ignored`) and shown as the
+  usual pairing error; the app keeps running. There is no extra that opens a workspace: the scripts tap its row in the Remote list by label. No extra confirms a pairing code:
   scripts tap "The code matches" from the automation snapshot.
 
 ### Tests, desktop test host and acceptance run
@@ -246,6 +247,15 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
   and refits the PTY to the phone; the desktop then is the observer. Releasing, or the controller disconnecting, lets
   the other side claim again. The phone is usable either way: as observer it reads and scrolls, as controller it
   types. `mobile-machine-host.py hold-control WORKSPACE TERMINAL` starts a second controlling viewer for tests.
+- **Control after a cold start (decision, 2026-11-12).** A phone whose app was killed reopens its last view
+  (`PhoneLastView`, `files/last-view.json`), and the terminal with it. It does not take control from another client by
+  itself. If the phone held control when it was killed and another client (usually the editor, which claims the freed
+  lease) holds it now, the strip asks "Take control back?" with "Take control" and "Not now". Take control is the
+  usual takeover. Not now leaves the plain read-only strip; the phone then stays an observer until its person presses
+  Take control, also when the other client lets go. A phone that was an observer comes back as one, with no question.
+  When nobody else holds the lease the reopened terminal is controlled at once, as any terminal the phone opens: the
+  service gives a free lease to the view that opens it, and nothing is taken from anyone. The question is kept across
+  another kill until it is answered. Headless check: `tests/phone-last-view`.
 - **Create.** The Workbench menu (chevron) has "New Agent Session...": Claude there creates a Claude Code terminal
   (agent sessions are terminals by default). It needs a control grant; the "+" button makes a terminal of the
   default provider (Codex here, whose fake script is not a terminal program, so it ends at once).
@@ -291,7 +301,7 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
 
 - Emulator: `-gpu host -no-window` is not the default; `swiftshader_indirect` stays (default in `emulator-lib.ps1`, `-Gpu host` is accepted by the acceptance script and renders the app correctly). The emulator now starts with `-cores 2 -memory 3072`.
 - Back at the app's root moves the task to the background; Home, relaunch, and screen off/on resume the drawn UI (the splash hang was an endless loop in `mobile_host_destroy`, fixed in NativeKit).
-- Debug builds with `files/automation.on` write `files/automation/snapshot.json` (labelled elements, app state). `android/scripts/phone-ui.ps1` taps by label from it.
+- Debug builds with `files/automation.on` write `files/automation/snapshot.json` (labelled elements, app state). `android/scripts/phone-ui.ps1` taps by label from it. The rigs remove `automation.on` when they end (`machine-acceptance.ps1` in its `finally`, `e2e-local.ps1` when the rig stops), so a device is not left accepting test-rig extras; a rig that was killed outright can leave it behind until its next `up` and `down`.
 - Pairing race: the phone's `resetPairing` closed the relay channel that the machine connection reuses, and the desktop judged "closed" before reading the phone's confirmation. The phone now lets go of the channel; the desktop reads the confirmation before treating the close as a failure.
 - Large terminal frames: replay records are cut at 24 KB, batches at 48 KB, and `SNAPSHOT` is paged (`offset`/`total`), all under the 65487-byte relay frame.
 - Control strip (re-checked 2026-11-04 on the persistent rig, swiftshader_indirect): not reproduced. With the phone controlling the Claude terminal, the editor's Take control (rig step `takeover`) and a second client (rig step `hold`, the admin tool's `--hold-control`) each made the phone show "Read only · another client controls this terminal" and Take control within 0.1 to 2 s (screenshot and snapshot), and the phone's Take control made the editor read only (step `editor-state`), three cycles, also after a tab switch. The earlier miss was most likely the acceptance script reading a stale automation snapshot (fixed in 83fa94de) or the host-GPU headless emulator not presenting frames; if it comes back, run those rig steps first.
