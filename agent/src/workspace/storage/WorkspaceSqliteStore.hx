@@ -103,18 +103,46 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			});
 
             if (version < 8) transaction(function() {
-                db.exec("CREATE TABLE IF NOT EXISTS workspace_terminal_history (id TEXT PRIMARY KEY REFERENCES workspace_terminals(id) ON DELETE CASCADE, payload BLOB NOT NULL CHECK(length(payload)<=4194432))");
+                db.exec(TERMINAL_HISTORY_TABLE);
                 db.exec("PRAGMA user_version=8");
             });
 			// Check database ownership before extension initialization or orphan cleanup.
 			statement("SELECT workspace FROM workspace_meta WHERE id=1",function(row) {
 				if(!row.step() || row.columnText(0)!=workspace || row.step()) throw "Workspace database identity mismatch";
 			});
+			// After the check: a database that is refused must not have been rewritten.
+			widenTerminalHistory();
 			initializeContentExtension();
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
 		}
+	}
+
+	/**
+		A terminal's saved history: up to 16 MiB of rendered scrollback (TerminalHostProtocol.SCROLLBACK_ROWS lines) in a
+		MessagePack record. The table was made with a 4 MiB bound when scrollback was 1000 lines.
+	**/
+	static inline final TERMINAL_HISTORY_TABLE = "CREATE TABLE IF NOT EXISTS workspace_terminal_history (id TEXT PRIMARY KEY REFERENCES workspace_terminals(id) ON DELETE CASCADE, payload BLOB NOT NULL CHECK(length(payload)<=16777344))";
+
+	/**
+		Remakes a terminal history table that still has the 4 MiB bound with the 16 MiB one, keeping its rows. Without it
+		every history over 4 MiB (a few thousand coloured lines) failed to save, and the service tried again every two
+		seconds for as long as it ran, growing by tens of MB each time. The schema version stays 8: an older daemon
+		reads and writes the wider table as it did the narrow one.
+	**/
+	function widenTerminalHistory():Void {
+		var schema:Null<String> = null;
+		statement("SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_terminal_history'", function(row) {
+			if (row.step()) schema = row.columnText(0);
+		});
+		if (schema == null || schema.indexOf("<=4194432") < 0) return;
+		transaction(function() {
+			db.exec(StringTools.replace(TERMINAL_HISTORY_TABLE, "IF NOT EXISTS workspace_terminal_history", "workspace_terminal_history_wide"));
+			db.exec("INSERT INTO workspace_terminal_history_wide(id,payload) SELECT id,payload FROM workspace_terminal_history");
+			db.exec("DROP TABLE workspace_terminal_history");
+			db.exec("ALTER TABLE workspace_terminal_history_wide RENAME TO workspace_terminal_history");
+		});
 	}
 
 	static function integer(value:Int64):Int {
@@ -433,14 +461,14 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
   var result:Null<workspace.service.TerminalHistory> = null;
   statement("SELECT payload,length(payload) FROM workspace_terminal_history WHERE id=?1", function(row) {
    row.bindText(1,id);
-   if (row.step()) result = MessagePack.decode(blob(row,0,integer(row.columnInt64(1)),4194432));
+   if (row.step()) result = MessagePack.decode(blob(row,0,integer(row.columnInt64(1)),16777344));
   });
   if (result != null) validateTerminalHistory(result);
   return result;
  }
  static function validateTerminalHistory(h:workspace.service.TerminalHistory):Void {
   if (h == null || h.version != 1 || h.columns < 1 || h.columns > 512 || h.rows < 1 || h.rows > 256
-   || h.data == null || h.data.length == 0 || h.data.length > 4194304) throw "Invalid terminal history";
+   || h.data == null || h.data.length == 0 || h.data.length > 16777216) throw "Invalid terminal history";
  }
  public function saveTerminalHistory(id:String, history:workspace.service.TerminalHistory):Void {
   validateTerminalHistory(history);

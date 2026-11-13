@@ -188,10 +188,33 @@ class MachineCatalog {
 		save();
 	}
 
-	/** Removes the workspace from the list; its folders and their services are untouched. */
+	/**
+		Removes the workspace from the list; its folders and their services are untouched. Leaves a removal marker
+		beside machine.json (`removedMarker`): what tells a terminal host with no service that its workspace is gone,
+		where a list that lacks the workspace may only be a damaged or reset catalog.
+	**/
 	public function delete(id:String):Void {
 		state.workspaces.remove(require(id));
 		save();
+		var marker = removedMarker(path, id);
+		if (marker != null)
+			try {
+				createDirectories(Path.directory(marker));
+				sys.io.AtomicFile.write(marker, Json.stringify({version: 1, workspace: id, removedAt: Sys.time()}) + "\n");
+			} catch (_:Dynamic) {}
+	}
+
+	/** Where `delete` records that workspace `id` was removed from the catalog at `catalogFile`; null for an id that is no file name. */
+	public static function removedMarker(catalogFile:String, id:String):Null<String> {
+		if (id == null || !~/^[A-Za-z0-9_-]{1,128}$/.match(id))
+			return null;
+		return Path.join([Path.directory(catalogFile), "removed-workspaces", id + ".json"]);
+	}
+
+	/** Whether workspace `id` was removed from the catalog at `catalogFile` (its removal marker exists). */
+	public static function removed(catalogFile:String, id:String):Bool {
+		var marker = removedMarker(catalogFile, id);
+		return marker != null && FileSystem.exists(marker);
 	}
 
 	public function addFolder(id:String, folder:String):MachineWorkspace {

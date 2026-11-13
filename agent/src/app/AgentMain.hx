@@ -73,6 +73,11 @@ class AgentMain {
 
 	static function main():Void {
 		var args = Sys.args();
+		// A terminal host is not part of any service: it takes no manager's lock and outlives them all.
+		if (args.length > 0 && args[0] == "--terminal-host") {
+			Sys.exit(TerminalHostMain.run(args.slice(1)));
+			return;
+		}
 		AgentManagerNative.guardChildLock();
 		if (args.length > 0 && args[0] == "--manager") {
 			Sys.exit(AgentManager.run(args.slice(1)));
@@ -145,7 +150,10 @@ class AgentMain {
 		// Catalogs from before that still have the seeded "Work" group; its contents move to the workspace (once).
 		if (store != null) store.retireSeedGroup(args[3], directories.root);
 		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
-		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
+		// With hosts on, each terminal's PTY lives in a process of its own that outlives this daemon; a later generation adopts it.
+		var terminalHosts = workspace.runtime.TerminalHosts.create(runtime.events, stateDirectory, Path.join([AgentManager.stateBase(), "terminal-host"]),
+			directories.root, stateWorkspace(stateDirectory));
+		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,WorkspaceTerminalManager.REPLAY_BYTES,store,function() return service.snapshot().groups, terminalHosts, stateDirectory);
 		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");
 		var codexScript = Sys.getEnv("EXOSUIT_CODEX_SCRIPT");
 		var claudeExecutable = Sys.getEnv("EXOSUIT_CLAUDE_BIN");
@@ -163,6 +171,8 @@ class AgentMain {
         var agents = new workspace.provider.WorkspaceAgentService("workspace", args.length >= 7 ? args[6] : args[3],
             directories.root, [codex, claude, pi, agentKit], store,
             args.length >= 5 ? FileSystem.fullPath(args[4]) : FileSystem.fullPath(Path.directory(args[2])));
+		// A chat session's conversation is never a terminal's to resume.
+		terminals.otherConversations = function() return [for (record in agents.records()) record.thread];
 		service.canRemoveGroup = function(group) {
 			for (terminal in terminals.snapshot().terminals) if (terminal.group == group) return false;
 			return agents.groupIsEmpty(group);
@@ -203,14 +213,29 @@ class AgentMain {
 		server.enableCatalog(catalog.bind);
 		server.enableFolders(function(requested) return workspace.runtime.WorkspaceFolderChange.apply(requested, stateDirectory, directories.root, files, scm).folders);
 		var updates = new workspace.service.WorkspaceUpdatePolicy();
+		// The manager settles the build identity while this daemon starts and records it with the generation it spawned
+		// (EXOSUIT_AGENT_BUILD_FILE); it is read when first asked for. EXOSUIT_AGENT_BUILD_ID names it outright.
 		var build = Sys.getEnv("EXOSUIT_AGENT_BUILD_ID");
+		if (build != null && build.length == 0) build = null;
+		var buildFile = Sys.getEnv("EXOSUIT_AGENT_BUILD_FILE");
+		var buildGeneration = args.length >= 7 ? args[6] : "";
+		function settledBuild():String {
+			if (build == null && buildFile != null && buildFile.length > 0) {
+				try {
+					var lines = sys.io.File.getContent(buildFile).split("\n");
+					if (lines.length >= 2 && lines[0] == buildGeneration && StringTools.trim(lines[1]).length > 0) build = StringTools.trim(lines[1]);
+				} catch (_:Dynamic) {}
+			}
+			return build == null ? "unknown" : build;
+		}
 		var updateRequestedAt:Float = 0;
 		var restarting = false;
 		if (Sys.getEnv("EXOSUIT_AGENT_MANAGED_UPDATES") == "1")
 			server.enableLifecycle(function():workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus return {
 				protocol: workspace.service.WorkspaceLifecycleProtocol.VERSION,
-				build: build == null ? "unknown" : build,
-				terminals: terminals.activeCount(), agents: agents.updateActivityCount(), updatePending: updates.pending
+				build: settledBuild(),
+				terminals: terminals.activeCount(), agents: agents.updateActivityCount(), updatePending: updates.pending,
+				keptTerminals: terminals.hostedCount()
 			}, function(mode:String):Bool {
 				if (!updates.request(mode)) return false;
 				updateRequestedAt = clock();
@@ -288,9 +313,12 @@ class AgentMain {
 				restarting = true;
 				break;
 			}
-			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount() + remoteAccess))
+			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount() + remoteAccess,
+				agents.updateActivityCount()))
 				break;
 		}
+		workspace.runtime.ServiceLog.note((restarting ? "service stopping for an update" : "service stopping: idle") + ", "
+			+ terminals.activeCount() + " terminal(s) running, " + terminals.hostedCount() + " of them in hosts that keep them");
 		relayStatus.remove();
 		suit.SuitClient.unregister();
 		if (pairingManager != null)

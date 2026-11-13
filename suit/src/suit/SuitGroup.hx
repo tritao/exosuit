@@ -23,6 +23,9 @@ enum SuitGroup {
 	/** Exosuit's processes that belong to no editor but are still in use. */
 	OtherGroup;
 
+	/** Terminal hosts: terminals kept running without their workspace service. No bulk stop but "End all terminals" ends them. */
+	TerminalsGroup;
+
 	OrphanedGroup;
 
 	/** Found by scanning but not started by exosuit: listed, never included in a bulk stop. */
@@ -35,8 +38,9 @@ class SuitGroups {
 			case EditorGroup(_): 0;
 			case HaxeonGroup: 1;
 			case OtherGroup: 2;
-			case OrphanedGroup: 3;
-			case NotStartedByExosuit: 4;
+			case TerminalsGroup: 3;
+			case OrphanedGroup: 4;
+			case NotStartedByExosuit: 5;
 		};
 	}
 

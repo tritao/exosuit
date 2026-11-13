@@ -10,6 +10,8 @@ import suit.SuitGroup;
 import suit.SuitKind;
 import suit.SuitLineage;
 import suit.SuitPaths;
+import suit.SuitProcessTree;
+import suit.TerminalHostFolder;
 import suit.MachineCatalog;
 
 /**
@@ -27,6 +29,7 @@ class SuitUnitTests {
 
 	static function main():Void {
 		descendantsFollowOnlyExosuitKinds();
+		wholeTreeStopsAtHostsAndEditors();
 		reusedPidKeepsTheOldTargetsChildren();
 		sweepRespectsEnvironment();
 		adoptionNeedsExosuitChainAndEnvironment();
@@ -37,6 +40,9 @@ class SuitUnitTests {
 		temporaryStateIsDisposable();
 		machineCatalog();
 		windowFocus();
+		terminalHosts();
+		terminalHostEndRequests();
+		haxeonClients();
 		failures += MachineRemoteUnitTests.run();
 		if (failures > 0) {
 			Sys.println('FAIL: $failures suit unit check(s)');
@@ -67,6 +73,40 @@ class SuitUnitTests {
 		];
 		var found = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(10, 100, -1));
 		check(found == "11,12", 'a stop kills only exosuit-spawned descendants, got $found');
+	}
+
+	/**
+		An agent provider's whole tree ends with it, deepest first: an MCP server through `cmd /C`, and what that started.
+		A terminal host below a service is not part of the service's tree, nor is anything under it; an editor started below
+		is spared with the processes it runs under, and a reused pid never links.
+	**/
+	static function wholeTreeStopsAtHostsAndEditors():Void {
+		var provider = "claude.exe -p --output-format stream-json --input-format stream-json --permission-prompt-tool stdio";
+		var snapshot = [
+			process(10, 1, 100, "hl.exe", DAEMON),
+			process(11, 10, 110, "claude.exe", provider),
+			process(12, 11, 120, "cmd.exe", "cmd.exe /C npx mcp-server"),
+			process(13, 12, 130, "node.exe", "node.exe mcp-server.js"),
+			process(14, 13, 140, "dev.exe", ""),
+			process(15, 11, 90, "hl.exe", WORKER), // names 11 as parent but started first: an earlier owner of that pid
+			process(20, 10, 200, "hl.exe", "hl.exe C:/s/terminal-hosts/runtime/main.hl --terminal-host C:/s/terminal-hosts/t1"),
+			process(21, 20, 210, "pwsh.exe", ""), // the terminal's shell
+			process(30, 11, 300, "python.exe", "python.exe scripts/run.py"), // an editor the agent started, through run.py
+			process(31, 30, 310, "hl.exe", "hl.exe C:/x/graphical/build/host/main.hl"),
+			process(32, 30, 320, "node.exe", "node.exe watcher.js"), // run.py's other child: no editor below it
+			process(40, 11, 400, "python.exe", "python.exe live.py"),
+			process(41, 40, 410, "hl.exe", "hl.exe C:/x/graphical/build/host/live.hl") // registered editor, read as a live host
+		];
+		var tree = new SuitProcessTree(snapshot, info -> info.pid == 41);
+		var provided = tree.descendants(11, 110, -1);
+		check(pids(provided) == "12,13,14,32", 'a provider ends with its tree but not an editor or what it runs under, got ${pids(provided)}');
+		check(provided.indexOf(snapshot[3]) < provided.indexOf(snapshot[2]) && provided.indexOf(snapshot[4]) < provided.indexOf(snapshot[3]),
+			"the tree is listed deepest first");
+		var served = pids(tree.descendants(10, 100, -1));
+		// The provider runs editors here, so it is spared too: the editors keep what they run under.
+		check(served == "12,13,14,32", 'a service ends with its tree but never with a terminal host or its shell, got $served');
+		check(pids(tree.descendants(20, 200, -1)) == "21", "a terminal host killed by force takes its shell with it");
+		check(tree.descendants(11, 110, 13).length == 2, "the caller and what is below it are never part of the tree");
 	}
 
 	/**
@@ -346,7 +386,7 @@ class SuitUnitTests {
 		sys.FileSystem.createDirectory(state);
 		function record(pid:Int, kind:SuitKind, workspace:Null<String>, stateDir:Null<String>, started:Float, generation:Null<String>):SuitProcess
 			return {pid: pid, started: started, parent: 1, kind: kind, source: Registered, root: null, roots: [], workspace: workspace, workspaces: [],
-				stateDir: stateDir, generation: generation, window: null, context: null, owner: null, commandLine: "", orphaned: false, group: OtherGroup, relay: null};
+				stateDir: stateDir, generation: generation, window: null, context: null, owner: null, commandLine: "", orphaned: false, shared: false, group: OtherGroup, relay: null, terminal: null};
 		function endpoint(pid:Int, generation:String):Void
 			sys.io.File.saveContent(state + "/endpoint.json", "{\"socket\":\"pipe-w1\",\"workspaceId\":\"w1\",\"managerPid\":" + pid + ",\"generation\":\"" + generation + "\"}");
 		var processes = [record(7, Editor, "w1", state, 1, null), record(8, WorkspaceManager, "w2", state, 1, null),
@@ -395,6 +435,116 @@ class SuitUnitTests {
 	static function fails(action:Void->Void):Bool {
 		try action() catch (_:Dynamic) return true;
 		return false;
+	}
+
+	/**
+		A terminal host is its own kind: recognized before the agent's other forms, never orphaned, kept only by the
+		polite quit, not swept with the service that started it, and adopted only on its own folder's word.
+	**/
+	static function terminalHosts():Void {
+		var host = "C:/s/terminal-host/abc/hl.exe C:/s/terminal-host/abc/terminal-host.hl --terminal-host C:/s/workspaces/w1/terminal-hosts/0123";
+		var found = suit.SuitClassifier.classify("hl.exe", host);
+		check(found != null && found.kind == SuitKind.TerminalHost, "a terminal host's command line is a terminal host");
+		check(found != null && found.terminalDir == "C:/s/workspaces/w1/terminal-hosts/0123" && found.stateDir == "C:/s/workspaces/w1",
+			"a terminal host names its folder and its workspace's state folder");
+		var bundled = suit.SuitClassifier.classify("exosuit-agent.exe", "C:/s/terminal-host/abc/exosuit-agent.exe --terminal-host C:/s/workspaces/w1/terminal-hosts/0123");
+		check(bundled != null && bundled.kind == SuitKind.TerminalHost, "a bundle's terminal host is not taken for a workspace service");
+		var manager = suit.SuitClassifier.classify("hl.exe", "hl.exe C:/x/agent/build/host/main.hl --manager C:/root --state-dir C:/s");
+		check(manager != null && manager.kind == SuitKind.WorkspaceManager, "a manager is still a manager");
+		check(SuitKinds.orphanRule(SuitKind.TerminalHost) == Never, "a terminal host is never orphaned");
+		check(SuitKinds.keptByPoliteQuit(SuitKind.TerminalHost) && !SuitKinds.keptByPoliteQuit(SuitKind.WorkspaceHost), "only terminal hosts are kept by the polite quit");
+		check(!SuitKinds.spawnedByExosuit(SuitKind.TerminalHost), "a terminal host is not stopped as part of a service's tree");
+		check(SuitKinds.stop(SuitKind.TerminalHost) == EndRequest && SuitKinds.parse("terminal-host") == SuitKind.TerminalHost, "a terminal host is ended by request");
+		// Stopping the manager sweeps its daemon, never the host the daemon started.
+		var snapshot = [
+			process(10, 1, 100, "hl.exe", "hl.exe C:/x/agent/build/host/main.hl --manager C:/root --state-dir C:/s"),
+			process(11, 10, 110, "hl.exe", DAEMON),
+			process(17, 11, 120, "hl.exe", host, OWN)
+		];
+		var swept = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(10, 100, -1));
+		check(swept == "11", 'stopping a service leaves its terminal hosts, got $swept');
+		var info = process(17, 11, 120, "hl.exe", host, OWN);
+		check(SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", 17, HOME), "a host whose folder names its pid, under this suit, is exosuit's");
+		check(!SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", 18, HOME), "a host whose folder names another pid is not adopted");
+		check(!SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", null, HOME), "a host with no host.json is not adopted");
+		check(!SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", 17, "C:/elsewhere"), "another suit's host is not adopted");
+		check(!SuitInventory.ownsTerminalHost(process(17, 11, 120, "hl.exe", host, ""), "C:/s/workspaces/w1", 17, HOME),
+			"a host whose environment could not be read is not adopted");
+		// What a terminal runs is the user's, even an SDK-mode claude: below a host found by its command line or its pid.
+		var claude = "claude.exe --output-format stream-json --permission-prompt-tool stdio";
+		var terminal = [
+			process(17, 11, 120, "hl.exe", host, OWN),
+			process(18, 17, 130, "claude.exe", claude, OWN),
+			process(19, 18, 140, "node.exe", "node.exe x.js", OWN),
+			process(20, 5, 100, "python.exe", "python.exe stand-in-host.py", OWN),
+			process(21, 20, 110, "claude.exe", claude, OWN),
+			process(22, 11, 150, "claude.exe", claude, OWN) // the daemon's own provider
+		];
+		var lineage = new SuitLineage(terminal.concat([process(11, 10, 110, "hl.exe", DAEMON, OWN)]), HOME);
+		check(lineage.belowTerminalHost(terminal[1], new Map()) && lineage.belowTerminalHost(terminal[2], new Map()),
+			"a terminal's program and what it runs are below its host");
+		check(lineage.belowTerminalHost(terminal[4], [20 => true]), "a host suit knows by pid hides its program too");
+		check(!lineage.belowTerminalHost(terminal[5], [20 => true]), "a daemon's own provider is not below a terminal host");
+		check(suit.SuitReport.keptTerminals(0) == "" && suit.SuitReport.keptTerminals(2).indexOf("2 terminals keep running") == 0, "the polite quit says how many terminals stay");
+	}
+
+	/**
+		Which end request in a host's folder ends which host. A file that cannot be read is no request: read as one for any
+		host, the new host of a restarted terminal ended its fresh program when the old host took the old one's request
+		between the new host's look and its read.
+	**/
+	static function terminalHostEndRequests():Void {
+		check(TerminalHostFolder.endRequestOf(null) == null, "an end request that could not be read is no request");
+		check(TerminalHostFolder.endRequestOf("garbage") == null && TerminalHostFolder.endRequestOf({reason: "no version"}) == null
+			&& TerminalHostFolder.endRequestOf({version: "2", reason: "x"}) == null, "a file that is not an end request is no request");
+		var old = TerminalHostFolder.endRequestOf({version: 1, reason: "old writer", pid: 5});
+		check(old != null && old.reason == "old writer" && TerminalHostFolder.addressedTo(old, 7, "b"), "an older writer's request is for any host");
+		var addressed = TerminalHostFolder.endRequestOf({version: 2, reason: "restart", pid: 5, instance: "a"});
+		check(addressed != null && TerminalHostFolder.addressedTo(addressed, 5, "a") && !TerminalHostFolder.addressedTo(addressed, 7, "b"),
+			"a request names its host by pid and instance");
+		var unknown = TerminalHostFolder.endRequestOf({version: 2, reason: "before host.json"});
+		check(unknown != null && TerminalHostFolder.addressedTo(unknown, 7, "b"), "a request whose writer knew no host is for any host");
+		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
+		var directory = haxe.io.Path.join([temp, "suit-end-request-" + Sys.getPid() + "-" + Std.int(Sys.time())]);
+		sys.FileSystem.createDirectory(directory);
+		var file = haxe.io.Path.join([directory, TerminalHostFolder.END_REQUEST_FILE]);
+		try {
+			check(TerminalHostFolder.endRequest(directory) == null, "no file is no request");
+			sys.io.File.saveContent(file, "{\"version\":2,\"reason\":");
+			check(TerminalHostFolder.endRequest(directory) == null && sys.FileSystem.exists(file), "a half-written request is no request and is left to be read again");
+			sys.io.File.saveContent(file, '{"version":1,"reason":"' + StringTools.lpad("", "x", 20000) + '"}');
+			check(TerminalHostFolder.endRequest(directory) == null, "an end request too large to read is no request");
+			TerminalHostFolder.requestEnd(directory, "restart", 5, "a");
+			var read = TerminalHostFolder.endRequest(directory);
+			check(read != null && read.pid == 5 && read.instance == "a" && !TerminalHostFolder.addressedTo(read, 7, "b"), "a written request reads back for its host only");
+			// Two hosts on one folder (Restart Terminal): a request for the new one leaves the old one's in its own file.
+			TerminalHostFolder.requestEnd(directory, "suit: end terminal", 7, "b");
+			var forOld = TerminalHostFolder.ownEndRequest(directory, 5, "a"), forNew = TerminalHostFolder.ownEndRequest(directory, 7, "b");
+			check(forOld != null && forOld.reason == "restart" && forNew != null && forNew.reason == "suit: end terminal",
+				"a later request for another host does not replace an earlier host's");
+			check(TerminalHostFolder.ownEndRequest(directory, 5, "c") == null && TerminalHostFolder.ownEndRequest(directory, 5, "a") == null,
+				"a request for an earlier process with the same pid is no request and is removed");
+			TerminalHostFolder.clearOwnEndRequest(directory, 7);
+			check(TerminalHostFolder.ownEndRequest(directory, 7, "b") == null, "a taken request is gone");
+		} catch (failure:Dynamic) check(false, "end request files: " + Std.string(failure));
+		for (name in (try sys.FileSystem.readDirectory(directory) catch (_:Dynamic) []))
+			try sys.FileSystem.deleteFile(haxe.io.Path.join([directory, name])) catch (_:Dynamic) {}
+		try sys.FileSystem.deleteDirectory(directory) catch (_:Dynamic) {}
+	}
+
+	/** A Haxeon client and the worker it starts run on one toolchain: the hl.exe folder, compared as paths are. */
+	static function haxeonClients():Void {
+		var cli = "\"C:/w/Haxeon/.tools/hashlink/hl.exe\" C:/w/haxeon/out/haxeon-cli.hl build --project C:/w/agent/haxeon.json";
+		var worker = "\"C:\\w\\haxeon\\.tools\\hashlink\\hl.exe\" C:/Users/u/AppData/Local/haxeon/compiler/abc.hl C:/Users/u/AppData/Local/haxeon/compiler/k.json";
+		var split = suit.SuitClassifier.split;
+		check(suit.SuitClassifier.isHaxeonClient("hl.exe", split(cli)), "a haxeon-cli build is a Haxeon client");
+		check(!suit.SuitClassifier.isHaxeonClient("hl.exe", split(worker)), "a compiler worker is not a client");
+		check(!suit.SuitClassifier.isHaxeonClient("python.exe", split("python.exe scripts/haxeon_cli.py build")), "only HashLink running haxeon-cli.hl is a client");
+		var toolchain = suit.SuitClassifier.toolchainOf(split(cli));
+		check(toolchain != null && toolchain == suit.SuitClassifier.toolchainOf(split(worker)), "a client and its worker share a toolchain");
+		check(toolchain != suit.SuitClassifier.toolchainOf(split("C:/other/haxeon/.tools/hashlink/hl.exe x.hl")), "another checkout's hl.exe is another toolchain");
+		check(suit.SuitClassifier.toolchainOf(split("hl.exe x.hl")) == null && suit.SuitClassifier.toolchainOf([]) == null, "a bare program name names no toolchain");
+		check(suit.SuitClassifier.toolchainOf(split("out/hl.exe x.hl")) == null, "a relative program path names no toolchain");
 	}
 
 	static function check(condition:Bool, message:String):Void {

@@ -50,7 +50,8 @@ class ClaudeNameBridge {
    try {
     var executable=node,helper=script;
     if(helper==null || executable==null) throw "Metadata helper or Node.js is missing";
-    var child=processes.start(executable,[helper,root],root);
+    // The marker lets suit recognise the bridge (suit.SuitKinds.HELPER_MARKER); the helper reads only its first argument.
+    var child=processes.start(executable,[helper,root,suit.SuitKind.SuitKinds.HELPER_MARKER+"claude-name-bridge"],root);
     process=child;transport=new AgentJsonTransport(child,"Claude session metadata");
    } catch(_:Dynamic) {retryAt=clock()+10000;}
   }

@@ -12,6 +12,8 @@ typedef WorkspaceServiceStatus = {
  @:id(3) var terminals:Int;
  @:id(4) var agents:Int;
  @:id(5) var updatePending:Bool;
+ /** How many of `terminals` run in terminal hosts and stay running when the service restarts. Absent from older services: none. */
+ @:optional @:id(6) var keptTerminals:Null<Int>;
 }
 @:wire
 typedef ServiceUpdateRequest = {

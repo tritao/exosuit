@@ -32,6 +32,19 @@ class LocalPtyBackend implements TerminalBackend {
         return new LocalPtyBackend(opened.out_pty);
     }
 
+    /**
+        Starts `program` with exactly `environment` (`NAME=value` entries), nothing inherited: for a terminal host, which
+        is given the environment the terminal's program is to have and whose own differs.
+    **/
+    public static function spawnProgram(program:String, arguments:Array<String>, cwd:Null<String>, environment:Array<String>,
+            columns:Int, rows:Int):LocalPtyBackend {
+        if (columns < 1 || columns > 65535 || rows < 1 || rows > 65535)
+            throw "Terminal size is outside PTY limits";
+        var opened = NativeKit.nk_pty_spawn(program, arguments, cwd, environment, columns, rows);
+        if (opened.status != 0) throw 'PTY spawn failed: ${NativeKit.nk_last_error()}';
+        return new LocalPtyBackend(opened.out_pty);
+    }
+
     public function write(bytes:Bytes):Void {
         ensureOpen();
         if (bytes == null || bytes.length == 0) return;

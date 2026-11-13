@@ -115,7 +115,7 @@ class RpcCompatibilityTests {
 		// A paged-snapshot query writes its optional token and offset as nil; a request from an older client (the bare
 		// terminal target) still decodes, with no token, as a request for the whole snapshot.
 		require(RpcProtocol.encode(Request(1, 119, 1000, snapshotRequest), 4096)
-			.compare(bytes("8104940177cd03e8c40e8501a17702a16903a17404c005c0")) == 0,
+			.compare(bytes("8104940177cd03e8c4108601a17702a16903a17404c005c006c0")) == 0,
 			"Terminal screen snapshot RPC vector changed");
 		var olderQuery = WorkspaceTerminalProtocol.SNAPSHOT.decodeRequest(bytes("8301a17702a16903a174"));
 		require(olderQuery.id == "t" && olderQuery.token == null && olderQuery.offset == null, "An older snapshot request no longer decodes");

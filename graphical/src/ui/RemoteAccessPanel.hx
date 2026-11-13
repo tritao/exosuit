@@ -446,6 +446,13 @@ class RemoteAccessPanel implements View {
 		}
 	}
 
+	/** What "Restart now" costs: terminals in terminal hosts are picked up again by the restarted service, the rest end. */
+	public static function restartWarning(terminals:Int, kept:Int):String {
+		if (kept <= 0) return "Restarting ends active terminal and Codex sessions. Continue?";
+		if (kept >= terminals) return "Restarting ends active Codex sessions. Terminals stay running and reconnect. Continue?";
+		return "Restarting ends active Codex sessions and " + (terminals - kept) + " of " + terminals + " terminals; the others stay running and reconnect. Continue?";
+	}
+
 	public function build(context:BuildContext):RenderNode {
 		var list = client.pairingList();
 		var hasPending = list != null && list.pending.length > 0;
@@ -453,8 +460,10 @@ class RemoteAccessPanel implements View {
 		var service = client.serviceStatus();
 		if (client.serviceUpdateAvailable() || client.serviceUpdateBusy() || service != null && service.updatePending) {
 			rows.push(new KeyedView("update-title", paragraph("Workspace service update available", context)));
+			var kept = service == null || service.keptTerminals == null ? 0 : service.keptTerminals;
 			if (service != null) rows.push(new KeyedView("update-sessions", paragraph(
-				service.terminals + " terminal sessions · " + service.agents + " Codex sessions active", context, true)));
+				service.terminals + " terminal sessions · " + service.agents + " Codex sessions active"
+				+ (kept > 0 ? " · " + (kept >= service.terminals ? "all" : Std.string(kept)) + " terminals stay running through a restart" : ""), context, true)));
 			else rows.push(new KeyedView("update-legacy", paragraph("This older service cannot check session activity safely. A one-time restart is required.", context, true)));
 			if (client.serviceUpdateBusy()) rows.push(new KeyedView("update-preparing", paragraph("Preparing update. Existing sessions remain available.", context, true)));
 			else if (service != null && service.updatePending) {
@@ -466,7 +475,7 @@ class RemoteAccessPanel implements View {
 			if (!client.serviceUpdateBusy()) {
 				if (!confirmRestart) rows.push(new KeyedView("update-now", new Button("Restart now…", null, function() { confirmRestart = true; requestFrame(); }, "service-update-now")));
 				else {
-					rows.push(new KeyedView("update-warning", paragraph("Restarting ends active terminal and Codex sessions. Continue?", context)));
+					rows.push(new KeyedView("update-warning", paragraph(restartWarning(service == null ? 0 : service.terminals, kept), context)));
 					rows.push(new KeyedView("update-confirm", new Button("Restart workspace service", null, function() { confirmRestart = false; client.requestServiceUpdate("now"); requestFrame(); }, "service-update-confirm")));
 					rows.push(new KeyedView("update-keep", new Button("Keep sessions running", null, function() { confirmRestart = false; requestFrame(); }, "service-update-keep")));
 				}

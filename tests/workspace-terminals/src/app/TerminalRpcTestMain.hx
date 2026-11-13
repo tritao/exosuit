@@ -40,6 +40,10 @@ class TerminalRpcTestMain {
     }
 
     var runtime = Runtime.start(), processes = new ProcessManager();
+    if (mode == "host-steal") {
+      TerminalHostTests.steal(runtime, args[3]);
+      processes.shutdown(); runtime.dispose(); return;
+    }
     if (mode == "contracts") {
       TerminalCapabilitiesTests.run();
       TerminalSnapshotTests.run();
@@ -66,6 +70,10 @@ class TerminalRpcTestMain {
     client.select(root);
     if (mode == "history-create" || mode == "history-restore") {
       TerminalHistoryTests.process(client,runtime,root,mode == "history-create");
+      client.dispose(); processes.shutdown(); runtime.dispose(); return;
+    }
+    if (TerminalHostTests.handles(mode)) {
+      TerminalHostTests.run(mode, args, runtime, client, clock);
       client.dispose(); processes.shutdown(); runtime.dispose(); return;
     }
     if(mode=="catalog") {

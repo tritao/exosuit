@@ -33,6 +33,10 @@ class NativeRpcTransport implements MessageTransport {
 	public function isOpen():Bool
 		return connected && !terminal && stream.isOpen();
 
+	/** Why the connection closed (or null when that is not known): this side's reading or framing, or the stream's. */
+	public function failureReason():Null<String>
+		return failure != null ? failure : stream.failure;
+
 	/** The process at the other end of a local transport, from the OS rather than anything it sent; 0 when unknown. */
 	public function peerProcess():Int
 		return stream.peerProcess();

@@ -159,7 +159,14 @@ class RemoteAccessPanelTestMain {
   var confirmation = labels().join("\n");
   require(confirmation.indexOf("Restarting ends active terminal and Codex sessions") >= 0
    && confirmation.indexOf("Restart workspace service") >= 0, "Destructive restart must explain session loss");
+  // Terminals in terminal hosts outlive a restart, so the warning must not claim they end.
+  require(ui.RemoteAccessPanel.restartWarning(2, 0).indexOf("ends active terminal and Codex sessions") >= 0
+   && ui.RemoteAccessPanel.restartWarning(2, 2).indexOf("Terminals stay running") >= 0
+   && ui.RemoteAccessPanel.restartWarning(3, 2).indexOf("1 of 3 terminals") >= 0, "Restart warning does not match what a restart ends");
   panel.confirmRestart = false;
+  fixture.service = {protocol:1, build:"old", terminals:2, agents:1, updatePending:false, keptTerminals:2};
+  require(labels().join("
+").indexOf("all terminals stay running through a restart") >= 0, "Kept terminals are not shown with the update");
   fixture.service = {protocol:1, build:"old", terminals:2, agents:1, updatePending:false};
   require(labels().join("\n").indexOf("Update when idle") >= 0, "Managed daemon must offer safe scheduled update");
   fixture.service.updatePending = true;

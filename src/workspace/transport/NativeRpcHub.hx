@@ -38,6 +38,12 @@ private typedef Pending = {var attempt:NativeAttempt; var done:NativeKitByteStre
 
 /** Observes the shared NativeKit event pump; never steals another subsystem's events. */
 class NativeRpcHub {
+	/**
+		NK_TRANSPORT_ERROR_RECEIVE_OVERFLOW: more arrived than the stream's receive buffer holds while it was not read. A
+		NativeKit stream reads its peer as fast as the peer writes and ends instead of making it wait.
+	**/
+	public static inline final RECEIVE_OVERFLOW = -208;
+
 	final streams:Map<Int, NativeKitByteStream> = [];
 	final pending:Map<Int, Pending> = [];
 	final listeners:Map<Int, {owned:OwnedListenerHandle, callback:NativeRpcTransport->Void}> = [];
@@ -143,6 +149,10 @@ class NativeRpcHub {
 					}
 				} else if (kind == EventKind.TransportFailed || kind == EventKind.TransportClosed) {
 					pending.remove(key);
+					// Why NativeKit ended the stream, for whoever logs the lost connection.
+					var code:Int = result;
+					if (byteStream.failure == null && code != 0)
+						byteStream.failure = code == RECEIVE_OVERFLOW ? "receive_overflow" : "transport_error " + code;
 					if (connecting != null && !connecting.attempt.complete) {
 						pending.remove(key);
 						connecting.attempt.complete = true;

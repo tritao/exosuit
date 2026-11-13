@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='extty-',ignore_cleanup_errors=True) as 
                 run_tree([*RUNNER,mode,str(root),str(MANAGER)],environment)
                 if mode=='create':
                     time.sleep(5)
-                    assert manager.poll() is None,'Active terminal did not keep daemon alive'
+                    assert manager.poll() is None,'Active terminal did not keep daemon alive'+chr(10)+(fixture/'manager.log').read_text()[-5000:]
                     assert json.loads(endpoints()[0].read_text())['generation']==descriptor['generation']
             assert manager.wait(timeout=12)==0,'Exited terminal prevented idle shutdown'
             assert not endpoints()

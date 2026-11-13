@@ -197,6 +197,14 @@ class SuitClient {
 	public static function registerWorkspaceService(kind:SuitKind, workspace:SuitWorkspace):Void
 		writeRecord(kind, workspace);
 
+	/**
+		Registers a terminal host under the workspace whose terminal it keeps (`generation` is unused). A host is
+		detached from the service that started it, so nothing but this record ties it to exosuit. It does not start
+		the daemon: a host must not bring suit back after the user quit it.
+	**/
+	public static function registerTerminalHost(workspace:SuitWorkspace):Void
+		writeRecord(SuitKind.TerminalHost, workspace);
+
 	/** Removes this process's record on a clean exit. Suit also prunes records of processes that are gone. */
 	public static function unregister():Void {
 		if (registeredKind == null)

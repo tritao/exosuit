@@ -121,6 +121,27 @@ class SuitLineage {
 	}
 
 	/**
+		True when `info` runs below a terminal host: a listed ancestor (each link obeying the start order) is in `hosts`
+		(terminal hosts suit knows by pid) or carries `--terminal-host DIR`. What runs in a terminal is the user's program,
+		even when it is of a kind exosuit starts (an SDK-mode claude, a codex app-server): it is never classified or adopted
+		by kind, and its host ends it when the terminal ends. A shell suit does not list (pwsh, bash) hides the host; a
+		process below one is still never adopted, since the shell breaks every chain.
+	**/
+	public function belowTerminalHost(info:ProcessInfo, hosts:Map<Int, Bool>):Bool {
+		var current = info;
+		for (_ in 0...MAX_DEPTH) {
+			var parent = byPid.get(current.parent);
+			if (parent == null || parent.pid == current.pid || !SuitClock.startedBefore(parent.started, current.started))
+				return false;
+			if (hosts.exists(parent.pid)
+				|| parent.commandLine.length > 0 && SuitClassifier.terminalDirectory(SuitClassifier.split(parent.commandLine)) != null)
+				return true;
+			current = parent;
+		}
+		return false;
+	}
+
+	/**
 		suit's adoption policy: true when a process started with this environment (and, for a workspace
 		service, this state directory) registers with the suit at `ownHome`. It applies the mode rule a
 		process applies to itself (SuitClient.modeOf: `off`, or unset with temporary state, is off), then
