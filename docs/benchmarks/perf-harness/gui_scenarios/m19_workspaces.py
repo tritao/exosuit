@@ -33,7 +33,7 @@ def sequence(gui, alpha, folder_start):
     gui.type_text("Gamma")
     gui.chord("enter")
     gamma = gui.wait("Gamma exists", lambda s: (ws(s["state"], "Gamma") or {}).get("id"), 20)
-    gui.check("new workspace Gamma created and opened", lambda s: s["state"]["openWorkspace"] == gamma and s["state"]["groups"] is not None, 40)
+    gui.check("new workspace Gamma created and opened", lambda s: is_attached(s["state"], gamma), 40)
     gui.check("Gamma starts with no tabs", lambda s: tabs(s["state"]) == [])
     gui.check("Gamma's context key names it", lambda s: gamma in s["state"]["context"], detail=lambda s: s["state"]["context"])
     gui.shot("gamma-open")
@@ -42,7 +42,7 @@ def sequence(gui, alpha, folder_start):
     show_workbench(gui)
     gui.click(gui.element("w:" + gamma))
     quick_switch(gui, "Alpha")
-    gui.check("switched to Alpha", lambda s: s["state"]["openWorkspace"] == alpha and s["state"]["groups"] is not None, 40)
+    gui.check("switched to Alpha", lambda s: is_attached(s["state"], alpha), 40)
     gui.check("Alpha's tabs came back (a1.txt, a2.txt)", lambda s: tabs(s["state"]) == ["a1.txt", "a2.txt"],
               detail=lambda s: tabs(s["state"]))
     gui.shot("alpha-back")
@@ -51,7 +51,7 @@ def sequence(gui, alpha, folder_start):
     show_workbench(gui)
     gui.click(gui.element("w:" + alpha))
     gui.chord("ctrl+shift+d")
-    gui.check("previous workspace is Gamma", lambda s: s["state"]["openWorkspace"] == gamma and s["state"]["groups"] is not None, 40)
+    gui.check("previous workspace is Gamma", lambda s: is_attached(s["state"], gamma), 40)
     gui.check("Gamma still has no tabs", lambda s: tabs(s["state"]) == [])
     gui.chord("ctrl+shift+d")
     gui.check("and previous again is Alpha with its tabs", lambda s: s["state"]["openWorkspace"] == alpha and tabs(s["state"]) == ["a1.txt", "a2.txt"], 40,

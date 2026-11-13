@@ -18,7 +18,7 @@ def run(gui):
     alpha, beta = ws(gui.state(), "Alpha")["id"], ws(gui.state(), "Beta")["id"]
     open_by_double_click(gui, beta, "Beta")
     show_workbench(gui)
-    work = gui.wait("Beta's group", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+    work = ensure_group(gui, beta)
     bterm = new_terminal(gui, "g:" + work)
 
     gui.step("move the window to Alpha; Beta keeps running")

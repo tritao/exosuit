@@ -22,7 +22,7 @@ def run(gui):
     time.sleep(1)
     show_workbench(gui)
     dump(gui, "a-opened")
-    gui.click(gui.element("g:work"), button="right")
+    gui.click(gui.element("g:" + ensure_group(gui, alpha)), button="right")
     time.sleep(0.6)
     dump(gui, "b-group-menu")
     gui.chord("esc")

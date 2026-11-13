@@ -33,7 +33,7 @@ def run(gui):
         alpha, beta = ws(gui.state(), "Alpha")["id"], ws(gui.state(), "Beta")["id"]
         open_by_double_click(gui, alpha, "Alpha")
         show_workbench(gui)
-        work = gui.wait("Alpha's group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+        work = ensure_group(gui, alpha)
         gui.check("no other window yet", lambda s: s["state"]["otherWindows"] == [], 5, detail=lambda s: s["state"]["otherWindows"])
 
         gui.step("Open in New Window on Beta's row")
@@ -45,7 +45,7 @@ def run(gui):
                   detail=lambda s: s["state"]["newWindowMs"])
         two = Gui(second_pid, os.path.join(os.path.dirname(gui.dir), "automation-2"), os.path.join(gui.out, "window2"),
                   max(10, gui.deadline - time.monotonic()), 30)
-        two.wait("window 2 attached to Beta", lambda s: s["state"]["openWorkspace"] == beta and s["state"]["groups"] is not None, 40)
+        two.wait("window 2 attached to Beta", lambda s: is_attached(s["state"], beta), 40)
         two.check("window 2 opened on Beta, not on the last workspace", lambda s: s["state"]["contextWorkspace"] == beta, 5,
                   detail=lambda s: s["state"]["context"])
         two.check("window 2 sees window 1 on Alpha", lambda s: others(s["state"], alpha), 10, detail=lambda s: s["state"]["otherWindows"])
@@ -72,7 +72,7 @@ def run(gui):
 
         gui.step("window 2 makes a group in Beta; window 1 sees it")
         two.focus()
-        bwork = two.wait("Beta's group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+        bwork = ensure_group(two, beta)
         before = watched(gui.state(), beta)
         bgroups0 = before["groups"] if before and before["groups"] >= 0 else 0
         create(two, "g:" + bwork, "New group", "Third", "groups")

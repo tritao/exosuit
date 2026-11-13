@@ -27,12 +27,51 @@ def context_tabs(state, workspace_id):
     return names
 
 
+def is_attached(state, workspace_id):
+    """Whether the window has workspace `workspace_id` open with a catalog from that workspace's service. The snapshot's
+    `groups` is a list with or without a catalog, so it says nothing; the Workbench's automation state says it."""
+    workbench = state.get("workbench") or {}
+    return bool(state["openWorkspace"] == workspace_id and workbench.get("catalog")
+                and workbench.get("servedWorkspace") in (None, workspace_id))
+
+
 def attached(gui, name, timeout=60):
-    """Waits until the window is attached to the workspace `name`; returns its id."""
+    """Waits until the window is attached to the workspace `name` and holds its catalog; returns its id."""
     def look(s):
         w = ws(s["state"], name)
-        return w["id"] if w and s["state"]["openWorkspace"] == w["id"] and s["state"]["groups"] is not None else None
+        return w["id"] if w and is_attached(s["state"], w["id"]) else None
     return gui.wait("window attached to workspace " + name, look, timeout, settle=0.5)
+
+
+def menu(gui, row_label, item):
+    """Right-click a row and click a menu item; one retry when the menu did not open (a tooltip can swallow the first click)."""
+    for attempt in range(2):
+        gui.click(gui.element(row_label), button="right")
+        try:
+            target = gui.element(item, role="16", timeout=3)
+            break
+        except Failure:
+            if attempt:
+                raise
+            gui.chord("esc")
+    gui.click(target)
+
+
+def ensure_group(gui, workspace_id, name="Work"):
+    """The id of the group `name` at the root of the open workspace `workspace_id`, made from the workspace row's menu
+    (New Group…, the inline editor, Enter) when the catalog has none: a new workspace has no groups."""
+    def named(s):
+        return next((g["id"] for g in s["state"]["groups"] if g["name"] == name and not g["parent"]), None)
+    gui.wait("catalog of the open workspace", lambda s: is_attached(s["state"], workspace_id), 40, settle=0.5)
+    found = named(gui.snapshot())
+    if found:
+        return found
+    show_workbench(gui)
+    menu(gui, "w:" + workspace_id, "New Group…")
+    time.sleep(0.6)
+    gui.type_text(name)
+    gui.chord("enter")
+    return gui.wait("group %s created at the workspace root" % name, named, 20)
 
 
 def row(gui, key_prefix, index=0, timeout=8.0):

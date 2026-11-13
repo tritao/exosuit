@@ -34,7 +34,8 @@ def create(gui, row_key, item, name, kind):
 
 
 def new_terminal(gui, row_key):
-    """New Terminal... opens a command view ("Open terminal" first); Enter takes it. Returns the new terminal's id."""
+    """New Terminal… on the row `row_key` (the open workspace's row "w:<id>" for a terminal at its root, or a group's
+    row "g:<id>" from ensure_group) opens a command view ("Open terminal" first); Enter takes it. Returns the new terminal's id."""
     before = {t["id"] for t in gui.state()["terminals"]}
     menu(gui, row_key, "New Terminal" + ELLIPSIS)
     time.sleep(0.8)
@@ -49,7 +50,7 @@ def run(gui):
     alpha = ws(gui.state(), "Alpha")["id"]
     open_by_double_click(gui, alpha, "Alpha")
     show_workbench(gui)
-    work = gui.wait("group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+    work = ensure_group(gui, alpha)
 
     gui.step("groups and sessions from the menus")
     create(gui, "g:" + work, "New group", "Second", "groups")

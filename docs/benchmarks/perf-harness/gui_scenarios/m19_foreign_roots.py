@@ -36,7 +36,7 @@ def run(gui):
     gui.step("Alpha with a terminal tab")
     open_by_double_click(gui, alpha, "Alpha")
     show_workbench(gui)
-    work = gui.wait("Alpha's group", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+    work = ensure_group(gui, alpha)
     term = new_terminal(gui, "g:" + work)
     only(gui, "Alpha", "Alpha", os.path.join(fixture, "alpha"))
     gui.shot("alpha")

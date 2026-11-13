@@ -51,7 +51,7 @@ def run(gui):
     alpha = ws(gui.state(), "Alpha")["id"]
     open_by_double_click(gui, alpha, "Alpha")
     show_workbench(gui)
-    work = gui.wait("group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+    work = ensure_group(gui, alpha)
     root_key = current(gui)
 
     gui.step("setup: six sub-groups of Work, each entered by the quick switch and given a document")

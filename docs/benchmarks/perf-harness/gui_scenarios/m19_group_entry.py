@@ -16,7 +16,7 @@ def run(gui):
     alpha = ws(gui.state(), "Alpha")["id"]
     open_by_double_click(gui, alpha, "Alpha")
     show_workbench(gui)
-    work = gui.wait("group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+    work = ensure_group(gui, alpha)
     root_key = gui.state()["context"]
     gui.check("the window starts in the workspace root context", lambda s: s["state"]["context"] == root_key and not s["state"]["context"].endswith("/" + work), 5)
 

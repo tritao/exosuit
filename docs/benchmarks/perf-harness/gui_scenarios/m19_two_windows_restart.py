@@ -73,7 +73,7 @@ def run(gui):
         alpha = ws(gui.state(), "Alpha")["id"]
         open_by_double_click(gui, alpha, "Alpha")
         show_workbench(gui)
-        work = gui.wait("Alpha's group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+        work = ensure_group(gui, alpha)
         create(gui, "g:" + work, "New group", "Second", "groups")
         create(gui, "g:" + work, "New group", "Third", "groups")
         second = next(g["id"] for g in gui.state()["groups"] if g["name"] == "Second")
@@ -92,7 +92,7 @@ def run(gui):
             pids.append(pid)
             folder = os.path.join(out_dir, "automation-2" if index == 0 else "automation-2-2")
             window = Gui(pid, folder, os.path.join(gui.out, "window" + name), max(10, gui.deadline - time.monotonic()), 30)
-            window.wait("window %s attached" % name, lambda s: s["state"]["openWorkspace"] == alpha and s["state"]["groups"] is not None, 40)
+            window.wait("window %s attached" % name, lambda s: is_attached(s["state"], alpha), 40)
             windows.append(window)
         a, b = windows
 
@@ -137,7 +137,7 @@ def run(gui):
         process = subprocess.Popen(arguments, env=env, cwd=root, stdout=log, stderr=subprocess.STDOUT, creationflags=0x08000000)
         pids.append(process.pid)
         r = Gui(process.pid, os.path.join(out_dir, "automation-restart"), os.path.join(gui.out, "windowR"), max(10, gui.deadline - time.monotonic()), 25)
-        r.wait("restarted editor attached", lambda s: s["state"]["openWorkspace"] == alpha and s["state"]["groups"] is not None, 40)
+        r.wait("restarted editor attached", lambda s: is_attached(s["state"], alpha), 40)
         r.check("the restarted editor opens on the group Second (B closed last)", lambda s: s["state"]["context"].endswith("/" + second), 10,
                 detail=lambda s: s["state"]["context"])
         r.check("Second shows B's tab: a2.txt", lambda s: documents(s["state"]) == ["a2.txt"], 15, detail=lambda s: documents(s["state"]))

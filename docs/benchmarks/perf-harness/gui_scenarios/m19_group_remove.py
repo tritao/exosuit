@@ -22,7 +22,7 @@ def run(gui):
     alpha = ws(gui.state(), "Alpha")["id"]
     open_by_double_click(gui, alpha, "Alpha")
     show_workbench(gui)
-    work = gui.wait("group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+    work = ensure_group(gui, alpha)
     root_context = gui.state()["context"]
 
     gui.step("an agent session in the workspace root (a fake Codex stands in for the provider)")

@@ -11,20 +11,6 @@ FIXTURE = {"workspaces": ["alpha", "beta"], "folders": ["extra"], "open": None, 
 ELLIPSIS = "…"
 
 
-def menu(gui, row_label, item):
-    """Right-click a row and click a menu item; one retry when the menu did not open (a tooltip can swallow the first click)."""
-    for attempt in range(2):
-        gui.click(gui.element(row_label), button="right")
-        try:
-            target = gui.element(item, role="16", timeout=3)
-            break
-        except Failure:
-            if attempt:
-                raise
-            gui.chord("esc")
-    gui.click(target)
-
-
 def open_by_double_click(gui, wid, name):
     """A double click opens the workspace, idle or running (an idle one is started and waited for)."""
     gui.click(gui.element("w:" + wid), count=2)

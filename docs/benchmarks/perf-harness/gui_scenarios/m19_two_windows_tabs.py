@@ -34,7 +34,7 @@ def run(gui):
         alpha = ws(gui.state(), "Alpha")["id"]
         open_by_double_click(gui, alpha, "Alpha")
         show_workbench(gui)
-        work = gui.wait("Alpha's group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
+        work = ensure_group(gui, alpha)
         # Work has the workspace's folder and so shares the root's context key; a group of its own has a key of its own.
         create(gui, "g:" + work, "New group", "Second", "groups")
         second = next(g["id"] for g in gui.state()["groups"] if g["name"] == "Second")
@@ -49,7 +49,7 @@ def run(gui):
                               lambda s: next((w["pid"] for w in s["state"]["otherWindows"] if w["context"].endswith("/" + second)), None), 60)
         two = Gui(second_pid, os.path.join(os.path.dirname(gui.dir), "automation-2"), os.path.join(gui.out, "window2"),
                   max(10, gui.deadline - time.monotonic()), 30)
-        two.wait("window 2 attached to Alpha", lambda s: s["state"]["openWorkspace"] == alpha and s["state"]["groups"] is not None, 40)
+        two.wait("window 2 attached to Alpha", lambda s: is_attached(s["state"], alpha), 40)
         two.check("window 2 is on the same group as window 1", lambda s: s["state"]["context"].endswith("/" + second), 5,
                   detail=lambda s: s["state"]["context"])
 

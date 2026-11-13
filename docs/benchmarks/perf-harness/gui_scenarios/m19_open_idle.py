@@ -14,7 +14,7 @@ def run(gui):
     beta = ws(gui.state(), "Beta")["id"]
     gui.click(gui.element("w:" + beta), count=2)
     healthy(gui, "double click on an idle workspace")
-    gui.check("the window attached to Beta", lambda s: s["state"]["openWorkspace"] == beta and s["state"]["groups"] is not None, 30,
+    gui.check("the window attached to Beta", lambda s: is_attached(s["state"], beta), 30,
               detail=lambda s: (s["state"]["openWorkspace"], s["state"]["workspaceStatus"], s["state"]["notifications"]))
     gui.shot("after-double-click")
 
