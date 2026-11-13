@@ -219,7 +219,11 @@ class WorkspaceRelayHost implements WorkspacePairingRelay {
 					permanentFailure = true;
 					return;
 				}
-				error = dialer.backOff(nowMilliseconds(), error);
+				var now = nowMilliseconds();
+				error = dialer.backOff(now, error);
+				// The relay's challenge table was full or this address asked too often: wait what it said.
+				if (error == "relay_rate_limited" && connector.retryAfterMilliseconds > 0)
+					dialer.retryAfter(now, connector.retryAfterMilliseconds);
 				return;
 			}
 			if (link != null) {

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker, { registrationProof, relayIdOf, x25519 } from "../src/index";
 
 // Proven registration (docs/mobile/relay-identity.md): a machine whose relay id is derived from its Noise key takes the
@@ -79,10 +79,57 @@ describe("proven machine registration", () => {
     expect((await register(machine.id, "c6".repeat(32), stolen)).status).toBe(401);
   });
 
-  it("bounds outstanding challenges", async () => {
+  it("never evicts a young challenge: a flood gets 429 and the machine's challenge still registers", async () => {
     const machine = await machineKey();
-    for (let index = 0; index < 8; index += 1) await newChallenge(machine.id);
-    expect((await call(machine.id, "register/challenge", { method: "POST" })).status).toBe(429);
+    const token = "c7".repeat(32);
+    const own = await newChallenge(machine.id, "203.0.113.1");
+    // Seven more fill the table (each from its own address, so no bucket limits them); the next ones are refused.
+    const flood: string[] = [];
+    for (let index = 0; index < 7; index += 1) flood.push(await newChallenge(machine.id, `198.51.100.${index}`));
+    for (let index = 0; index < 20; index += 1) {
+      const refused = await challengeRequest(machine.id, `198.51.100.${100 + index}`);
+      expect(refused.status).toBe(429);
+      expect(Number(refused.headers.get("Retry-After"))).toBeGreaterThanOrEqual(1);
+      expect(Number(refused.headers.get("Retry-After"))).toBeLessThanOrEqual(10);
+    }
+    expect((await register(machine.id, token, await provenBody(machine, token, machine.id, own))).status).toBe(201);
+    const kept = await provenBody(machine, token, machine.id, flood[0]);
+    expect((await register(machine.id, token, kept)).status).toBe(204);
+  });
+
+  it("lets the oldest challenge go once it is past the protection window", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const machine = await machineKey();
+      const token = "c8".repeat(32);
+      const first = await newChallenge(machine.id, "192.0.2.0");
+      for (let index = 1; index < 8; index += 1) await newChallenge(machine.id, `192.0.2.${index}`);
+      expect((await challengeRequest(machine.id, "192.0.2.50")).status).toBe(429);
+      vi.advanceTimersByTime(11_000);
+      expect((await challengeRequest(machine.id, "192.0.2.50")).status).toBe(201);
+      // The oldest made room; the machine proves with a newer challenge.
+      expect((await register(machine.id, token, await provenBody(machine, token, machine.id, first))).status).toBe(401);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("limits challenges per client address with a refilling bucket", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const machine = await machineKey();
+      // The same address gets a burst of six, then 429 until a token refills; another address is unaffected.
+      for (let index = 0; index < 6; index += 1) expect((await challengeRequest(machine.id, "192.0.2.77")).status).toBe(201);
+      const refused = await challengeRequest(machine.id, "192.0.2.77");
+      expect(refused.status).toBe(429);
+      expect(refused.headers.get("Retry-After")).toBe("2");
+      vi.advanceTimersByTime(2_100);
+      expect((await challengeRequest(machine.id, "192.0.2.77")).status).toBe(201);
+      vi.advanceTimersByTime(61_000);
+      expect((await challengeRequest(machine.id, "192.0.2.78")).status).toBe(201);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -99,13 +146,17 @@ async function machineKey(): Promise<MachineKey> {
   return { id: await relayIdOf(publicKey), publicKey, privateKey };
 }
 
-async function newChallenge(id: string): Promise<string> {
+function challengeRequest(id: string, client = "203.0.113.9"): Promise<Response> {
   // suit sends "{}" as the body, as on every relay POST.
-  const response = await call(id, "register/challenge", {
+  return call(id, "register/challenge", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "CF-Connecting-IP": client },
     body: "{}",
   });
+}
+
+async function newChallenge(id: string, client?: string): Promise<string> {
+  const response = await challengeRequest(id, client);
   expect(response.status).toBe(201);
   return (await response.json() as { challenge: string }).challenge;
 }

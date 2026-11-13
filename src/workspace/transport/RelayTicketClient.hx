@@ -26,6 +26,11 @@ class RelayTicketClient {
 	final pending:Map<String, TicketPending> = [];
 	final allowLoopbackHttp:Bool;
 	var disposed:Bool = false;
+	/**
+		The relay's Retry-After (milliseconds, 1 to 30 seconds) from the last 429 it gave the challenge request, else 0. The
+		dialer's own backoff is the retry loop (there is no timer here); the host waits at least this long.
+	**/
+	public var retryAfterMilliseconds(default, null):Int = 0;
 
 	public function new(events:EventPump, allowLoopbackHttp:Bool = false) {
 		if (events == null)
@@ -88,11 +93,18 @@ class RelayTicketClient {
 				complete("relay_registration_unproven");
 				return;
 			}
+			if (response.statusCode == 429) {
+				retryAfterMilliseconds = retryAfterOf(response);
+				outer.finish();
+				complete(statusError(429));
+				return;
+			}
 			if (response.statusCode != 201) {
 				outer.finish();
 				complete(statusError(response.statusCode));
 				return;
 			}
+			retryAfterMilliseconds = 0;
 			var body:Null<String> = null;
 			try {
 				var value:Dynamic = haxe.Json.parse(response.body.toString());
@@ -274,6 +286,19 @@ class RelayTicketClient {
 			complete(null, "ticket_request_failed");
 		}
 		return attempt;
+	}
+
+	/** The Retry-After header in whole seconds, clamped to 1..30; 2 seconds when absent or not a number. */
+	static function retryAfterOf(response:haxeon.platform.http.HttpResponse):Int {
+		var seconds = 2;
+		for (header in response.headers) {
+			if (header.name.toLowerCase() == "retry-after") {
+				var parsed = Std.parseInt(StringTools.trim(header.value));
+				if (parsed != null)
+					seconds = parsed;
+			}
+		}
+		return Std.int(Math.max(1, Math.min(30, seconds))) * 1000;
 	}
 
 	static function statusError(status:Int):String

@@ -63,9 +63,9 @@ class RelayMachineDialer {
 		return reason == null || reason == "closed" ? "relay_disconnected" : reason;
 	}
 
-	/** The next dial waits `delay` without changing the backoff. */
+	/** The next dial waits at least `delay` (never less than the backoff already set), without changing the backoff. */
 	public function retryAfter(now:Float, delay:Float):Void
-		retryAt = now + delay;
+		retryAt = Math.max(retryAt, now + delay);
 
 	public function retryNow():Void {
 		retryDelay = initialDelay;

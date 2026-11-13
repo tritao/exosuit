@@ -71,7 +71,11 @@ Proven registration:
 
 1. `POST /v1/machines/<id>/register/challenge` (no credential) returns 201 `{"challenge": "<64 hex>",
    "expiresInSeconds": 60}`: the public half of a one-use X25519 key the Durable Object keeps for 60 s (at most 8 at
-   once, else 429).
+   once). A challenge younger than 10 s is never evicted: when all 8 slots are that young the answer is 429 with
+   `Retry-After` (seconds until the oldest may go), otherwise the oldest older challenge makes room. One client
+   address (`CF-Connecting-IP`) also gets a token bucket per machine id (6 at once, one more every 2 s, stored in
+   `challenge_bucket`): beyond it, 429 with `Retry-After`. So a flood neither evicts the challenge the machine is about to
+   register with nor, from one address, keeps the table full; suit waits the `Retry-After` and dials again.
 2. `POST /v1/machines/<id>/register`, the bearer, JSON `{"publicKey": "<64 hex>", "challenge": "<64 hex>", "proof":
    "<64 hex>"}`. The Worker checks that `<id>` is the relay id of `publicKey` (else 400 `machine_id_not_derived`), uses
    the challenge up (unknown or expired: 401 `invalid_challenge`), and recomputes the proof (mismatch, or an all-zero
@@ -92,7 +96,8 @@ What it does not cover:
   explanation in the Remote Access status. Turning remote access off and choosing another relay gives a new, derived id.
 - Someone who registers a derived id first (before the machine) can hold it only until the machine connects to a
   Worker with proven registration. A derived id is not in any invitation before the machine registered it.
-- The Worker does not limit challenge requests beyond 8 outstanding per id.
+- Many addresses together can still keep all 8 slots young (the machine then gets 429 and retries, and gets a slot as soon
+  as the oldest challenge passes 10 s). Stateless challenges would close that; not done.
 
 ## Compatibility
 

@@ -7,6 +7,12 @@ const SOCKET_TICKET_TTL_SECONDS = 60;
 /** A registration challenge key lives this long and is used once. */
 const REGISTER_CHALLENGE_TTL_SECONDS = 60;
 const MAX_REGISTER_CHALLENGES = 8;
+/** A challenge younger than this is never evicted: the machine is between its challenge and its register call. */
+const REGISTER_CHALLENGE_PROTECT_MS = 10_000;
+/** Challenge creation per client address (and machine id, as this is one Durable Object per id): a token bucket. */
+const CHALLENGE_BUCKET_BURST = 6;
+const CHALLENGE_BUCKET_REFILL_MS = 2_000;
+const CHALLENGE_BUCKET_MAX_CLIENTS = 256;
 /** docs/mobile/relay-identity.md; MachineKeys.hx computes the same. */
 const RELAY_ID_CONTEXT = "exosuit-relay-id/1";
 const PROOF_CONTEXT = "exosuit-relay-register/1";
@@ -141,6 +147,9 @@ export class MachineRelay extends DurableObject<Env> {
     );
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS register_challenge (public_key TEXT PRIMARY KEY, private_key TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+    );
+    ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS challenge_bucket (client TEXT PRIMARY KEY, tokens REAL NOT NULL, updated_at INTEGER NOT NULL)",
     );
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS machine_key (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), public_key TEXT NOT NULL)",
@@ -293,17 +302,60 @@ export class MachineRelay extends DurableObject<Env> {
 
   /**
    * A one-use X25519 key for a proven registration (docs/mobile/relay-identity.md). Anyone may ask; a challenge proves
-   * nothing by itself, and at most MAX_REGISTER_CHALLENGES live at once.
+   * nothing by itself, so the endpoint is bounded instead: at most MAX_REGISTER_CHALLENGES live at once, and one client
+   * address (CF-Connecting-IP) gets a small token bucket per machine id. A full table gives way to its oldest challenge
+   * only once that is older than REGISTER_CHALLENGE_PROTECT_MS, so a flood cannot evict the challenge the machine is about
+   * to register with; when every slot is that young the answer is 429 with Retry-After, which the machine retries.
    */
   private async createRegisterChallenge(request: Request): Promise<Response> {
     // The body means nothing here; it is read (bounded) so the runtime does not fail on an unread request stream.
     await discardBody(request);
     const now = Date.now();
-    this.ctx.storage.sql.exec("DELETE FROM register_challenge WHERE expires_at <= ?", now);
-    const count = this.ctx.storage.sql.exec<{ total: number }>(
-      "SELECT COUNT(*) AS total FROM register_challenge",
-    ).toArray()[0]?.total ?? 0;
-    if (count >= MAX_REGISTER_CHALLENGES) return jsonResponse({ error: "challenge_limit" }, 429);
+    const sql = this.ctx.storage.sql;
+    sql.exec("DELETE FROM register_challenge WHERE expires_at <= ?", now);
+
+    const client = request.headers.get("CF-Connecting-IP")?.slice(0, 64) || "unknown";
+    sql.exec("DELETE FROM challenge_bucket WHERE updated_at <= ?", now - CHALLENGE_BUCKET_BURST * CHALLENGE_BUCKET_REFILL_MS);
+    const bucket = sql.exec<{ tokens: number; updated_at: number }>(
+      "SELECT tokens, updated_at FROM challenge_bucket WHERE client = ?",
+      client,
+    ).toArray()[0];
+    const tokens = Math.min(
+      CHALLENGE_BUCKET_BURST,
+      (bucket?.tokens ?? CHALLENGE_BUCKET_BURST) + Math.max(0, now - (bucket?.updated_at ?? now)) / CHALLENGE_BUCKET_REFILL_MS,
+    );
+    if (tokens < 1) {
+      return rateLimited(Math.ceil((1 - tokens) * CHALLENGE_BUCKET_REFILL_MS / 1000));
+    }
+
+    const count = sql.exec<{ total: number }>("SELECT COUNT(*) AS total FROM register_challenge").toArray()[0]?.total ?? 0;
+    if (count >= MAX_REGISTER_CHALLENGES) {
+      // expires_at orders by age: every challenge lives the same time. Only unprotected (old enough) ones may go.
+      const protectedFrom = now + (REGISTER_CHALLENGE_TTL_SECONDS * 1000 - REGISTER_CHALLENGE_PROTECT_MS);
+      const evictable = sql.exec<{ public_key: string }>(
+        "SELECT public_key FROM register_challenge WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?",
+        protectedFrom,
+        count - MAX_REGISTER_CHALLENGES + 1,
+      ).toArray();
+      if (evictable.length < count - MAX_REGISTER_CHALLENGES + 1) {
+        const oldest = sql.exec<{ oldest: number }>("SELECT MIN(expires_at) AS oldest FROM register_challenge").toArray()[0]?.oldest ?? protectedFrom;
+        return rateLimited(Math.max(1, Math.ceil((oldest - protectedFrom) / 1000)));
+      }
+      for (const row of evictable) sql.exec("DELETE FROM register_challenge WHERE public_key = ?", row.public_key);
+    }
+
+    // Spend the token only for a challenge that is issued.
+    const clients = sql.exec<{ total: number }>("SELECT COUNT(*) AS total FROM challenge_bucket").toArray()[0]?.total ?? 0;
+    if (clients >= CHALLENGE_BUCKET_MAX_CLIENTS && !bucket) {
+      sql.exec("DELETE FROM challenge_bucket WHERE client IN (SELECT client FROM challenge_bucket ORDER BY updated_at ASC LIMIT 1)");
+    }
+    sql.exec(
+      "INSERT INTO challenge_bucket (client, tokens, updated_at) VALUES (?, ?, ?) " +
+        "ON CONFLICT(client) DO UPDATE SET tokens = excluded.tokens, updated_at = excluded.updated_at",
+      client,
+      tokens - 1,
+      now,
+    );
     const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]) as CryptoKeyPair;
     const publicKey = bytesToHex(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey) as ArrayBuffer));
     const privateKey = bytesToHex(new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey) as ArrayBuffer));
@@ -718,6 +770,12 @@ function corsHeaders(origin: string): Headers {
     "Access-Control-Max-Age": "300",
     "Vary": "Origin",
   });
+}
+
+function rateLimited(retryAfterSeconds: number): Response {
+  const response = jsonResponse({ error: "rate_limited", retryAfterSeconds }, 429);
+  response.headers.set("Retry-After", String(retryAfterSeconds));
+  return response;
 }
 
 function jsonResponse(value: unknown, status = 200): Response {

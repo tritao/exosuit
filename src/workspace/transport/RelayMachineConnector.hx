@@ -18,6 +18,12 @@ class RelayMachineConnector {
 		tickets = new RelayTicketClient(events, allowLoopbackHttp);
 	}
 
+	/** How long the relay asked us to wait after refusing a registration challenge (0: it did not). */
+	public var retryAfterMilliseconds(get, never):Int;
+
+	function get_retryAfterMilliseconds():Int
+		return tickets.retryAfterMilliseconds;
+
 	public function connect(endpoint:RelayMachineEndpoint, machineToken:String,
 		complete:RelaySocketLink->Null<String>->Void):RelayMachineConnectAttempt {
 		if (complete == null)
