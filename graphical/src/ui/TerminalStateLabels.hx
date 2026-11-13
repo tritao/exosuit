@@ -2,5 +2,8 @@ package ui;
 
 /** Process loss ends a shell; its retained record can still open for recovery. */
 class TerminalStateLabels {
-  public static function display(state:String):String return state == "lost" ? "session ended" : state;
+  /** A Claude Code or Codex terminal whose program ended continues the same conversation when restarted. */
+  public static function display(state:String, ?agentProvider:String):String
+    return (state == "lost" || state == "exited") && resumes(agentProvider) ? "resumable" : state == "lost" ? "session ended" : state;
+  public static function resumes(agentProvider:Null<String>):Bool return agentProvider == "claude" || agentProvider == "codex";
 }

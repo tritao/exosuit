@@ -230,6 +230,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(27) var historyEpoch:Null<String>;
 	/** True only when activity was evicted from this in-memory conversation. */
 	@:optional @:id(28) var historyOmitted:Null<Bool>;
+	/** The session's process is not running, and a prompt sent now resumes the same conversation and is then delivered. */
+	@:optional @:id(29) var promptResumes:Null<Bool>;
 }
 
 @:wire typedef AgentContentQuery = {

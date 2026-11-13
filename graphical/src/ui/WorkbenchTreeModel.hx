@@ -427,11 +427,13 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function revision():Int
 		return version;
 
-	static function agentStateLabel(state:String):String {
+	/** Claude and Pi continue the same conversation when a prompt arrives; a Codex session is only disconnected. */
+	public static function agentStateLabel(state:String, ?provider:String):String {
 		return switch (state) {
 			case "reconnecting": "Reconnecting…";
 			case "reconnect-failed": "Session unavailable";
-			case "disconnected": "Disconnected";
+			// Stopped with the service; a message (or Resume) continues the same conversation.
+			case "disconnected": provider == "claude" || provider == "pi" ? "Resumable" : "Disconnected";
 			default: state;
 		};
 	}
@@ -460,10 +462,10 @@ class WorkbenchTreeModel implements TreeViewModel {
 				}
 			case WorkbenchRowKind.Agent:
 				var a = agents.get(row.id);
-				if (a != null) return new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state));
+				if (a != null) return new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state, a.provider));
 			case WorkbenchRowKind.Terminal:
 				var terminal = terminals.get(row.id);
-				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state));
+				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state, terminal.agentProvider));
 		}
 		return new Text("");
 	}
@@ -481,10 +483,10 @@ class WorkbenchTreeModel implements TreeViewModel {
 				}
 			case WorkbenchRowKind.Agent:
 				var session = foreignSessions.get(key);
-				if (session != null) return new WorkbenchSessionLabel(session.name, session.state, agentStateLabel(session.state));
+				if (session != null) return new WorkbenchSessionLabel(session.name, session.state, agentStateLabel(session.state, session.provider));
 			case WorkbenchRowKind.Terminal:
 				var terminal = foreignTerminals.get(key);
-				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state));
+				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state, terminal.agentProvider));
 		}
 		return new Text("");
 	}

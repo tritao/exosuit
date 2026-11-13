@@ -31,6 +31,14 @@ private typedef ClaudeSession = {
  var currentModel:Null<String>;
  var serial:Int;
  var interrupting:Bool;
+ /** The provider's own record of the conversation was read into `conversation` (done once, when first needed). */
+ var imported:Bool;
+ /** A prompt sent while the process was not running; delivered as soon as the resumed process is ready. */
+ var queued:Null<AgentAction>;
+ /** The last launch began a conversation (`--session-id`) instead of resuming one. */
+ var fresh:Bool;
+ /** Why the saved record cannot be resumed at all; the row stays so the user can see and remove it. */
+ var broken:Null<String>;
 }
 
 /** One native CLI process per session, owned by the workspace daemon, not an editor attachment. */
@@ -70,11 +78,21 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
   this.executable=executable;prefix=script == null ? [] : [script];
   nameBridge=new ClaudeNameBridge(processes,clock,directories.root,ClaudeNameBridge.findScript());
   if (persistence != null) for (r in persistence.loadAgents()) if (r.provider == "claude") {
-   if (!valid(r.id,128) || !valid(r.name,256) || !uuid(r.thread) || r.workspaceRoot != directories.root
-      || !valid(r.cwd,1024) || !inside(r.cwd) || !mode(r.permissionMode) || sessions.exists(r.id)) throw "Invalid persisted Claude session";
-   r.state = r.state == "working" || r.state == "needs-attention" || r.state == "uncertain" ? "uncertain" : "disconnected";
+   // One bad record must not stop the service (every row of the workspace would be gone) and must not vanish itself.
+   if (!valid(r.id,128) || sessions.exists(r.id)) continue;
+   var problem:Null<String>=null;
+   if (!valid(r.name,256)) r.name="Claude session";
+   if (!mode(r.permissionMode)) r.permissionMode="default";
+   // The record keeps its own folder: the root is only shown, so a rename or move never saves a placeholder.
+   if (!valid(r.cwd,1024) || !inside(r.cwd)) problem="The saved session has no working folder; it cannot be resumed.";
+   if (!uuid(r.thread)) problem="The saved session has no Claude conversation id; it cannot be resumed.";
+   // The workspace's folders may have changed since the record was saved; the session keeps its own folder.
+   r.workspaceRoot=directories.root;
+   r.state = problem != null ? "reconnect-failed"
+    : r.state == "working" || r.state == "needs-attention" || r.state == "uncertain" ? "uncertain" : "disconnected";
    r.turn=null;
-   sessions.set(r.id,session(r));
+   var restored=session(r);restored.broken=problem;restored.error=problem;
+   sessions.set(r.id,restored);
   }
  }
  static function valid(v:String,n:Int):Bool return v != null && v.length > 0 && v.length <= n;
@@ -87,8 +105,25 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
  function inside(path:String):Bool return WorkspaceDirectories.persisted(path);
  function session(r:AgentRecord):ClaudeSession return {
   record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay,new AgentResponseArchive("claude",r.id,persistence)),
-  approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false
+  approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false,
+  imported:false,queued:null,fresh:false,broken:null
  };
+ /**
+  * Replaces the shortened preview with the conversation Claude itself recorded, once per session and only while no
+  * process streams into it. Without that record (nothing was ever sent, or it was removed) the preview stays.
+  */
+ function importTranscript(s:ClaudeSession):Void {
+  if (s.imported || s.transport != null || s.broken != null) return;
+  s.imported=true;
+  try {
+   var path=ClaudeTranscript.locate(s.record.thread,s.record.cwd);
+   if (path == null) return;
+   var history=ClaudeTranscript.read(path,ClaudeConversation.MAX_ENTRIES);
+   if (history == null || history.items.length == 0) return;
+   var items=ClaudeTranscript.merge(history.items,s.conversation.snapshot());
+   s.conversation=new ClaudeConversation(items,new AgentResponseArchive("claude",s.record.id,persistence),true,history.omitted);
+  } catch (_:Dynamic) {}
+ }
  function save(s:ClaudeSession):Void {
   if (storageFailed) throw "Agent storage requires recovery";
   s.record.replay=s.conversation.snapshot();
@@ -96,7 +131,13 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
  }
  public function owns(id:String):Bool return sessions.exists(id);
  public function summary():String return "Claude: " + [for(s in sessions) true].length + " sessions";
- public function records():Array<AgentRecord> return [for(s in sessions) copy(s.record)];
+ public function records():Array<AgentRecord> return [for(s in sessions) shown(s)];
+ /** The record for display; a broken row without a usable folder shows the workspace root, the stored record is untouched. */
+ function shown(s:ClaudeSession):AgentRecord {
+  var r=copy(s.record);
+  if (s.broken != null && (!valid(r.cwd,1024) || !inside(r.cwd))) r.cwd=directories.root;
+  return r;
+ }
  public function requestCounts():Map<String,Int> {
   var counts = new Map<String,Int>();
   for(id=>s in sessions) {
@@ -115,17 +156,19 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
  function view(s:ClaudeSession,?before:Int):AgentView {
   var pending = AgentRequestPage.project([for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable,questions:r.structured}]);
   return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
+  record:shown(s),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
   requests:pending.requests,requestsOmitted:pending.omitted,
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
-  recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error
+  recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error,
+  promptResumes:!s.ready && s.broken == null && s.queued == null && s.record.state != "uncertain" && s.record.state != "reconnect-failed"
   };
  }
  public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
   var s=sessions.get(session); return s == null ? null : s.conversation.content(turn,item,token,offset);
  }
  function fail(s:ClaudeSession,reason:String):Void {
+  if (s.queued != null) {s.queued=null;reason="Your message was not sent: the session could not be resumed. " + reason;}
   s.ready=false;s.busy=false;s.error=reason.substring(0,2048);s.approvals.clear();
   s.record.state = s.record.state == "working" || s.record.state == "needs-attention" ? "uncertain" : "disconnected";
   s.record.turn=null;
@@ -134,9 +177,22 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
   if(s.process != null) {processes.release(s.process);s.process=null;}
   try save(s) catch(_:Dynamic) {}
  }
- function launch(s:ClaudeSession,resume:Bool):Void {
+ function launch(s:ClaudeSession,resume:Bool,second:Bool=false,?firstError:String):Void {
   if (s.transport != null) return;
+  if (s.broken != null) {s.error=s.broken;return;}
   if (directories.resolve(s.record.cwd) != s.record.cwd) {fail(s,"Claude session directory no longer exists: " + s.record.cwd);return;}
+  if (!second) {
+   importTranscript(s);
+   // Claude refuses to resume a conversation it never recorded (a session nothing was sent to), and refuses to
+   // begin one under an id it has: its own record decides. If that guess fails, the other way is tried once.
+   if (resume && ClaudeTranscript.configDirectory() != null && ClaudeTranscript.locate(s.record.thread,s.record.cwd) == null) {
+    // A conversation that had messages but has no record any more (removed after 30 days, or another config folder)
+    // must not be replaced by an empty one under the same id: the next message would reach Claude without context.
+    if (s.conversation.snapshot().length > 0) {fail(s,"Claude no longer has this conversation's record, so it cannot be continued.");return;}
+    resume=false;
+   }
+  }
+  s.fresh=!resume;
   var args=prefix.concat(["-p","--input-format","stream-json","--output-format","stream-json","--verbose",
    "--include-partial-messages","--permission-prompt-tool","stdio","--permission-mode",s.record.permissionMode]);
   args=args.concat(resume ? ["--resume",s.record.thread] : ["--session-id",s.record.thread]);
@@ -149,7 +205,15 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
    t.serverRequest=function(id,subtype,request) approval(s,Std.string(id),subtype,request);
    t.request("initialize",{},clock(),function(r) {
     if(s.transport != t) return;
-    if(r.error != null) {fail(s,r.error);return;}
+    if(r.error != null) {
+     if(second || !s.fresh) {fail(s,firstError != null ? firstError : r.error);return;}
+     // Began a conversation because no record of it was found, and Claude refused: it has one after all.
+     var keep=s.queued;
+     s.queued=null;fail(s,r.error);s.queued=keep;
+     // If that guess fails as well, the first error is the real one (not logged in, ...), not "no conversation found".
+     launch(s,true,true,r.error);
+     return;
+    }
     var models:Dynamic = r.result == null ? null : Reflect.field(r.result,"models");
     if(Std.isOfType(models,Array)) for(m in (cast models:Array<Dynamic>)) {
      if(s.models.length >= 64) break;
@@ -157,7 +221,13 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
      if(valid(id,256) && valid(name,256)) s.models.push({model:id,name:name,supportedEfforts:[]});
     }
     s.ready=true;s.record.state="idle";
-    try save(s) catch(e:Dynamic) fail(s,"Claude initialization could not be saved");
+    try save(s) catch(e:Dynamic) {fail(s,"Claude initialization could not be saved");return;}
+    var waiting=s.queued;
+    if(waiting != null) {
+     s.queued=null;
+     var problem=deliver(s,waiting);
+     if(problem != null) s.error="Your message was not sent: " + problem.message;
+    }
    });
   } catch(e:Dynamic) fail(s,Std.string(e));
  }
@@ -262,11 +332,42 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
   try save(s) catch(_:Dynamic) {ctx.fail({code:"storage_unavailable",message:"Claude reservation failed",ambiguous:false});return;}
   sessions.set(q.id,s);launch(s,q.thread != null);ctx.respond(copy(s.record));
  }
+ /** Sends one prompt to the running process. Null when it was queued; else why it was not. */
+ function deliver(s:ClaudeSession,q:AgentAction):Null<{code:String,message:String}> {
+  var t=s.transport;
+  if(t == null || !s.ready) return {code:"disconnected",message:"Explicitly resume this Claude session before sending requests"};
+  function error(code:String,message:String):{code:String,message:String} return {code:code,message:message};
+  if(q.text==null || q.text.length>8192 || (StringTools.trim(q.text)=="" && (q.imageIds==null || q.imageIds.length==0)) || s.busy || s.record.state == "uncertain") return error("busy","Claude is busy or delivery requires reconciliation");
+  if(q.effort != null || (q.model != null && q.model != s.record.preferredModel)) return error("invalid_request","Set the Claude model before sending; effort overrides are unsupported");
+  var turn="turn-" + (++s.serial) + "-" + Std.string(clock());
+  var content:Dynamic=q.text;
+  if(q.imageIds!=null && q.imageIds.length>0) {
+   var images=imagePrepare==null ? null : imagePrepare(s.record.id,q.imageIds,null,null);
+   if(images==null) return error("image_unavailable","An image is unavailable; remove it and upload it again");
+   var blocks:Array<Dynamic>=[];
+   if(q.text!="") blocks.push({type:"text",text:q.text});
+   for(image in images) blocks.push({type:"image",source:{type:"base64",media_type:Reflect.field(image,"mimeType"),data:Reflect.field(image,"data")}});
+   content=blocks;
+   var encoded=haxe.io.Bytes.ofString(Json.stringify({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null}));
+   if(encoded.length+1>ClaudeTransport.MAX_FRAME_BYTES) return error("image_unavailable","Images exceed the Claude input limit");
+   if(imageHold==null || !imageHold(s.record.id,s.record.thread,turn,turn,q.imageIds)) return error("image_unavailable","Could not retain this image for Claude");
+  }
+  s.record.state="working";s.record.turn=turn;s.error=null;s.busy=true;
+  s.conversation.put(turn,turn,"userMessage","You",q.text,"","completed");
+  if(q.imageIds!=null && q.imageIds.length>0) s.conversation.attachImages(turn,turn,q.imageIds);
+  // Write-ahead state: a daemon crash must never cause an automatic prompt retry.
+  try save(s) catch(_:Dynamic) {s.busy=false;s.record.state="uncertain";return error("storage_unavailable","Prompt was not queued");}
+  if(!t.send({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null})) {
+   fail(s,"Claude prompt queue failed; explicitly resume before another prompt");return error("backpressure","Claude prompt was not queued");
+  }
+  return null;
+ }
  public function action(q:AgentAction,ctx:RpcContext<AgentView>):Void {
   var s=sessions.get(q.id);
   if(s == null) {ctx.fail({code:"unknown_agent",message:"Unknown Claude agent",ambiguous:false});return;}
   function error(code:String,message:String,ambiguous:Bool=false):Void {ctx.fail({code:code,message:message,ambiguous:ambiguous});}
   if(q.action == "read") {
+   importTranscript(s);
    var before=q.after == null ? null : s.conversation.offset(q.after);
    if(q.after != null && before == null) {error("invalid_cursor","Refresh activity history");return;}
    ctx.respond(view(s,before));return;
@@ -293,6 +394,7 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
    return;
   }
   if(q.action == "connect") {
+   if(s.broken != null) {error("session_unavailable",s.broken);return;}
    if(s.transport == null) launch(s,true);
    ctx.respond(view(s));return;
   }
@@ -304,7 +406,19 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
    var sync=nameSync.get(q.id);if(sync!=null) sync.dispose();nameSync.remove(q.id);
    sessions.remove(q.id);ctx.respond(result);return;
   }
-  if(!s.ready || s.transport == null) {error("disconnected","Explicitly resume this Claude session before sending requests");return;}
+  if(!s.ready || s.transport == null) {
+   // Typing into a session whose process ended resumes it and sends: one action, the same conversation. A session
+   // with a message of uncertain delivery still has to be resumed by hand first.
+   if(q.action == "prompt" && s.broken == null && s.queued == null && s.record.state != "uncertain" && s.record.state != "reconnect-failed"
+     && (q.imageIds == null || q.imageIds.length == 0) && q.text != null && q.text.length <= 8192 && StringTools.trim(q.text) != ""
+     && q.effort == null && (q.model == null || q.model == s.record.preferredModel)) {
+    s.queued=q;
+    if(s.transport == null) launch(s,true);
+    if(s.transport == null) {error("disconnected",s.error == null ? "The session could not be resumed" : s.error);return;}
+    ctx.respond(view(s));return;
+   }
+   error("disconnected",s.broken != null ? s.broken : "Explicitly resume this Claude session before sending requests");return;
+  }
   var t=s.transport;
   if(q.action == "models") {ctx.respond(view(s));return;}
   if(q.action == "stop") {
@@ -328,30 +442,9 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
    });return;
   }
   if(q.action == "prompt") {
-   if(q.text==null || q.text.length>8192 || (StringTools.trim(q.text)=="" && (q.imageIds==null || q.imageIds.length==0)) || s.busy || s.record.state == "uncertain") {error("busy","Claude is busy or delivery requires reconciliation");return;}
-   if(q.effort != null || (q.model != null && q.model != s.record.preferredModel)) {error("invalid_request","Set the Claude model before sending; effort overrides are unsupported");return;}
-   var turn="turn-" + (++s.serial) + "-" + Std.string(clock());
-   var content:Dynamic=q.text;
-   if(q.imageIds!=null && q.imageIds.length>0) {
-    var images=imagePrepare==null ? null : imagePrepare(s.record.id,q.imageIds,null,null);
-    if(images==null) {error("image_unavailable","An image is unavailable; remove it and upload it again");return;}
-    var blocks:Array<Dynamic>=[];
-    if(q.text!="") blocks.push({type:"text",text:q.text});
-    for(image in images) blocks.push({type:"image",source:{type:"base64",media_type:Reflect.field(image,"mimeType"),data:Reflect.field(image,"data")}});
-    content=blocks;
-    var encoded=haxe.io.Bytes.ofString(Json.stringify({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null}));
-    if(encoded.length+1>ClaudeTransport.MAX_FRAME_BYTES) {error("image_unavailable","Images exceed the Claude input limit");return;}
-    if(imageHold==null || !imageHold(s.record.id,s.record.thread,turn,turn,q.imageIds)) {error("image_unavailable","Could not retain this image for Claude");return;}
-   }
-   s.record.state="working";s.record.turn=turn;s.error=null;s.busy=true;
-   s.conversation.put(turn,turn,"userMessage","You",q.text,"","completed");
-   if(q.imageIds!=null && q.imageIds.length>0) s.conversation.attachImages(turn,turn,q.imageIds);
-   // Write-ahead state: a daemon crash must never cause an automatic prompt retry.
-   try save(s) catch(_:Dynamic) {s.busy=false;s.record.state="uncertain";error("storage_unavailable","Prompt was not queued");return;}
-   if(!t.send({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null})) {
-    fail(s,"Claude prompt queue failed; explicitly resume before another prompt");error("backpressure","Claude prompt was not queued");return;
-   }
-   ctx.respond(view(s));return;
+   var problem=deliver(s,q);
+   if(problem != null) error(problem.code,problem.message); else ctx.respond(view(s));
+   return;
   }
   var r=q.request == null ? null : s.approvals.get(q.request);
   if(r == null) {error("resolved","Request has resolved or disconnected");return;}

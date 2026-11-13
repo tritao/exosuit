@@ -17,6 +17,20 @@ class PiProviderTestMain {
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
+  // Pi's session file is the whole conversation after a restart (the service keeps a short preview only).
+  var transcriptPath=root+"/pi-transcript.jsonl", long=[for(_ in 0...600) "word"].join(" ");
+  // Pi records written as raw JSON: a Haxe array of differently shaped objects would not type.
+  sys.io.File.saveContent(transcriptPath,StringTools.replace(['{"type":"session","version":3,"id":"s1","timestamp":"2026-11-12T10:00:00.000Z","cwd":"x"}','{"type":"message","id":"u1","parentId":null,"timestamp":"x","message":{"role":"user","content":[{"type":"text","text":"first question"}]}}','{"type":"message","id":"a1","parentId":"u1","timestamp":"x","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"@LONG@"},{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"a.txt"}}]}}','{"type":"message","id":"r1","parentId":"a1","timestamp":"x","message":{"role":"toolResult","toolCallId":"call-1","toolName":"read","content":[{"type":"text","text":"contents"}],"isError":false}}','{"type":"model_change","id":"m1","provider":"x","modelId":"y"}','{"type":"message","id":"u2","parentId":"r1","timestamp":"x","message":{"role":"user","content":"second question"}}','{"type":"message","id":"a2","parentId":"u2","timestamp":"x","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'].join("\n")+"\n","@LONG@",long));
+  var read=workspace.provider.PiTranscript.read(transcriptPath,512);
+  require(read != null,"Pi's session file could not be read");
+  var transcript:{items:Array<AgentActivityItem>, omitted:Bool}=cast read;
+  require(!transcript.omitted,"Pi's session file was read only in part");
+  var kinds=[for(i in transcript.items) i.kind+":"+i.text.substr(0,15)];
+  require(kinds.join("|")=="userMessage:first question|agentMessage:word word word |tool:contents|userMessage:second question|agentMessage:done",
+   "Pi's session file did not give the whole conversation: "+kinds.join("|"));
+  require(transcript.items[1].text==long && transcript.items[2].title=="read" && transcript.items[2].detail.indexOf("a.txt")>0,"Pi's session file lost a whole reply or a tool call");
+  var whole=new workspace.provider.PiConversation(transcript.items,null,true,false);
+  require([for(i in whole.snapshot()) i].length==5,"A Pi conversation read from its session file was not kept whole");
   var pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
   var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
@@ -123,6 +137,22 @@ class PiProviderTestMain {
   action("read");require(items().length>0 && currentView().record.state=="uncertain","Restart lost uncertain state or replay");
   action("connect");until("idle");require(currentView().record.thread==id,"Resume changed session id");
   action("prompt","after-resume");until("completed");
+  // An idle session whose service stops (editor closed, workspace switched, rebuild): the row stays, and one message
+  // starts Pi again in the same session file and is sent.
+  provider.dispose();client.close();server.close();
+  pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
+  pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
+  provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
+  for(_ in 0...10) provider.poll();
+  require(processes.activeCount()==0,"A stopped idle Pi session was started without a message");
+  action("read");
+  require(currentView().record.state=="disconnected" && currentView().promptResumes==true,"A stopped idle Pi session does not offer to resume on a message");
+  var before=items().length;
+  action("prompt","after-restart");require(code=="","A message to a stopped Pi session was refused: "+code);
+  wait(function() {action("read");return currentView().record.state=="completed" && items().length>before;});
+  require(currentView().record.thread==id && processes.activeCount()==1,"A message resumed a different Pi session or more than one process");
+  require([for(i in items()) if(i.kind=="userMessage" && i.text=="after-restart") true].length==1,"The message that resumed Pi was not delivered once");
   action("prompt","malformed");until("uncertain");
   action("connect");until("idle");action("prompt","oversized");until("uncertain");
   require(currentView().error!=null && currentView().error.indexOf("Pi frame exceeded bound")>=0,"Oversized unterminated Pi frame did not hit its bound");

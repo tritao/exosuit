@@ -206,7 +206,7 @@ class AgentProviderTestMain {
 		var startEpoch=epochs.epoch();
 		for(i in 0...8) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
 		require(epochs.epoch()==startEpoch && !epochs.hasOmitted(),"Appending changed history epoch");
-		for(i in 8...129) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
+		for(i in 8...workspace.provider.ClaudeConversation.MAX_ENTRIES+1) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
 		require(epochs.epoch()!=startEpoch && epochs.hasOmitted(),"Eviction did not invalidate history epoch");
 		require(new workspace.provider.ClaudeConversation().epoch()!=startEpoch,"New conversation reused history epoch");
 		require(new workspace.provider.PiConversation().epoch()!=new workspace.provider.PiConversation().epoch(),"Pi conversation reused history epoch");
@@ -663,8 +663,29 @@ class AgentProviderTestMain {
 		badClient.close();
 		badServer.close();
 		processes.shutdown();
+		// A saved record that fails validation is a row that says why, next to the good ones; the service starts.
+		var invalidStore = new WorkspaceSqliteStore(root + "/invalid-records.sqlite", "w", seed.snapshot(), 32, root);
+		var good:AgentRecord = cast Reflect.copy([for (r in saved) if (r.thread != "") r][0]);
+		good.id = "good-record";
+		good.replay = null;
+		invalidStore.saveAgent(good);
+		var bad:AgentRecord = cast Reflect.copy(good);
+		bad.id = "bad-record";
+		bad.cwd = "relative/folder";
+		bad.workspaceRoot = "/elsewhere";
+		invalidStore.saveAgent(bad);
+		var invalidProcesses = new ProcessManager();
+		var tolerant = new workspace.provider.CodexProvider("tolerant", new WorkspaceDirectories(root), function() return seed.snapshot().groups,
+			invalidProcesses, clock, invalidStore, executable, bridge, codexScript);
+		var rows = tolerant.records();
+		var badRow = [for (r in rows) if (r.id == "bad-record") r], goodRow = [for (r in rows) if (r.id == "good-record") r];
+		require(rows.length == 2 && badRow.length == 1 && badRow[0].state == "reconnect-failed" && goodRow.length == 1 && goodRow[0].state == "disconnected",
+			"An invalid saved Codex record stopped the provider or hid the other rows");
+		tolerant.dispose();
+		invalidProcesses.shutdown();
+		invalidStore.close();
 
-		Sys.println("PASS: Codex shared proxy, automatic newer-version acceptance and diagnostics, create idempotence, streamed items, permission fencing, approval races, input, automatic active-turn and persisted-session recovery, history, interruption and workspace mismatch handling");
+		Sys.println("PASS: Codex shared proxy, automatic newer-version acceptance and diagnostics, create idempotence, streamed items, permission fencing, approval races, input, automatic active-turn and persisted-session recovery, history, interruption and workspace mismatch handling; an invalid saved record is a row");
 	}
 }
 

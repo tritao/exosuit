@@ -119,15 +119,20 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 		if (persistence != null)
 			for (r in persistence.loadAgents()) {
 				if (r.provider != null && r.provider != "codex") continue;
-				if (!valid(r.id, 128)
-					|| !valid(r.name, 256)
-					|| r.workspaceRoot != directories.root
-					|| (!valid(r.cwd, 1024)
-						|| !WorkspaceDirectories.persisted(r.cwd))
-					|| sessions.exists(r.id))
-					throw "Invalid persisted Codex resource";
+				// One bad record must not stop the service (every row of the workspace would be gone) and must not vanish
+				// itself: it becomes a row that says why it cannot be resumed.
+				if (!valid(r.id, 128) || sessions.exists(r.id)) continue;
+				var problem:Null<String> = null;
+				if (!valid(r.name, 256)) r.name = "Codex session";
+				if (!valid(r.cwd, 1024) || !WorkspaceDirectories.persisted(r.cwd)) {
+					problem = "The saved session has no working folder; it cannot be resumed.";
+					// The record keeps its own folder: the root is only shown, so a rename or move never saves a placeholder.
+				}
+				// The workspace's folders may have changed since the record was saved; Codex checks the thread's folder
+				// against the session's before it resumes (loadThread).
+				r.workspaceRoot = directories.root;
 				// The proxy subscription/active turn must be reconciled, never invented after restart.
-				r.state = r.thread == "" ? "uncertain" : "disconnected";
+				r.state = problem != null ? "reconnect-failed" : r.thread == "" ? "uncertain" : "disconnected";
 				sessions.set(r.id, {
 					record: r,
 					activity: "",
@@ -141,9 +146,10 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 					currentEffort: null,
 					reconnectAttempts: 0,
 					reconnectAt: 0,
-					reconnectBlocked: false,
+					reconnectBlocked: problem != null,
 					eventRevision: 0
 				});
+				if (problem != null) sessions.get(r.id).error = problem;
 			}
 	}
 
@@ -199,7 +205,7 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 			id:id, method:r.method, detail:r.detail, reviewable:r.reviewable, questions:r.structured
 		}]);
 		return {
-			record: copy(s.record),
+			record: shown(s),
 			activity: s.activity,
 			items: s.conversation.page(before),
 			itemsOmitted: false,
@@ -779,7 +785,14 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 	public function driverKind():String return "codex";
 	public function summary():String return status;
 	public function owns(id:String):Bool return sessions.exists(id);
-	public function records():Array<AgentRecord> return [for (s in sessions) copy(s.record)];
+	public function records():Array<AgentRecord> return [for (s in sessions) shown(s)];
+
+	/** The record for display; a broken row without a usable folder shows the workspace root, the stored record is untouched. */
+	function shown(s:Session):AgentRecord {
+		var r = copy(s.record);
+		if (s.reconnectBlocked && (!valid(r.cwd, 1024) || !WorkspaceDirectories.persisted(r.cwd))) r.cwd = directories.root;
+		return r;
+	}
 
 	public function requestCounts():Map<String, Int> {
 		var counts = new Map<String, Int>();

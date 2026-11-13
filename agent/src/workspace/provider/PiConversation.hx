@@ -24,10 +24,15 @@ class PiConversation {
   }
   return null;
  }
- public function new(?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive) {
-  cacheId=++nextCacheId;this.archive=archive;
+ /**
+  * `saved` is the service's shortened preview of the newest items, or with `whole` the conversation read from Pi's
+  * own session file (`PiTranscript`): whole texts, of which older parts were left out when `partial`.
+  */
+ public function new(?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive,whole:Bool=false,partial:Bool=false) {
+  cacheId=++nextCacheId;this.archive=archive;omitted=partial;
   if (saved != null) for (entry in saved) {
    put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
+   if (whole) { entries[entries.length-1].images=entry.images; continue; }
    var restored=entries[entries.length-1];restored.truncated=entry.truncated;restored.contentDigest=entry.contentDigest;
    if(entry.truncated && archive!=null) restored.contentToken=archive.restore(cacheKey(entry.turn,entry.id),restored);
    entries[entries.length-1].files=retainedFiles(entry,2048);

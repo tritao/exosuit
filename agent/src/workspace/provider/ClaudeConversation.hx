@@ -4,6 +4,8 @@ import workspace.service.WorkspaceAgentProtocol;
 
 /** Bounded normalized conversation. Cursors are invalidated when old items are evicted. */
 class ClaudeConversation {
+ /** Items kept per session; older ones are dropped and reported as omitted. */
+ public static inline final MAX_ENTRIES:Int = 512;
  static var nextCacheId:Int = 0;
  final cacheId:Int;
  final archive:Null<AgentResponseArchive>;
@@ -24,10 +26,18 @@ class ClaudeConversation {
   }
   return null;
  }
- public function new(?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive) {
-  cacheId=++nextCacheId;this.archive=archive;
+ /**
+  * `saved` is the service's shortened preview of the newest items, or with `whole` the conversation read from the
+  * provider's own record: whole texts, of which older parts were left out when `partial`.
+  */
+ public function new(?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive,whole:Bool=false,partial:Bool=false) {
+  cacheId=++nextCacheId;this.archive=archive;omitted=partial;
   if (saved != null) for (entry in saved) {
    put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
+   if (whole) {
+    for (restored in entries) if (restored.id == entry.id && restored.turn == entry.turn) restored.images=entry.images;
+    continue;
+   }
    for (restored in entries) if (restored.id == entry.id && restored.turn == entry.turn) {
     restored.truncated = entry.truncated;restored.contentDigest=entry.contentDigest;
     restored.images=entry.images;
@@ -55,7 +65,7 @@ class ClaudeConversation {
   entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
   entry.truncated = entry.truncated || text.length > 4096 || detail.length > 2048;
   if(!restoring && archive!=null) archive.capture(cacheKey(turn,id),entry);
-  if (entries.length > 128) { entries.shift(); revision++; omitted=true; }
+  if (entries.length > MAX_ENTRIES) { entries.shift(); revision++; omitted=true; }
  }
  public function delta(id:String, turn:String, text:String):Void {
   var previous = "", existing:Null<AgentActivityItem> = null;

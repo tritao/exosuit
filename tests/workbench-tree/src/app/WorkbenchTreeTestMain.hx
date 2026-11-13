@@ -148,6 +148,9 @@ class WorkbenchTreeTestMain {
 		require(!model.initiallyExpanded("w:exo") && !model.initiallyExpanded("g:drafts"), "a closed workspace or sub-group starts expanded");
 		require(model.expandable("w:eon") && model.expandable("w:resume") && !model.expandable("n:new-workspace") && !model.expandable("t:t1"),
 			"every workspace and only workspaces expand without children");
+		// Only sessions whose prompt resumes them (Claude, Pi) are called Resumable; Codex is merely disconnected.
+		require(WorkbenchTreeModel.agentStateLabel("disconnected", "claude") == "Resumable" && WorkbenchTreeModel.agentStateLabel("disconnected", "pi") == "Resumable"
+			&& WorkbenchTreeModel.agentStateLabel("disconnected", null) == "Disconnected", "disconnected labels");
 		// The machine is no row: a selector above the tree names it, with this machine its only choice for now.
 		var machines = ui.WorkbenchMachineSelector.choices(view(machineWorkspaces, "resume", ["C:/work/resume"]));
 		require(machines.length == 1 && machines[0].label == "cube · this machine" && machines[0].value == ui.WorkbenchMachineSelector.THIS_MACHINE,

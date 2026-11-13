@@ -91,7 +91,7 @@ bytecode and HashLink runtime, so managed startup does not compile sources.
 The default idle grace is 60 seconds, including initial startup. `--idle-seconds N`
 changes it for new managed daemons; `--always-available` (or
 `EXOSUIT_AGENT_ALWAYS_AVAILABLE=1`) explicitly disables idle shutdown. Unnegotiated
-or unauthenticated sockets do not keep it alive. Running daemon-owned terminals also retain the service, even with no attached clients. Existing policies are not changed by client attachment.
+or unauthenticated sockets do not keep it alive. Running daemon-owned terminals also retain the service, even with no attached clients. Idle chat processes (a Claude or Pi session with nothing to do, an attached Codex thread) lengthen the grace to ten times the idle limit, at most ten minutes, so a rebuild or a switch to another workspace and back keeps them; after that the service stops and each session resumes its conversation when a message arrives. Existing policies are not changed by client attachment.
 Normal idle stop closes clients/listeners, releases SQLite and the native runtime,
 then the manager retires discovery and its lifetime lock with exit 0. Explicit
 SIGTERM stop uses the same owned-process cleanup. The desktop command palette offers “Terminate Active Terminal”; closing a window only detaches.

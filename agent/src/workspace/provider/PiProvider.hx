@@ -48,6 +48,12 @@ private typedef PiSession = {
  var settling:Bool;
  var currentModel:Null<String>;
  var currentEffort:Null<String>;
+ /** Why a saved record cannot be resumed; null when it can. */
+ var broken:Null<String>;
+ /** A message typed while Pi was stopped, sent once it is ready again. */
+ var resumePrompt:Null<String>;
+ /** Whether the conversation was read from Pi's session file yet (`importTranscript`). */
+ var imported:Bool;
 }
 
 /** Pi owns credentials, extensions and native session files. The daemon owns process lifetime and delivery. */
@@ -85,10 +91,20 @@ class PiProvider implements AgentMessageSource {
   this.extensionDirectory=extensionDirectory;this.persistence=persistence;this.executable=executable;
   prefix=script == null ? [] : [script];
   if(persistence != null) for(r in persistence.loadAgents()) if(r.provider == "pi") {
-   if(!valid(r.id,128) || !valid(r.name,256) || !inside(r.cwd) || r.workspaceRoot != directories.root
-    || (r.thread != "" && !sessionPath(r.thread)) || !mode(r.permissionMode) || sessions.exists(r.id)) throw "Invalid persisted Pi session";
-   r.state=r.state == "working" || r.state == "needs-attention" || r.state == "uncertain" ? "uncertain" : "disconnected";
-   r.turn=null;sessions.set(r.id,session(r));
+   // One bad record must not stop the service (every row of the workspace would be gone) and must not vanish itself.
+   if(!valid(r.id,128) || sessions.exists(r.id)) continue;
+   var problem:Null<String>=null;
+   if(!valid(r.name,256)) r.name="Pi session";
+   if(!mode(r.permissionMode)) r.permissionMode="supervised";
+   // The record keeps its own folder: the root is only shown, so a rename or move never saves a placeholder.
+   if(!valid(r.cwd,1024) || !inside(r.cwd)) problem="The saved session has no working folder; it cannot be resumed.";
+   if(r.thread != "" && !sessionPath(r.thread)) problem="The saved session has no valid Pi session file; it cannot be resumed.";
+   r.workspaceRoot=directories.root;
+   r.state=problem != null ? "reconnect-failed"
+    : r.state == "working" || r.state == "needs-attention" || r.state == "uncertain" ? "uncertain" : "disconnected";
+   r.turn=null;
+   var restored=session(r);restored.broken=problem;restored.error=problem;
+   sessions.set(r.id,restored);
   }
  }
  static function valid(v:String,n:Int):Bool return v != null && v.length > 0 && v.length <= n;
@@ -100,10 +116,34 @@ class PiProvider implements AgentMessageSource {
  function inside(v:String):Bool return WorkspaceDirectories.persisted(v);
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
   conversation:new PiConversation(r.replay,new AgentResponseArchive("pi",r.id,persistence)),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
-  settling:false,currentModel:null,currentEffort:null};
+  settling:false,currentModel:null,currentEffort:null,broken:null,resumePrompt:null,imported:false};
+ /**
+  * Replaces the shortened preview with the conversation Pi itself recorded in the session file, once per session and
+  * only while no process streams into it. Without that file (nothing was ever sent, or it was removed) the preview stays.
+  */
+ function importTranscript(s:PiSession):Void {
+  if(s.imported || s.transport != null || s.broken != null) return;
+  s.imported=true;
+  try {
+   if(s.record.thread == "" || !FileSystem.exists(s.record.thread)) return;
+   var history=PiTranscript.read(s.record.thread,ClaudeConversation.MAX_ENTRIES);
+   if(history == null || history.items.length == 0) return;
+   var items=ClaudeTranscript.merge(history.items,s.conversation.snapshot());
+   s.conversation=new PiConversation(items,new AgentResponseArchive("pi",s.record.id,persistence),true,history.omitted);
+  } catch(_:Dynamic) {}
+ }
+ /** A message typed into a stopped session starts Pi again in the same conversation and is sent once it is ready. */
+ function promptResumes(s:PiSession):Bool return s.transport == null && !s.ready && s.broken == null && s.error == null && s.resumePrompt == null
+  && s.record.state != "uncertain" && s.record.state != "reconnect-failed" && s.inputs.pending().length == 0;
  static function copy(r:AgentRecord):AgentRecord {var result:AgentRecord=cast Reflect.copy(r);result.replay=null;result.inputMessages=null;return result;}
  public function owns(id:String):Bool return sessions.exists(id);
- public function records():Array<AgentRecord> return [for(s in sessions) copy(s.record)];
+ public function records():Array<AgentRecord> return [for(s in sessions) shown(s)];
+ /** The record for display; a broken row without a usable folder shows the workspace root, the stored record is untouched. */
+ function shown(s:PiSession):AgentRecord {
+  var r=copy(s.record);
+  if(s.broken != null && (!valid(r.cwd,1024) || !inside(r.cwd))) r.cwd=directories.root;
+  return r;
+ }
  function save(s:PiSession):Void {
   if(storageFailed) throw "Agent storage requires recovery";
   s.record.replay=s.conversation.snapshot();
@@ -118,10 +158,11 @@ class PiProvider implements AgentMessageSource {
    detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}];
   var page=AgentRequestPage.project(pending);
   return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
+  record:shown(s),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
   requests:page.requests,requestsOmitted:page.omitted,
   models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
+  promptResumes:promptResumes(s),
   recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error,
   inputToken:s.inputs.token(),pendingInputs:[for(m in s.inputs.pending()) cast Reflect.copy(m)],queuePaused:s.record.queuePaused==true,
   nativePending:s.nativePending,inputBusy:s.inputs.hasNativeOperation(),supportsSteering:true,supportsQueue:true
@@ -134,7 +175,7 @@ class PiProvider implements AgentMessageSource {
   var t=s.transport;s.transport=null;s.ready=false;
   var uncertain=s.busy || s.record.state == "uncertain";
   s.inputs.pause();s.nativePending=[];s.nativeKnown=false;s.pendingPrompts=0;s.revision++;s.probe++;
-  s.busy=false;s.settling=false;s.dialogs.clear();s.commands=null;s.commandsLoading=false;s.commandsError=null;s.error=reason.substring(0,2048);
+  s.busy=false;s.settling=false;s.dialogs.clear();s.resumePrompt=null;s.commands=null;s.commandsLoading=false;s.commandsError=null;s.error=reason.substring(0,2048);
   if(s.record.turn != null) s.conversation.finish(s.record.turn,terminalState);
   s.record.state=uncertain ? "uncertain" : "disconnected";s.record.turn=null;
   if(t != null) t.close(reason);
@@ -161,6 +202,8 @@ class PiProvider implements AgentMessageSource {
  }
  function launch(s:PiSession):Void {
   if(s.transport != null) return;
+  if(s.broken != null) {s.error=s.broken;return;}
+  importTranscript(s);
   if(s.record.thread != "" && !FileSystem.exists(s.record.thread) && s.record.nativeSessionRequired == true) {fail(s,"Pi session file is missing; refusing to create a replacement conversation");return;}
   try {
    if(!FileSystem.isDirectory(extensionDirectory)) throw "Pi extension directory is unavailable";
@@ -196,6 +239,11 @@ class PiProvider implements AgentMessageSource {
       s.ready=true;s.record.state=s.dialogs.keys().hasNext() ? "needs-attention" : "idle";
       try save(s) catch(_:Dynamic) {fail(s,"Pi initialization could not be saved");return;}
       refreshCommands(s);
+      var waiting=s.resumePrompt;s.resumePrompt=null;
+      if(waiting != null) {
+       if(!s.busy && !s.dialogs.keys().hasNext()) startRun(s,waiting);
+       else {s.error="Your message was not sent: Pi was waiting for an answer when it became ready. Send it again.";}
+      }
      }
      function thinking():Void {
       if(s.record.preferredEffort != null) setThinking(s,s.record.preferredEffort,ready);else ready();
@@ -500,6 +548,7 @@ class PiProvider implements AgentMessageSource {
   function error(code:String,message:String,ambiguous:Bool=false):Void ctx.fail({code:code,message:message,ambiguous:ambiguous});
   if(s == null) {error("unknown_agent","Unknown Pi agent");return;}
   if(q.action == "read") {
+   importTranscript(s);
    var before=q.after == null ? null : s.conversation.offset(q.after);
    if(q.after != null && before == null) {error("invalid_cursor","Refresh activity history");return;}
    ctx.respond(view(s,before));return;
@@ -539,6 +588,11 @@ class PiProvider implements AgentMessageSource {
    var result=view(s);
    try {if(persistence != null) persistence.removeAgent(q.id);} catch(_:Dynamic) {storageFailed=true;error("storage_unavailable","Pi removal failed");return;}
    if(s.process != null) processes.release(s.process);sessions.remove(q.id);ctx.respond(result);return;
+  }
+  if(q.action == "prompt" && promptResumes(s)) {
+   if(q.text==null || q.text.length>8192 || StringTools.trim(q.text)=="") {error("invalid_request","A message of at most 8192 bytes is required");return;}
+   if(q.imageIds!=null && q.imageIds.length>0) {error("disconnected","Resume this Pi session before sending images");return;}
+   s.resumePrompt=q.text;launch(s);ctx.respond(view(s));return;
   }
   var t=s.transport;
   if(t == null) {error("disconnected","Explicitly resume this Pi session before sending requests");return;}

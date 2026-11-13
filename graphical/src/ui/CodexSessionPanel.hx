@@ -292,6 +292,15 @@ class CodexSessionPanel implements View {
     });
   }
 
+  /** What the transcript holds, one "kind: text" line per item, and the session's state, for a test driver (automation only). */
+  public function automationTranscript():{state:Null<String>, lines:Array<String>, error:Null<String>, prompt:String} {
+    var client = getClient();
+    var view = client == null ? null : client.agentView(resource);
+    if (view == null) return {state: null, lines: [], error: client == null ? null : client.agentError(), prompt: prompt};
+    var items = view.items == null ? [] : view.items;
+    return {state: view.record.state, lines: [for (item in items) item.kind + ": " + item.text], error: view.error, prompt: prompt};
+  }
+
   public function build(context:BuildContext):RenderNode {
     var client = getClient();
     var catalog = client == null ? null : client.agents();
@@ -316,7 +325,9 @@ class CodexSessionPanel implements View {
       : view.connectionState;
     var connectionReady = connectionState == "connected";
     var deliveryUncertain = client.agentDeliveryUncertain(id);
-    var canSend = control && connectionReady && !working && view.requests.length == 0 && !deliveryUncertain;
+    // The service resumes a session whose process ended when a prompt arrives, so the prompt stays usable.
+    var promptResumes = view.promptResumes == true && connectionState == "disconnected";
+    var canSend = control && (connectionReady || promptResumes) && !working && view.requests.length == 0 && !deliveryUncertain;
     var piActive = view.supportsQueue == true && (working || view.record.state == "needs-attention");
     var canQueue = control && connectionReady && view.supportsQueue == true && view.inputToken != null && !deliveryUncertain;
     var canSteer = control && connectionReady && view.supportsSteering == true && view.inputToken != null && view.inputBusy != true && !deliveryUncertain;
@@ -361,7 +372,7 @@ class CodexSessionPanel implements View {
     field.imeAction = 5;
     field.label = providerName(view.record.provider) + " prompt";
     field.placeholder = "Message " + providerName(view.record.provider) + "…";
-    field.enabled = client.canControlAgents() && connectionReady;
+    field.enabled = client.canControlAgents() && (connectionReady || promptResumes);
     var stop = new Button("Stop", null,
       function() client.agentAction(id, "stop", "", null), "codex-stop");
     stop.enabled = control && connectionReady;
@@ -492,7 +503,9 @@ class CodexSessionPanel implements View {
       var recoveryStyle = new LayoutStyle();
       recoveryStyle.width = LayoutAxis.grow();
       recoveryStyle.childGap = 10;
-      var recoveryControls = [new KeyedView("message", paragraph(recovery.message))];
+      var recoveryControls = [new KeyedView("message", paragraph(promptResumes
+        ? "This session's process ended; the conversation is kept. Send a message or press Resume session to continue it."
+        : recovery.message))];
       if (view.recoveryReason == "thread-unavailable") {
         var create = new Button("Create new session", null,
           function() createReplacement(view.record.group), "codex-create-replacement");

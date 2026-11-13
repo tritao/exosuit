@@ -24,8 +24,20 @@ class TerminalProfile {
         return new TerminalProfile(path, [], cwd);
     }
 
-    /** Interactive CLI, without a command string injected into a shell. */
-    public static function agent(provider:String, cwd:String):TerminalProfile {
+    /**
+     * Interactive CLI, without a command string injected into a shell. `extra` comes after the program (and its script
+     * override): the provider's own arguments, such as the conversation to resume. Each must be a plain word (letters,
+     * digits, `-`) or an absolute path of plain characters, because a Windows command shim passes them through the command
+     * processor.
+     */
+    /** An absolute path of plain characters (Pi's session file), which a command shim passes through unchanged. */
+    static function sessionFile(argument:String):Bool
+        return argument.length <= 1024 && argument.indexOf("..") < 0
+            && ~/^([A-Za-z]:[\\\/]|\/)[A-Za-z0-9 _.\\\/:-]+$/.match(argument);
+
+    public static function agent(provider:String, cwd:String, ?extra:Array<String>):TerminalProfile {
+        if (extra == null) extra = [];
+        for (argument in extra) if (!~/^[A-Za-z0-9-]{1,64}$/.match(argument) && !sessionFile(argument)) throw "Invalid terminal agent argument";
         if (["codex", "claude", "pi"].indexOf(provider) < 0) throw "Unsupported terminal agent provider";
         var overrideName = "EXOSUIT_" + provider.toUpperCase() + "_BIN";
         var configured = Sys.getEnv(overrideName);
@@ -51,9 +63,9 @@ class TerminalProfile {
                 if (arguments.length > 0) throw "Script overrides require an executable rather than a command shim";
                 // NativeKit quotes each argument for the C runtime (a path with spaces becomes "path"), and cmd /c keeps
                 // a lone quoted program path. Hand-written ""path"" quoting reached cmd escaped as \"\" and failed.
-                return new TerminalProfile(processor, ["/d", "/c", resolved], cwd);
+                return new TerminalProfile(processor, ["/d", "/c", resolved].concat(extra), cwd);
             }
-            return new TerminalProfile(resolved, arguments, cwd);
+            return new TerminalProfile(resolved, arguments.concat(extra), cwd);
         }
         throw 'The $provider CLI was not found on the workspace host PATH';
     }

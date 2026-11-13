@@ -89,6 +89,11 @@ for line in messages():
    send({'id':i,'error':{'code':-32000,'message':'Thread already has an active writer in another Codex client'}});continue
   loaded.add(params['threadId'])
   reply(i,{'thread':load()['threads'][params['threadId']]})
+ elif method=='thread/name/set':
+  # A current Codex names its threads (Rename session…); thread/read then returns the name.
+  v=load();t=v['threads'].get(params['threadId'])
+  if t is None: send({'id':i,'error':{'code':-32000,'message':'Unknown thread'}})
+  else: t['name']=params['name'];save(v);reply(i,{})
  elif method=='thread/turns/list':
   t=load()['threads'][params['threadId']]
   reply(i,{'data':[] if not t['turn'] else [t['turn']]})
@@ -97,6 +102,11 @@ for line in messages():
    items=json.loads((root/'history-fixture.json').read_text(encoding='utf-8'))
    start=int(params.get('cursor') or 0);limit=min(int(params.get('limit') or 8),8)
    end=min(start+limit,len(items))
+   reply(i,{'data':items[start:end],'nextCursor':str(end) if end<len(items) else None})
+  elif load()['threads'].get(params['threadId'],{}).get('items'):
+   # Newest first (Exosuit asks with sortDirection desc), eight per page.
+   items=list(reversed(load()['threads'][params['threadId']]['items']))
+   start=int(params.get('cursor') or 0);end=min(start+min(int(params.get('limit') or 8),8),len(items))
    reply(i,{'data':items[start:end],'nextCursor':str(end) if end<len(items) else None})
   else: reply(i,{'data':[{'turnId':'history','item':{'id':'historical-message','type':'agentMessage','text':'Persisted history'}}]})
  elif method=='model/list':
@@ -121,9 +131,14 @@ for line in messages():
    # Phone test hosts (scripts/mobile-machine-host.py, scripts/e2e-local.ps1): echo the prompt and finish the turn at once.
    reply(i,{'turn':turn})
    event('turn/started',{'threadId':t['id'],'turn':turn})
+   # As Codex does, the user's own message is an item of the turn first.
+   event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'prompt','type':'userMessage','content':[{'type':'text','text':text}]}})
    event('item/started',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':''}})
    event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':'FAKE-REPLY: '+text}})
-   v=load();t=v['threads'][params['threadId']];t['turn']['status']='completed';t['status']={'type':'idle'};save(v)
+   v=load();t=v['threads'][params['threadId']];t['turn']['status']='completed';t['status']={'type':'idle'}
+   # Kept for thread/items/list, so the conversation comes back after a restart as Codex's own history does.
+   t.setdefault('items',[]).extend([{'turnId':turn['id'],'item':{'id':'prompt','type':'userMessage','content':[{'type':'text','text':text}]}},
+    {'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':'FAKE-REPLY: '+text}}]);save(v)
    event('turn/completed',{'threadId':t['id'],'turn':t['turn']})
    continue
   reply(i,{'turn':turn})

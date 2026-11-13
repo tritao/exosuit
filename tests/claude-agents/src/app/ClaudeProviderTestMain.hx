@@ -27,6 +27,9 @@ class ClaudeProviderTestMain {
  static function main():Void {
   var args=Sys.args(),root=args[0],script=args[1],clock=function() return Sys.time()*1000;
   var python=Sys.getEnv("EXOSUIT_TEST_PYTHON"); if (python == null || python == "") python="python3";
+  // The fake keeps Claude Code's own record of each conversation here, and the provider reads it there.
+  Sys.putEnv("FAKE_CLAUDE_HOME",root+"/claude-home");Sys.putEnv("CLAUDE_CONFIG_DIR",root+"/claude-home");
+  var sid="a";
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
@@ -45,13 +48,13 @@ class ClaudeProviderTestMain {
   function items():Array<AgentActivityItem> return cast currentView().items;
   function create():Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"Claude",group:"work",thread:null,provider:"claude"},5000,
+   client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:sid,name:"Claude",group:"work",thread:null,provider:"claude"},5000,
     function(r) {record=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);require(code=="","Create failed: "+code);
   }
   function action(action:String,text:String="",?request:String,?model:String,?imageIds:Array<String>):Void {
    var done=false;code="";value=null;
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:action,text:text,request:request,model:model,imageIds:imageIds},5000,
+   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:sid,action:action,text:text,request:request,model:model,imageIds:imageIds},5000,
     function(r) {value=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);
   }
@@ -139,6 +142,80 @@ class ClaudeProviderTestMain {
   require(archived!=null && archived.bytes.compare(sys.io.File.getBytes("graphical/assets/icons/exosuit-16.png"))==0,"Restart lost uncertain image bytes");
   action("connect");until("idle");require(currentView().record.thread==id,"Resume changed session id");
   action("prompt","after-resume");until("completed");
+  action("prompt","long");until("completed");
+  // Stop and restart with nothing in flight. Before it: a second session nothing was ever sent to, and a saved
+  // record that fails validation.
+  sid="b";create();var unsent=currentRecord().thread;until("idle");sid="a";
+  store.saveAgent({id:"c",name:"Broken",group:"work",cwd:dirs.root,thread:"not-a-conversation",state:"idle",turn:null,
+   workspaceRoot:"elsewhere",provider:"claude",nameMetadata:{source:"native",nativeName:null},permissionMode:"default",preferredModel:null});
+  // A conversation with messages whose Claude record is gone, and a row whose working folder is gone.
+  store.saveAgent({id:"d",name:"Lost",group:"work",cwd:dirs.root,thread:"22222222-2222-4222-a222-222222222222",state:"idle",turn:null,
+   workspaceRoot:"elsewhere",provider:"claude",nameMetadata:{source:"native",nativeName:null},permissionMode:"default",preferredModel:null,
+   replay:[{id:"t1",turn:"t1",kind:"userMessage",title:"You",text:"earlier question",detail:"",state:"completed",truncated:false}]});
+  store.saveAgent({id:"e",name:"NoFolder",group:"work",cwd:"",thread:"33333333-3333-4333-a333-333333333333",state:"idle",turn:null,
+   workspaceRoot:"elsewhere",provider:"claude",nameMetadata:{source:"native",nativeName:null},permissionMode:"default",preferredModel:null});
+  function launches():Array<Dynamic> return [for(line in sys.io.File.getContent(root+"/wire.jsonl").split("\n")) if(line.indexOf('"type": "launch"')>=0) haxe.Json.parse(line)];
+  provider.dispose();client.close();server.close();
+  pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
+  claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,python,script);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store,"claude-image-fixture");
+  provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
+  var rows:Array<String>=[],rowsDone=false;
+  client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {rows=[for(row in r.records) row.id+":"+row.state];rowsDone=true;},function(e) throw e.message);
+  wait(function() return rowsDone);rows.sort(Reflect.compare);
+  require(rows.join(",")=="a:disconnected,b:disconnected,c:reconnect-failed,d:disconnected,e:reconnect-failed","A restart lost or mislabelled session rows: "+rows.join(","));
+  action("read");
+  require(currentView().record.state=="disconnected" && currentView().connectionState=="disconnected" && currentView().promptResumes==true
+   && currentView().recoveryReason=="explicit-resume","A stopped session is not offered as resumable");
+  // The whole conversation, not the six shortened items the service saves: read every page.
+  var whole:Array<AgentActivityItem>=[],older:Null<String>=null;
+  while(true) {
+   var done=false,page:Null<AgentView>=null;
+   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"read",text:"",request:null,after:older},5000,
+    function(r) {page=r;done=true;},function(e) throw e.message);
+   wait(function() return done);
+   var got:AgentView=cast page;whole=(cast got.items:Array<AgentActivityItem>).concat(whole);older=got.itemsNext;
+   if(older==null) break;
+  }
+  var prompts=[for(item in whole) if(item.kind=="userMessage") item.text];
+  require(whole.length>12 && prompts[0]=="hello" && prompts.contains("approval") && prompts.contains("after-resume") && prompts[prompts.length-1]=="long",
+   "A restart did not bring the whole conversation back: "+prompts.join("|"));
+  var longReply=[for(item in whole) if(item.kind=="agentMessage" && item.id=="message-long") item];
+  require(longReply.length==1 && longReply[0].truncated && longReply[0].text.length==4096 && longReply[0].contentToken!=null,"A long reply was not restored with its content");
+  var content:Null<AgentContentChunk>=null,contentDone=false;
+  client.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:longReply[0].turn,item:"message-long",token:cast longReply[0].contentToken,offset:0},5000,
+   function(chunk) {content=chunk;contentDone=true;},function(e) throw e.message);
+  wait(function() return contentDone);
+  require(content!=null && (cast content:AgentContentChunk).total>6000,"A long reply's whole text is not served after a restart");
+  var stopped=claude.sessions.get("a");
+  require(stopped!=null && stopped.transport==null,"Reading a stopped session started its process");
+  // One action continues it: a prompt resumes the same conversation and is delivered once.
+  var before=launches().length;
+  action("prompt","typed-after-restart");require(code=="","A prompt to a stopped session was refused: "+code);until("completed");
+  var started=launches();
+  require(started.length==before+1 && started[before].session==id && started[before].resume==true,"A prompt did not resume the same Claude conversation");
+  require(currentView().record.thread==id && items()[items().length-1].text=="Hello 界" && items()[items().length-2].text=="typed-after-restart","The resumed prompt or its reply is missing");
+  // A session nothing was sent to has no conversation to resume: it is begun under the same id.
+  sid="b";action("read");require(currentView().record.state=="disconnected" && currentView().record.thread==unsent,"The unsent session changed");
+  action("connect");until("idle");started=launches();
+  require(started[started.length-1].session==unsent && started[started.length-1].resume==false,"A session without a conversation was resumed instead of begun");
+  // The invalid record stays as a row that says why it cannot be resumed.
+  sid="c";action("read");
+  require(currentView().record.state=="reconnect-failed" && currentView().error!=null && currentView().error.indexOf("conversation id")>=0,"An invalid record is not explained");
+  action("connect");require(code=="session_unavailable","An invalid record was resumed");
+  action("prompt","nothing");require(code=="disconnected","An invalid record took a prompt");
+  // A conversation that had messages but lost Claude's record is not replaced by an empty one.
+  sid="d";var startedBefore=launches().length;
+  action("prompt","hello again");require(code=="" || code=="disconnected","Unexpected refusal: "+code);
+  wait(function() {action("read");return currentView().error!=null;});
+  require(currentView().error.indexOf("no longer has this conversation's record")>=0 && currentView().error.indexOf("not sent")>=0,"A lost record was not reported: "+currentView().error);
+  require(launches().length==startedBefore && (function() {var lost=claude.sessions.get("d");return lost!=null && lost.transport==null;})(),"A lost conversation was begun again under the same id");
+  // A row without a working folder shows the workspace root, but renaming it keeps the saved record's own folder.
+  sid="e";action("read");require(currentView().record.cwd==dirs.root,"A broken row does not show the workspace root");
+  action("rename","Renamed",currentView().record.name);require(code=="","Rename of a broken row failed: "+code);
+  var savedE=[for(a in store.loadAgents()) if(a.id=="e") a][0];
+  require(savedE.name=="Renamed" && savedE.cwd=="","A rename saved the placeholder folder: "+savedE.cwd);
+  sid="a";
   action("prompt","malformed");until("uncertain");
   action("connect");until("idle");action("prompt","oversized");until("uncertain");
   require(currentView().error!=null && currentView().error.indexOf("Claude frame exceeded bound")>=0,"Oversized unterminated Claude frame did not hit its bound");
@@ -151,7 +228,7 @@ class ClaudeProviderTestMain {
   var c=new workspace.provider.ClaudeConversation();
   for(i in 0...20) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
   var cursor=c.next();
-  for(i in 20...160) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
+  for(i in 20...(workspace.provider.ClaudeConversation.MAX_ENTRIES+40)) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
   require(c.offset(cursor)==null && c.snapshot().length==6,"Replay bounds/cursors failed");
   provider.dispose();client.close();server.close();ro.close();roServer.close();
   var silent=processes.start(python,[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
@@ -169,6 +246,6 @@ class ClaudeProviderTestMain {
   var accepted=0;
   while(bounded.send({text:StringTools.lpad("","x",200000)})) {accepted++;require(accepted<=32,"Output queue was unbounded");}
   require(accepted>0,"Bounded output queue accepted nothing");bounded.close("Fixture shutdown");processes.release(silentQueue);processes.shutdown();
-  Sys.println("PASS: native Claude routing, streaming, controls, approval/questions, interrupt, detach, explicit resume, uncertain delivery, malformed/bounded frames and replay");
+  Sys.println("PASS: native Claude routing, streaming, controls, approval/questions, interrupt, detach, explicit resume, uncertain delivery, malformed/bounded frames, replay, and a restart that keeps every row, restores the whole conversation and resumes on a prompt");
  }
 }

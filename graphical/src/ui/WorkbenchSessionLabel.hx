@@ -32,14 +32,14 @@ class WorkbenchSessionLabel implements View {
 			case "completed": IconName.Check;
 			case "exited", "lost": IconName.Stop;
 			case "starting", "creating", "reconnecting": IconName.Reset;
-			case "idle": IconName.Pause;
+			case "idle", "disconnected": IconName.Pause;
 			default: IconName.AlertTriangle;
 		};
 		var color = switch (state) {
 			case "running", "working", "starting", "creating", "reconnecting": context.theme.tokens.accent;
 			case "completed": context.theme.tokens.success;
 			case "failed", "reconnect-failed": context.theme.tokens.danger;
-			case "needs-attention", "uncertain", "disconnected": context.theme.tokens.warning;
+			case "needs-attention", "uncertain": context.theme.tokens.warning;
 			default: context.theme.tokens.textSecondary;
 		};
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.fixed(ROW_HEIGHT);
