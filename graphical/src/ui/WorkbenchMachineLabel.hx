@@ -84,12 +84,15 @@ class WorkbenchMachineLabel implements View {
 		if (glyph != null) children.push(new KeyedView("icon", new Icon("machine-row-icon", glyph, 14, warning ? tokens.warning : null)));
 		var label = new MiddleEllipsisText("machine-row-text", text, false, TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
 		children.push(new KeyedView("text", muted ? new Muted(label) : label));
+		// The marker ("this window", "running") comes before the folder: a narrow side bar cuts the folder, which the
+		// tooltip and the accessibility label still give whole, rather than the workspace's state.
+		var note = detail;
+		if (note != null) children.push(new KeyedView("detail", new Muted(new Text(note, null, null,
+			new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None)))));
 		var folder = directory;
 		if (folder != null)
 			children.push(new KeyedView("directory", new Muted(new MiddleEllipsisText("machine-row-directory",
 				WorkbenchGroupLabel.shortDirectory(folder, null), true, new TextStyleOverride(null, 12)))));
-		var note = detail;
-		if (note != null) children.push(new KeyedView("detail", new Muted(new Text(note, null, null, TextStyleOverride.text(12)))));
 		var row = new Row("workbench-machine-row", children, style);
 		var tooltip = new haxeon.ui.widgets.overlays.Tooltip("machine-row-tooltip", row, new Text(description), 0, 28);
 		tooltip.requirePointerMovement = true;

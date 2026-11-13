@@ -32,6 +32,7 @@ class QuickPickView implements View {
 	final configureKeybinding:Null<String->Void>;
 	final picker:SearchPicker;
 	var atlas:SetiIconAtlas;
+	var prefillChecked = false;
 	public function new(model:CommandView, provider:CommandViewProvider, dismiss:Void->Void,
 			changed:Void->Void, ?configureKeybinding:String->Void) {
 		this.model = model; this.provider = provider; this.configureKeybinding = configureKeybinding;
@@ -40,12 +41,25 @@ class QuickPickView implements View {
 		picker.placeholder = provider.prompt.length == 0 ? "Search files by name" : provider.prompt == "> " ? "Type a command" : provider.prompt;
 		picker.prefix = provider.prompt == "> " ? ">" : "";
 		picker.label = provider.prompt.length == 0 ? "Quick Open" : "Command Palette";
+		// A prompt for a free text (Rename Terminal: ) has nothing to match: say what Enter does where the results would be.
+		if (provider.entries.length == 0 && provider.prompt.length > 0 && provider.prompt != "> ")
+			picker.emptyText = promptTitle(provider.prompt) + " · Enter to confirm, Escape to cancel";
+	}
+
+	static function promptTitle(prompt:String):String {
+		var title = StringTools.trim(prompt);
+		return StringTools.endsWith(title, ":") ? title.substr(0, title.length - 1) : title;
 	}
 
 	public function build(context:BuildContext):RenderNode {
 		return context.withScope(new Key("quick-pick"), function() {
 			var width = Math.max(1.0, Math.min(720.0, context.viewportWidth - 24.0));
 			picker.rowHeight = provider.prompt.length == 0 && width < 520 ? 52 : 32;
+			// A value the opener filled in and selected (a rename's current name) is shown selected, so typing replaces it.
+			if (!prefillChecked) {
+				prefillChecked = true;
+				picker.selectQuery = model.query.length > 0 && model.input.selection.hasSelection();
+			}
 			atlas = context.resourceState(context.id("cv-icons"), function() return new SetiIconAtlas(), function(value) value.dispose()).value;
 			return picker.build(context);
 		});

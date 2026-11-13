@@ -646,8 +646,10 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	static function syntheticParent(key:String, suffix:String):String
 		return key.substring(0, key.length - suffix.length - 1);
 
+	/** The last name of a path. A root comes as its owner spells it, so on Windows it can use backslashes. */
 	static function baseName(path:String):String {
-		var slash = path.lastIndexOf("/");
+		var slash = path.lastIndexOf("/"), backslash = path.lastIndexOf("\\");
+		if (backslash > slash) slash = backslash;
 		return slash < 0 ? path : path.substring(slash + 1);
 	}
 }
