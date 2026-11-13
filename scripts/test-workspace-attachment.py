@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """Native client discovery/launch/reuse acceptance, with real private managed daemons."""
-import hashlib
 import json
 import contextlib
 import socket
 import threading
 import os
 from pathlib import Path
-import signal
 import subprocess
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parent.parent
-from agent_test_runtime import launcher_path, manager_command, manager_environment
+from agent_test_runtime import launcher_path, manager_command
+from test_driver import ROOT, WINDOWS, build_test, endpoint_for, isolated_environment, request_stop, run_tree, stop_managers
 
-HAXEON = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
 MANAGER = launcher_path(ROOT)
 MANAGER_COMMAND = manager_command(ROOT)
-MODE = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
-
-
-def directory_for(state, root):
-    key = hashlib.sha256(os.fsencode(root.resolve())).hexdigest()[:20]
-    return state / 'exosuit/workspaces' / key
+RUNNER = build_test('workspace-attachment')
 
 
 @contextlib.contextmanager
@@ -71,26 +63,33 @@ def proxy_socket(address, target):
 
 
 def run_client(mode, root, environment):
-    subprocess.run([HAXEON, 'run', '--project', str(ROOT / 'tests/workspace-attachment/haxeon.json'), *MODE, '--', mode, str(root), str(MANAGER)], env=environment, check=True, timeout=120)
+    run_tree([*RUNNER, mode, str(root), str(MANAGER)], environment, timeout=150)
 
 
-with tempfile.TemporaryDirectory(prefix='exa-') as temporary:
+with tempfile.TemporaryDirectory(prefix='exa-', ignore_cleanup_errors=True) as temporary:
     directory = Path(temporary)
     root, state = directory / 'project', directory / 'state'
     (root / 'other').mkdir(parents=True)
-    environment = dict(os.environ, XDG_STATE_HOME=str(state))
+    environment = isolated_environment(state, MANAGER, 'workspace-attachment')
     descriptors = []
     try:
         run_client('attach', root, environment)
         for project in [root, root / 'other']:
-            endpoint = directory_for(state, project) / 'endpoint.json'
-            descriptors.append(json.loads(endpoint.read_text()))
-        endpoint = directory_for(state, root) / 'endpoint.json'
+            descriptors.append(json.loads(endpoint_for(state, project).read_text()))
+        endpoint = endpoint_for(state, root)
         original = json.loads(endpoint.read_text())
         # Same expected root, but a socket serving another workspace: RPC must reject it.
         other = descriptors[1]
-        with proxy_socket(Path(original['socket']), Path(other['socket'])):
+        if WINDOWS:
+            # The endpoint is a named pipe, exosuit-<key> in the pipe namespace. It cannot be moved aside for a proxy to
+            # take its name while its manager serves it. What a client does with a descriptor naming another workspace's
+            # pipe is checked instead: the second manager's pipe goes into the descriptor and the client must refuse it.
+            endpoint.write_text(json.dumps(dict(original, socket=other['socket']))); os.chmod(endpoint, 0o600)
             run_client('reject', root, environment)
+            endpoint.write_text(json.dumps(original))
+        else:
+            with proxy_socket(Path(original['socket']), Path(other['socket'])):
+                run_client('reject', root, environment)
         # Wrong roots in private metadata must also fail before opening a transport.
         value = dict(original, root=str(root / 'other'))
         endpoint.write_text(json.dumps(value)); os.chmod(endpoint, 0o600)
@@ -100,13 +99,12 @@ with tempfile.TemporaryDirectory(prefix='exa-') as temporary:
         value = dict(original, socket=str(directory / 'untrusted.sock'))
         endpoint.write_text(json.dumps(value))
         # The manager runs with its native libraries, so it fails for the descriptor rather than for loading.
-        manager = dict(manager_environment(ROOT), XDG_STATE_HOME=str(state))
-        rejected = subprocess.run([*MANAGER_COMMAND, str(root), '--discover'], env=manager, capture_output=True, text=True, timeout=10)
+        rejected = subprocess.run([*MANAGER_COMMAND, str(root), '--discover'], env=environment, capture_output=True, text=True, timeout=30)
         assert rejected.returncode == 1 and 'identity mismatch' in rejected.stderr, (rejected.returncode, rejected.stdout, rejected.stderr)
         endpoint.write_text(json.dumps(original))
         # A stale descriptor for a dead manager/socket must cause safe restart.
-        os.kill(original['managerPid'], signal.SIGTERM)
-        deadline = time.monotonic() + 10
+        request_stop(endpoint, original)
+        deadline = time.monotonic() + 15
         while endpoint.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert not endpoint.exists()
@@ -116,19 +114,11 @@ with tempfile.TemporaryDirectory(prefix='exa-') as temporary:
         assert restarted['generation'] != original['generation']
         descriptors[0] = restarted
         print('PASS: safe stale discovery restart and private descriptor rejection', flush=True)
+        run_client('terminal-handover', root, environment)
         run_client('remote-setup', root, environment)
     finally:
-        # Read current owned descriptors, including managers created before a failed assertion.
-        for endpoint in state.glob('exosuit/workspaces/*/endpoint.json'):
-            try:
-                descriptor = json.loads(endpoint.read_text())
-                os.kill(descriptor['managerPid'], signal.SIGTERM)
-            except (FileNotFoundError, ProcessLookupError):
-                pass
+        # Current owned descriptors, including managers created before a failed assertion.
+        stop_managers(state)
         for identity in state.glob('exosuit/workspaces/*/relay-machine.json'):
             machine_id = json.loads(identity.read_text())['machineId']
-            subprocess.run([HAXEON, 'run', '--project', str(ROOT / 'tests/workspace-attachment/haxeon.json'), *MODE, '--',
-                            'cleanup-relay', machine_id, 'https://127.0.0.1:1'], env=environment, check=True, timeout=120)
-        deadline = time.monotonic() + 10
-        while list(state.glob('exosuit/workspaces/*/endpoint.json')) and time.monotonic() < deadline:
-            time.sleep(0.05)
+            run_tree([*RUNNER, 'cleanup-relay', machine_id, 'https://127.0.0.1:1'], environment, timeout=120)

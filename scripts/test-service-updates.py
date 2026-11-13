@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
 """Exercise Haxe-managed workspace updates with two attached clients."""
-import json
-import os
 from pathlib import Path
-import signal
-import subprocess
 import sys
 import tempfile
-import time
 
-ROOT = Path(__file__).resolve().parent.parent
 from agent_test_runtime import launcher_path
+from test_driver import ROOT, build_test, isolated_environment, run_tree, stop_managers
 
-HAXEON = os.environ.get("HAXEON_BIN", str(Path(os.environ.get("HAXEON_ROOT", str(ROOT / "haxeon"))) / "scripts/haxeon"))
-MODE = ["--self-hosted"] if os.environ.get("HAXEON_SELF_HOSTED") == "1" else []
-PROJECT = ROOT / "tests/workspace-attachment/haxeon.json"
+RUNNER = build_test("workspace-attachment")
 
 
 def run_update(mode: str, base: Path) -> None:
@@ -25,8 +18,7 @@ def run_update(mode: str, base: Path) -> None:
     revision.write_text("a" * 64)
     launcher = launcher_path(ROOT)
     environment = dict(
-        os.environ,
-        XDG_STATE_HOME=str(state),
+        isolated_environment(state, launcher, "workspace-attachment"),
         EXOSUIT_AGENT_BUILD_ID_FILE=str(revision),
         EXOSUIT_HAXEON_CLI_PYTHON=sys.executable,
         EXOSUIT_PROJECT_ROOT=str(ROOT),
@@ -34,27 +26,21 @@ def run_update(mode: str, base: Path) -> None:
     if mode == "update-legacy":
         environment["EXOSUIT_AGENT_MANAGED_UPDATES"] = "0"
     try:
-        subprocess.run(
-            [HAXEON, "run", "--project", str(PROJECT), *MODE, "--", mode,
-             str(project), str(launcher), str(revision)],
-            env=environment,
-            check=True,
-            timeout=180,
-        )
+        run_tree([*RUNNER, mode, str(project), str(launcher), str(revision)], environment, timeout=180)
+    except Exception:
+        # The failure names these logs, which go with the fixture.
+        for log in [*state.glob("exosuit/workspaces/*/update-build.log"), *state.glob("exosuit/workspaces/*/manager.log")]:
+            # Without the compiler's statistics lines, which are thousands of characters each.
+            lines = [line for line in log.read_text(errors="replace").splitlines() if line.strip() and len(line) < 400]
+            print(f"== {mode}: {log.name}", *lines[-40:], sep="\n", file=sys.stderr)
+        raise
     finally:
-        for endpoint in state.glob("exosuit/workspaces/*/endpoint.json"):
-            try:
-                os.kill(json.loads(endpoint.read_text())["managerPid"], signal.SIGTERM)
-            except (FileNotFoundError, ProcessLookupError):
-                pass
-        deadline = time.monotonic() + 15
-        while list(state.glob("exosuit/workspaces/*/endpoint.json")) and time.monotonic() < deadline:
-            time.sleep(0.05)
+        stop_managers(state)
 
 
 def main() -> None:
     for mode in ["update-idle", "update-busy", "update-now", "update-legacy"]:
-        with tempfile.TemporaryDirectory(prefix="exa-update-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="exa-update-", ignore_cleanup_errors=True) as temporary:
             run_update(mode, Path(temporary))
 
 

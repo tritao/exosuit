@@ -585,7 +585,7 @@ class DocumentTestMain {
 			if (FileSystem.exists(saveAsPath)) FileSystem.deleteFile(saveAsPath);
 			var manager = new DocumentManager(syntaxes), untitled = manager.createUntitled(), untitledSelection = new BufferSelection();
 			untitled.insert(untitledSelection, "new document");
-			require(manager.saveAs(untitled, saveAsPath) && untitled.path == FileSystem.fullPath(saveAsPath) && !untitled.dirty
+			require(manager.saveAs(untitled, saveAsPath) && untitled.path == StringTools.replace(FileSystem.fullPath(saveAsPath), "\\", "/") && !untitled.dirty
 				&& File.getContent(saveAsPath) == "new document", "Save As did not assign identity after successful persistence");
 			var another = manager.createUntitled(), anotherSelection = new BufferSelection();
 			another.insert(anotherSelection, "collision");

@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-native-claude-names-') as tempo
     shutil.copytree(ROOT / 'agent/naming', adapter, ignore=shutil.ignore_patterns('package-lock.json', '.exosuit-naming-lock'))
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(config), ANTHROPIC_API_KEY='', ANTHROPIC_AUTH_TOKEN='')
     helper = subprocess.Popen(['node', str(adapter / 'claude-session-names.mjs'), str(workspace)],
-                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', env=env)
     serial = 0
     def request(method, **params):
         global serial
@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-native-claude-names-') as tempo
         return response
     def sdk(expression):
         source = "import {getSessionInfo,listSessions,renameSession} from './node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs';\n" + expression
-        return subprocess.check_output(['node', '--input-type=module', '-e', source], cwd=adapter, env=env, text=True)
+        return subprocess.check_output(['node', '--input-type=module', '-e', source], cwd=adapter, env=env, text=True, encoding='utf-8')
     try:
         assert request('session/name/read')['result']['name'] is None
         assert request('session/name/set', expected=None, name='Design α')['result']['name'] == 'Design α'

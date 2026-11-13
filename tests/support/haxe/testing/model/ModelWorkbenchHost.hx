@@ -513,7 +513,9 @@ class ModelWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function showSearchResults(query:String, results:Array<SearchMatch>):Void {
-		searchVisible = true;
+		// As UiWorkbenchHost: only another query brings Search forward. A context change refreshes the empty query's
+		// results, and that leaves the Explorer in front.
+		if (searchSidebar.query != query) searchVisible = true;
 		searchSidebar.setResults(query, results);
 	}
 

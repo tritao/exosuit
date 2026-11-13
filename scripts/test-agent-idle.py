@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real managed shutdown: idle, unnegotiated sockets, authenticated clients and opt-in availability."""
+import contextlib
 import json
-import os
 from pathlib import Path
 import socket
 import subprocess
@@ -9,24 +9,46 @@ import sys
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parent.parent
-from agent_test_runtime import launcher_path, manager_command, manager_environment
+from agent_test_runtime import launcher_path, manager_command
+from test_driver import ROOT, WINDOWS, build_test, endpoints, isolated_environment, kill_tree, run_tree, stop_managers
 
 MANAGER = launcher_path(ROOT)
 MANAGER_COMMAND = manager_command(ROOT)
-MANAGER_ENVIRONMENT = manager_environment(ROOT, MANAGER)
-HAXEON = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
-MODE = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
-PROJECT = ROOT / 'tests/workspace-attachment/haxeon.json'
-subprocess.run([HAXEON, 'build', '--project', str(PROJECT), *MODE], check=True)
-with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
+RUNNER = build_test('workspace-attachment')
+
+
+@contextlib.contextmanager
+def raw_connection(address):
+    """A connection to the manager's local endpoint that never speaks: a Unix socket, or a named pipe on Windows."""
+    if WINDOWS:
+        with open(address, 'r+b', buffering=0) as pipe:
+            yield pipe
+    else:
+        with socket.socket(socket.AF_UNIX) as raw:
+            raw.connect(address)
+            yield raw
+
+
+def endpoint_gone(address):
+    if not WINDOWS:
+        return not Path(address).exists()
+    # Asking whether a pipe exists opens it, so open it: a manager that is gone has no pipe of that name.
+    try:
+        with open(address, 'r+b', buffering=0):
+            return False
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+with tempfile.TemporaryDirectory(prefix='exidle-', ignore_cleanup_errors=True) as temporary:
     fixture = Path(temporary)
     root = fixture / 'project'; root.mkdir()
     state = fixture / 'state'
-    environment = dict(MANAGER_ENVIRONMENT, XDG_STATE_HOME=str(state))
-    environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE', None)
+    environment = isolated_environment(state, MANAGER, 'workspace-attachment')
     def endpoint():
-        entries = list(state.glob('exosuit/workspaces/*/endpoint.json'))
+        entries = endpoints(state)
         return entries[0] if entries else None
     def ready(process):
         deadline = time.monotonic() + 90
@@ -34,7 +56,8 @@ with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
             assert process.poll() is None, 'Manager exited before readiness: ' + (fixture / 'manager.log').read_text()[-4000:]
             path = endpoint()
             if path:
-                return json.loads(path.read_text())
+                try: return json.loads(path.read_text())
+                except (OSError, ValueError): pass  # being written
             time.sleep(0.05)
         raise AssertionError('Readiness timeout')
     with (fixture / 'manager.log').open('w') as log:
@@ -43,35 +66,30 @@ with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
             # No handshake: a raw socket cannot keep a service alive indefinitely.
             process = subprocess.Popen([*MANAGER_COMMAND, str(root), '--idle-seconds', '2'], env=environment, stdout=log, stderr=subprocess.STDOUT)
             first = ready(process)
-            with socket.socket(socket.AF_UNIX) as raw:
-                raw.connect(first['socket'])
+            with raw_connection(first['socket']):
                 assert process.wait(timeout=12) == 0, 'Idle shutdown reported failure'
-            assert endpoint() is None and not Path(first['socket']).exists(), 'Idle shutdown left live discovery/socket'
+            assert endpoint() is None and endpoint_gone(first['socket']), 'Idle shutdown left live discovery/socket'
             database = Path(first['credentialFile']).parent / 'catalog.sqlite'
             assert database.exists(), 'Idle shutdown discarded persistent catalog'
             # A fresh instance reopens the same durable database. Clients reset grace.
             process = subprocess.Popen([*MANAGER_COMMAND, str(root), '--idle-seconds', '10'], env=environment, stdout=log, stderr=subprocess.STDOUT)
             second = ready(process)
             assert first['generation'] != second['generation']
-            subprocess.run([HAXEON, 'run', '--project', str(PROJECT), *MODE, '--', 'hold', str(root), str(MANAGER)], env=environment, check=True, timeout=120)
+            run_tree([*RUNNER, 'hold', str(root), str(MANAGER)], environment, timeout=120)
             assert process.poll() is None and endpoint() is not None, 'Last disconnect had no grace'
             assert process.wait(timeout=15) == 0 and endpoint() is None
             # Explicit availability propagates through the detached manager boundary.
-            subprocess.run([*MANAGER_COMMAND, str(root), '--detach', '--idle-seconds', '1', '--always-available'], env=environment, check=True, timeout=90)
+            subprocess.run([*MANAGER_COMMAND, str(root), '--detach', '--idle-seconds', '1', '--always-available'], env=environment, check=True, timeout=90,
+                           stdout=subprocess.DEVNULL, stderr=log)
             descriptor = json.loads(endpoint().read_text())
             time.sleep(2)
             assert endpoint() is not None and json.loads(endpoint().read_text())['generation'] == descriptor['generation'], 'Always-available service idled out'
             print('PASS: graceful idle stop, unnegotiated socket exclusion, connected sibling, retained catalog, restart and detached always-available mode', flush=True)
         except Exception:
+            log.flush()
             print((fixture / 'manager.log').read_text()[-6000:], file=sys.stderr)
             raise
         finally:
-            if process is not None and process.poll() is None:
-                process.terminate(); process.wait(timeout=10)
-            path = endpoint()
-            if path:
-                import signal
-                try: os.kill(json.loads(path.read_text())['managerPid'], signal.SIGTERM)
-                except ProcessLookupError: pass
-                deadline = time.monotonic() + 10
-                while endpoint() and time.monotonic() < deadline: time.sleep(0.05)
+            if process is not None:
+                kill_tree(process)
+            stop_managers(state)

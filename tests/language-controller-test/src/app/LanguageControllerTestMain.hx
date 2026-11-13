@@ -71,7 +71,9 @@ class LanguageControllerTestMain {
 		require(controller.start(), "explicit Start did not clear suppression");
 		pump(controller, () -> { var service = controller.client; return service != null && service.ready; }, 5);
 		var pid = latestPid(log, directory);
-		require(Sys.command("kill", ["-KILL", Std.string(pid)]) == 0, "could not externally kill server");
+		var killed = Sys.systemName() == "Windows" ? Sys.command("taskkill", ["/F", "/PID", Std.string(pid)])
+			: Sys.command("kill", ["-KILL", Std.string(pid)]);
+		require(killed == 0, "could not externally kill server");
 		pump(controller, () -> errors.length > 0, 2);
 		require(root.getProblems().values().length > 0 && controller.statusLabel().indexOf("failed") >= 0, "crash was not visible");
 		pump(controller, () -> { var service = controller.client; return service != null && service.ready && latestPid(log, directory) != pid; }, 5);
@@ -97,11 +99,15 @@ class LanguageControllerTestMain {
 		Sys.println("PASS: lazy per-folder servers, nested routing, retained sessions, explicit Stop, external crash and configuration recovery");
 	}
 
+	/** The root URI the client sends: a drive-letter path takes a third slash (file:///C:/...). */
+	static function fileUri(root:String):String
+		return ~/^[A-Za-z]:/.match(root) ? "file:///" + root : "file://" + root;
+
 	static function initializedCount(path:String, root:String):Int {
 		var count = 0;
 		for (line in File.getContent(path).split("\n")) if (line.length > 0) {
 			var event:Dynamic = haxe.Json.parse(line);
-			if (Reflect.field(event, "root") == "file://" + root && Reflect.field(event, "method") == "initialize") count++;
+			if (Reflect.field(event, "root") == fileUri(root) && Reflect.field(event, "method") == "initialize") count++;
 		}
 		return count;
 	}
@@ -109,7 +115,7 @@ class LanguageControllerTestMain {
 		var pid = 0;
 		for (line in File.getContent(path).split("\n")) if (line.length > 0) {
 			var event:Dynamic = haxe.Json.parse(line);
-			if (Reflect.field(event, "root") == "file://" + root && Reflect.field(event, "method") == "initialize") pid = Std.parseInt(Std.string(Reflect.field(event, "pid")));
+			if (Reflect.field(event, "root") == fileUri(root) && Reflect.field(event, "method") == "initialize") pid = Std.parseInt(Std.string(Reflect.field(event, "pid")));
 		}
 		return pid;
 	}

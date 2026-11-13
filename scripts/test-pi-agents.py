@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """Native adapter tests; --real uses an installed Pi and a local mock model, never paid APIs."""
-import json, os, shutil, subprocess, sys, tempfile
+import json, os, shutil, sys, tempfile
 from pi_test_runtime import Model, configure_pi
 from pathlib import Path
-ROOT=Path(__file__).resolve().parent.parent
-HAXEON=ROOT/'haxeon'
+from test_driver import HL, MODE, ROOT, haxeon, run_tree, with_libraries
 real='--real' in sys.argv[1:]
 inputs='--inputs' in sys.argv[1:]
 project=ROOT/'tests/pi-agents'/('real-inputs.haxeon.json' if real and inputs else 'real.haxeon.json' if real else 'inputs.haxeon.json' if inputs else 'haxeon.json')
 binary=os.environ.get('EXOSUIT_PI_BIN') or shutil.which('pi')
 if real and not binary:
  raise SystemExit('Install Pi or set EXOSUIT_PI_BIN before running --real')
-subprocess.run([str(HAXEON/'scripts/haxeon'),'build','--project',str(project)],check=True)
+haxeon(['build','--project',str(project),*MODE])
 output=project.parent/'build/host'
-env=dict(os.environ)
-env['LD_LIBRARY_PATH']=':'.join(str(p) for p in [HAXEON/'out',HAXEON/'.tools/hashlink',*sorted(p for p in (output/'native').iterdir() if p.is_dir())])
+# The fake is started with EXOSUIT_TEST_PYTHON.
+env=dict(with_libraries(dict(os.environ),output/'native'),EXOSUIT_TEST_PYTHON=sys.executable)
 
-with tempfile.TemporaryDirectory(prefix='exosuit-pi-') as temporary:
+with tempfile.TemporaryDirectory(prefix='exosuit-pi-',ignore_cleanup_errors=True) as temporary:
+ # Staged images go under the temporary folder of the service (TEMP on Windows, TMPDIR elsewhere); the input test finds
+ # its staged fixture in this folder.
+ env=dict(env,TMPDIR=temporary,TEMP=temporary,TMP=temporary)
  server=configure_pi(temporary,env) if real else None
  try:
-  subprocess.run([str(HAXEON/'.tools/hashlink/hl'),str(output/'main.hl'),temporary,binary if real else str(project.parent/'fake-pi.py')],env=env,check=True,timeout=120)
+  run_tree([str(HL),str(output/'main.hl'),temporary,binary if real else str(project.parent/'fake-pi.py')],env,timeout=120,cwd=ROOT)
  finally:
   if server:server.shutdown();server.server_close()
  if real and not inputs:

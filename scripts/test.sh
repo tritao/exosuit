@@ -5,6 +5,9 @@
 # built and launched with `haxeon build`/`haxeon run`. Fixture setup for tests
 # that need files on disk lives here, matching what each project test entry
 # expects on Sys.args().
+#
+# On Windows run scripts/test-windows.ps1 instead: the suites and drivers that run there, each behind the dialog guard
+# with state of its own (-List says what it leaves out and why).
 set -euo pipefail
 # What tests start neither registers with the user's suit nor starts it (see suit/README.md).
 export EXOSUIT_SUIT=${EXOSUIT_SUIT:-off}
@@ -110,6 +113,9 @@ run_test status-bar
 terminal_context_state=$(mktemp -d)
 PRAGTICAL_PORTABLE="$terminal_context_state" run_test terminal-context-menu
 rm -rf "$terminal_context_state"
+phone_last_view_state=$(mktemp -d)
+PRAGTICAL_PORTABLE="$phone_last_view_state" run_test phone-last-view
+rm -rf "$phone_last_view_state"
 run_test sidebar-layout
 run_test terminal-keys
 run_test workbench-drag

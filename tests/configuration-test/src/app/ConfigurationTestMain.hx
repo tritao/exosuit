@@ -33,11 +33,14 @@ class ConfigurationTestMain {
 		for (suffix in ["", "/haxeon", "/haxeon/scripts", "/graphical", "/graphical/build", "/graphical/build/host"])
 			FileSystem.createDirectory(discovery + suffix);
 		File.saveContent(launcher, "fixture");
-		require(config.LanguageServerCommand.findCompilerRoot(discovery + "/graphical/build/host") == FileSystem.absolutePath(discovery + "/haxeon"),
-			"language server discovery failed from a nested application directory");
+		// Compared as absolute paths: on Windows the root is found with the absolute start's backslashes and a "/haxeon" suffix.
+		var found = config.LanguageServerCommand.findCompilerRoot(discovery + "/graphical/build/host");
+		require(found != null && FileSystem.absolutePath(found) == FileSystem.absolutePath(discovery + "/haxeon"),
+			"language server discovery failed from a nested application directory: " + found);
 		FileSystem.deleteFile(launcher);
 		FileSystem.createDirectory(launcher);
-		require(config.LanguageServerCommand.findCompilerRoot(discovery) != FileSystem.absolutePath(discovery + "/haxeon"),
+		var directoryLauncher = config.LanguageServerCommand.findCompilerRoot(discovery);
+		require(directoryLauncher == null || FileSystem.absolutePath(directoryLauncher) != FileSystem.absolutePath(discovery + "/haxeon"),
 			"language server discovery accepted a directory as an executable");
 		FileSystem.deleteDirectory(launcher);
 

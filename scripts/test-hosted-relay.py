@@ -2,15 +2,11 @@
 """Explicit opt-in native HTTPS/WSS acceptance against an existing hosted relay."""
 import argparse
 import json
-import os
 from pathlib import Path
-import signal
-import subprocess
 import tempfile
-import time
 
-ROOT = Path(__file__).resolve().parent.parent
 from agent_test_runtime import launcher_path
+from test_driver import ROOT, build_test, isolated_environment, run_tree, stop_managers
 
 
 def main():
@@ -19,30 +15,20 @@ def main():
     args = parser.parse_args()
     if not args.origin.startswith('https://'):
         parser.error('Expected an HTTPS relay origin')
-    cli = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
+    runner = build_test('workspace-attachment')
     launcher = launcher_path(ROOT)
-    compiler_mode = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
-    command = [cli, 'run', '--project', str(ROOT / 'tests/workspace-attachment/haxeon.json'), *compiler_mode, '--']
-    with tempfile.TemporaryDirectory(prefix='exa-live-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='exa-live-', ignore_cleanup_errors=True) as temporary:
         base = Path(temporary)
         project, state = base / 'project', base / 'state'
         project.mkdir()
-        environment = dict(os.environ, XDG_STATE_HOME=str(state))
+        environment = isolated_environment(state, launcher, 'workspace-attachment')
         try:
-            subprocess.run([*command, 'relay-live', str(project), str(launcher), args.origin],
-                           env=environment, check=True, timeout=150)
+            run_tree([*runner, 'relay-live', str(project), str(launcher), args.origin], environment, timeout=150)
         finally:
-            for endpoint in state.glob('exosuit/workspaces/*/endpoint.json'):
-                try:
-                    os.kill(json.loads(endpoint.read_text())['managerPid'], signal.SIGTERM)
-                except (FileNotFoundError, ProcessLookupError):
-                    pass
-            deadline = time.monotonic() + 10
-            while list(state.glob('exosuit/workspaces/*/endpoint.json')) and time.monotonic() < deadline:
-                time.sleep(.05)
+            stop_managers(state, timeout=10)
             for identity in state.glob('exosuit/workspaces/*/relay-machine.json'):
-                subprocess.run([*command, 'cleanup-relay', json.loads(identity.read_text())['machineId'], args.origin],
-                               env=environment, check=True, timeout=120)
+                run_tree([*runner, 'cleanup-relay', json.loads(identity.read_text())['machineId'], args.origin],
+                         environment, timeout=120)
 
 
 if __name__ == '__main__':

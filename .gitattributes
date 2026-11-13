@@ -1,2 +1,10 @@
 # Generated bindings are compared byte for byte by tools/update-hxi.sh --check.
 *.hxi text eol=lf
+# Sources, scripts and test fixtures are LF in every checkout, also with core.autocrlf=true on Windows: tests hold
+# multi-line string literals and fixture files whose bytes they compare, and Bash and Python scripts run as they are.
+*.hx text eol=lf
+*.hxml text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+tests/** text=auto eol=lf
+plugins/** text=auto eol=lf
