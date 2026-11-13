@@ -41,13 +41,14 @@ class StatusBarView implements View {
 			var showToast = toast != null && !data.notificationsVisible;
 			var remote = data.remoteDetails.length > 0;
 			var hasIndentation = data.indentation != null && data.openIndentation != null;
+			var cursorText = data.cursor == null ? "" : data.cursor;
 			var statusItems = data.items == null ? [] : data.items;
 			var leftItems = itemGroup(statusItems, Left, context);
 			var rightItems = itemGroup(statusItems, Right, context);
 			var leftItemsWidth = contributionWidth(statusItems, Left);
 			var rightItemsWidth = contributionWidth(statusItems, Right);
 			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread, hasIndentation,
-				leftItemsWidth, rightItemsWidth);
+				leftItemsWidth, rightItemsWidth, cursorWidth(cursorText));
 			var remoteNode:RenderNode = null, remoteButton:RenderNode = null, remoteLabel:RenderNode = null;
 			var dismissNode:RenderNode = null;
 
@@ -88,6 +89,12 @@ class StatusBarView implements View {
 			var documentNode = documentTip.build(context);
 			documentNode.layout.style.width = LayoutAxis.fixed(sizes.document);
 			root.add(documentNode);
+			var cursorNode:Null<RenderNode> = null;
+			if (cursorText.length > 0) {
+				cursorNode = tooltip("cursor", label("cursor", cursorText, false, context),
+					data.cursorDetails == null ? cursorText : data.cursorDetails).build(context);
+				root.add(cursorNode);
+			}
 			var indentationNode:Null<RenderNode> = null;
 			if (hasIndentation) {
 				var button = new Button(data.indentation, controlStyle(sizes.indentation, 22), data.openIndentation, "status-indentation");
@@ -135,7 +142,7 @@ class StatusBarView implements View {
 			var apply = function(next:StatusBarSizes, announce:Bool) {
 				// Once mounted these nodes belong to the submitted tree: announce each in-place edit (BuildContext.willEditRetained).
 				if (announce) {
-					for (node in [root, documentNode, messageNode, indentationNode, bellNode, remoteNode,
+					for (node in [root, documentNode, messageNode, cursorNode, indentationNode, bellNode, remoteNode,
 							remoteButton, remoteLabel, dismissNode, leftItemsNode, rightItemsNode])
 						if (node != null) context.willEditRetained(node);
 					if (data.unread > 0) context.willEditRetained(bellNode.children[1]);
@@ -144,6 +151,7 @@ class StatusBarView implements View {
 				root.layout.style.padding = new Insets(next.left, 0, next.right, 0);
 				sizeSlot(documentNode, next.document);
 				sizeSlot(messageNode, next.message);
+				if (cursorNode != null) sizeSlot(cursorNode, next.cursor);
 				if (indentationNode != null) { sizeSlot(indentationNode, next.indentation); indentationNode.layout.style.visible = next.indentation > 0; }
 				bellNode.layout.style.width = LayoutAxis.fixed(next.bell);
 				bellNode.layout.style.childGap = next.compact ? 0 : 8;
@@ -170,7 +178,7 @@ class StatusBarView implements View {
 				if (lastWidth == geometry.width) return;
 				lastWidth = geometry.width;
 				apply(allocate(geometry.width, remote, showToast, data.unread, hasIndentation,
-					leftItemsWidth, rightItemsWidth), true);
+					leftItemsWidth, rightItemsWidth, cursorWidth(cursorText)), true);
 				context.requestLayoutFeedback();
 			});
 			return root;
@@ -179,7 +187,7 @@ class StatusBarView implements View {
 
 	/** Allocate the resolved bar width, keeping actions intact before reducing text. */
 	static function allocate(width:Float, remote:Bool, toast:Bool, unread:Int, hasIndentation:Bool = false,
-			leftItemsWidth:Float = 0, rightItemsWidth:Float = 0):StatusBarSizes {
+			leftItemsWidth:Float = 0, rightItemsWidth:Float = 0, cursorWidth:Float = 0):StatusBarSizes {
 		var compact = width < 320;
 		var visibleLeftItems = width >= 300 ? leftItemsWidth : 0.0;
 		var visibleRightItems = width >= 380 ? rightItemsWidth : 0.0;
@@ -195,11 +203,14 @@ class StatusBarView implements View {
 				+ (visibleLeftItems > 0 ? 1 : 0) + (visibleRightItems > 0 ? 1 : 0)));
 		var indentation = hasIndentation && width >= 480 ? 92.0 : 0.0;
 		if (indentation > 0) remaining -= indentation + gap;
+		// The cursor position outranks the document name but yields before the message would vanish.
+		var cursor = cursorWidth > 0 && width >= 400 && remaining - cursorWidth - gap >= 48 ? cursorWidth : 0.0;
+		if (cursor > 0) remaining -= cursor + gap;
 		var document = remaining >= 240 ? Math.min(320, (remaining - gap) * 0.4) : 0.0;
 		if (document > 0) remaining -= gap;
 		return {compact: compact, gap: gap, left: left, right: right, bell: bell,
 			dismiss: dismiss, remote: connection, document: document, message: remaining - document,
-			indentation: indentation, leftItems: visibleLeftItems, rightItems: visibleRightItems};
+			indentation: indentation, cursor: cursor, leftItems: visibleLeftItems, rightItems: visibleRightItems};
 	}
 
 	function itemGroup(items:Array<PluginStatusItem>, side:PluginStatusSide, context:BuildContext):Null<View> {
@@ -231,6 +242,10 @@ class StatusBarView implements View {
 		style.clipHorizontal = true;
 		return new Row("status-items-" + (side == Left ? "left" : "right"), children, style);
 	}
+
+	/** Room for "Ln 12345, Col 678 (12345 selected)" style labels, measured generously at the label size. */
+	static function cursorWidth(text:String):Float
+		return text.length == 0 ? 0 : Math.min(220, text.length * 7.0 + 12);
 
 	static function contributionWidth(items:Array<PluginStatusItem>, side:PluginStatusSide):Float {
 		var width = 0.0, count = 0;
@@ -276,6 +291,9 @@ typedef StatusBarData = {
 	var document:String;
 	var status:String;
 	var remoteDetails:String;
+	/** The caret position of the active text document, e.g. "Ln 4, Col 9 (12 selected)". */
+	@:optional var cursor:String;
+	@:optional var cursorDetails:String;
 	@:optional var indentation:String;
 	@:optional var indentationDetails:String;
 	@:optional var openIndentation:Void->Void;
@@ -303,6 +321,7 @@ private typedef StatusBarSizes = {
 	var document:Float;
 	var message:Float;
 	var indentation:Float;
+	var cursor:Float;
 	var leftItems:Float;
 	var rightItems:Float;
 };

@@ -8,6 +8,7 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiContext;
 import haxeon.ui.semantics.AccessibilityRole;
 import ui.StatusBarView;
+import ui.StatusBarCursor;
 import haxeon.ui.icons.IconName;
 import plugin.PluginResourceDecorationColor;
 import plugin.PluginResourceDecorationRegistry;
@@ -40,6 +41,7 @@ class StatusBarTestMain {
 		folderIconRendering(fonts);
 		editorTabResourceDecoration(fonts);
 		statusContributions(fonts);
+		cursorLabels();
 		var status = "Haxeon: disabled after repeated failures";
 		var document = "a-very-long-document-name-with-Unicode-日本語.hx * - UTF-8";
 		for (dark in [false, true]) {
@@ -55,6 +57,7 @@ class StatusBarTestMain {
 				var toggles = 0, details = 0, dismissals = 0, connections = 0, indentations = 0;
 				var view = new StatusBarView({
 					document: document, status: status,
+					cursor: "Ln 12345, Col 678 (99999 selected)",
 					indentation: "Spaces: 4", indentationDetails: "Spaces: 4 · Detected from document", openIndentation: function() indentations++,
 					remoteDetails: remote ? "Remote workspace · Connected\n/home/example/project" : "",
 					notification: toast ? notice : null, notificationsVisible: false, unread: unread,
@@ -76,6 +79,10 @@ class StatusBarTestMain {
 							"status slots overlap or escape at " + width + " remote=" + remote + " toast=" + toast + " unread=" + unread + ": " + bounds.x + "," + bounds.width + " slots=" + [for (slot in root.children) slot.globalBounds().x + "," + slot.globalBounds().width]);
 						previousRight = bounds.x + bounds.width;
 					}
+					var cursorShown = false;
+					root.walk(function(node) { if (node.layout.style.visible && node.layout.text != null && node.layout.text.indexOf("Ln 12345") == 0) cursorShown = true; });
+					if (width == 1000) require(cursorShown, "cursor position missing from a wide status bar");
+					if (width < 400) require(!cursorShown, "cursor position crowded a narrow status bar at " + width);
 					var bell:RenderNode = null, message:RenderNode = null, dismiss:RenderNode = null, connection:RenderNode = null, indentation:RenderNode = null;
 					function visit(node:RenderNode):Void {
 						if (node.styleType == "tooltip" || !node.layout.style.visible) return;
@@ -231,6 +238,18 @@ class StatusBarTestMain {
 		});
 		require(tintedTitle, "resource decoration color did not tint the editor tab title");
 		context.dispose();
+	}
+
+	static function cursorLabels():Void {
+		var buffer = new editor.TextBuffer("alpha\nbeta gamma\n");
+		var selection = new editor.BufferSelection(new editor.BufferPosition(1, 4), new editor.BufferPosition(1, 4));
+		require(StatusBarCursor.label(buffer, selection) == "Ln 2, Col 5", "caret label: " + StatusBarCursor.label(buffer, selection));
+		selection.restore(buffer, new editor.BufferPosition(1, 2), new editor.BufferPosition(0, 3));
+		require(StatusBarCursor.label(buffer, selection) == "Ln 2, Col 3 (5 selected)",
+			"selection label: " + StatusBarCursor.label(buffer, selection));
+		selection.addRange(buffer, new editor.BufferPosition(1, 10), new editor.BufferPosition(1, 5));
+		require(StatusBarCursor.label(buffer, selection) == "2 selections (10 selected)",
+			"multi-selection label: " + StatusBarCursor.label(buffer, selection));
 	}
 
 	static function statusContributions(fonts:haxeon.ui.FontCollection):Void {
