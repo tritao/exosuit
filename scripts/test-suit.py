@@ -9,8 +9,11 @@ checks with --dry-run that bulk kills would touch none of them, and kills only i
 Covers: registration and pid-reuse checks (including old whole-second records), orphan detection, workspaces
 shared by editors or kept by suit's relay hosting, positive ownership (adoption only of exosuit kinds exosuit
 started itself, never through a terminal, never of EXOSUIT_SUIT=off; scanned processes kept out of bulk
-kills), listing without side effects, graceful stops that then kill only exosuit kinds (a terminal's programs
-survive Quit, a worker started during the grace period does not), relay listing and stop, the daemon's control
+kills), listing without side effects, stops that end a service's or an agent provider's whole tree (an agent's child
+and grandchild are listed under it and end with it; a terminal host below a service, and what runs in it, survive
+Quit; what starts during the grace period does not), terminal hosts (listed, never
+orphaned, ended by the full Quit, `kill --all` and `terminals end`, kept by `quit --keep-terminals` with the
+daemon staying up until the last one ends), relay listing and stop, the daemon's control
 endpoint (status, quit, stop), suit's unit tests, and, with --real-manager, a real workspace manager that
 registers itself and stops cooperatively through stop-request.json, and EXOSUIT_SUIT=off, isolated and unset-
 with-temporary-state keeping a real manager out of the default registry.
@@ -210,26 +213,38 @@ def test_registry_and_termination(fixture: Fixture, directory: Path) -> None:
     assert alive(editor), "kill --all must keep editors"
 
 
-def test_quit_spares_terminals(fixture: Fixture) -> None:
-    """Quit stops exosuit's processes and what exosuit spawned under them, never what a terminal started.
+def test_quit_spares_shell_programs(fixture: Fixture) -> None:
+    """Quit ends a service's whole tree, but never a terminal host it started nor what runs in that terminal.
 
-    A fake workspace daemon (registered) starts a compiler worker itself, and a terminal shell. In the shell
-    the user ran a build (another compiler worker) and a program of their own. Quit kills the daemon and
-    its worker; the shell, the build and the program live on, as if the user had left the terminal open.
+    (Terminal hosts themselves are ended by the full Quit through their own end path: test_full_quit_ends_terminals.)
+
+    A fake workspace daemon (registered) starts a compiler worker itself, and a terminal host that is not registered (so
+    this quit does not choose it) running a shell. In the shell the user ran a build (another compiler worker) and a
+    program of their own. Quit kills the daemon and its worker; the host, its shell, the build and the program live on.
     """
     scanning = dict(fixture.environment, EXOSUIT_SUIT_SCAN="1")
     shell = SPAWNER + [json.dumps([WORKER, SLEEPER])]
-    host = fixture.spawn(SPAWNER + [json.dumps([WORKER, shell])], fixture.environment)
+    # `python fake.hl --terminal-host DIR ...` reads as a terminal host (SuitClassifier.terminalDirectory).
+    fake_host = Path(tempfile.mkdtemp(prefix="suit-fake-host-")) / "terminal-host.hl"
+    fake_host.write_text("\n".join(["import json, os, subprocess, sys, time", _START.replace("sys.argv[1]", "sys.argv[3]"),
+                                    "time.sleep(300)", ""]))
+    host_command = [sys.executable, str(fake_host), "--terminal-host", str(fake_host.parent), json.dumps([shell])]
+    # The host is started with suit off, so it is not this suit's: one its owned service starts would be adopted while it
+    # starts (SuitInventory.startedByService) and ended by the quit, and this test is about what runs in a host it keeps.
+    host = fixture.spawn(SPAWNER + [json.dumps([WORKER, {"command": host_command, "env": {"EXOSUIT_SUIT": "off"}}])], fixture.environment)
     fixture.register(host.pid, "workspace-host", root=str(Path(tempfile.gettempdir()) / "suit-test-quit"))
     wait_until(lambda: len(child_processes(host.pid)) == 2, 30, "the fake daemon did not start its children")
-    worker, shell_pid = by_name(child_processes(host.pid))
+    worker, terminal_host = by_name(child_processes(host.pid))
+    wait_until(lambda: len(child_processes(terminal_host)) == 1, 30, "the fake terminal host did not start its shell")
+    (shell_pid,) = child_pids(terminal_host)
     wait_until(lambda: len(child_processes(shell_pid)) == 2, 30, "the fake shell did not start its children")
     build, program = by_name(child_processes(shell_pid))
-    survivors = [shell_pid, build, program]
+    survivors = [terminal_host, shell_pid, build, program]
     try:
         listing = scanned_listing(scanning)
         assert find(listing, worker)["source"] == "adopted", find(listing, worker)
-        assert find(listing, build)["source"] == "scanned", "a worker started from a terminal was adopted"
+        # What runs below a terminal host is the user's, so suit does not list it at all (not even as scanned).
+        assert find(listing, build) is None, "suit listed a worker started from a terminal"
         assert find(listing, shell_pid) is None and find(listing, program) is None, "suit listed a terminal's programs"
         planned = planned_kills(scanning, "--all")
         assert planned == {host.pid, worker}, f"kill --all would stop {planned}, not just this test's daemon and worker"
@@ -238,11 +253,328 @@ def test_quit_spares_terminals(fixture: Fixture) -> None:
         wait_until(lambda: not alive(host) and not pid_alive(worker), 15, "quit left the daemon or its worker running")
         time.sleep(1)
         for pid in survivors:
-            assert pid_alive(pid), f"quit killed {pid}, which a terminal started"
+            assert pid_alive(pid), f"quit killed {pid}, which runs in or is a terminal host"
     finally:
         for pid in [worker, *survivors]:
             if pid_alive(pid):
                 kill_pid(pid)
+
+
+def test_provider_tree(fixture: Fixture, directory: Path) -> None:
+    """An agent provider's children (an MCP server it started, and what that started) are not exosuit kinds: suit lists
+    them under the provider and the full quit ends them with it."""
+    provider = fixture.spawn(SPAWNER + [json.dumps([SPAWNER + [json.dumps([SLEEPER])]])], fixture.environment)
+    fixture.register(provider.pid, "agent-provider", root=str(directory / "provider-root"))
+    wait_until(lambda: len(child_pids(provider.pid)) == 1, 30, "the fake provider did not start its child")
+    (child,) = child_pids(provider.pid)
+    wait_until(lambda: len(child_pids(child)) == 1, 30, "the fake provider's child did not start the grandchild")
+    (grandchild,) = child_pids(child)
+    try:
+        entry = find(fixture.listing(), provider.pid)
+        assert entry["kind"] == "agent-provider" and entry["children"] == 2, entry
+        assert "2 child processes" in fixture.suit("list"), fixture.suit("list")
+        assert "started" in fixture.suit("start")
+        assert "Quitting Exosuit" in fixture.suit("quit")
+        wait_until(lambda: not alive(provider) and not pid_alive(child) and not pid_alive(grandchild), 20,
+                   "the full quit left the provider's child or grandchild running")
+    finally:
+        for pid in (child, grandchild):
+            if pid_alive(pid):
+                kill_pid(pid)
+
+
+# A stand-in terminal host: `python terminal-host.hl --terminal-host DIR [commands]` reads as a host
+# (SuitClassifier.terminalDirectory). It starts each command of its JSON list (pids in DIR/children.txt) and ends when
+# DIR/end-request.json appears, leaving DIR/ended-by-request, as a real host takes suit's end request.
+_FAKE_HOST = "\n".join([
+    "import json, os, subprocess, sys, time",
+    "folder = sys.argv[2]",
+    "commands = json.loads(sys.argv[3]) if len(sys.argv) > 3 else []",
+    "pids = [subprocess.Popen(c, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid for c in commands]",
+    "open(os.path.join(folder, 'children.txt'), 'w').write(','.join(map(str, pids)))",
+    "while not os.path.exists(os.path.join(folder, 'end-request.json')):",
+    "    time.sleep(0.1)",
+    "open(os.path.join(folder, 'ended-by-request'), 'w').write('1')",
+    ""])
+
+
+def fake_terminal_host(fixture: Fixture, folder: Path, commands: list | None = None,
+                       environment: dict | None = None) -> subprocess.Popen:
+    folder.mkdir(parents=True, exist_ok=True)
+    script = folder.parent / "terminal-host.hl"
+    if not script.exists():
+        script.write_text(_FAKE_HOST)
+    process = fixture.spawn([sys.executable, str(script), "--terminal-host", str(folder), json.dumps(commands or [])], environment)
+    wait_until(lambda: (folder / "children.txt").exists(), 15, "the stand-in terminal host did not start")
+    return process
+
+
+def test_cli_ends_own_terminal_last(fixture: Fixture, directory: Path) -> None:
+    """`suit kill --all` typed into an Exosuit terminal (no daemon) ends everything else first, prints it, and only then
+    ends the terminal it runs in, which ends the command too."""
+    service = fixture.spawn()
+    fixture.register(service.pid, "workspace-host", root=str(directory / "alpha"))
+    other = fake_terminal_host(fixture, directory / "hosts" / "other")
+    fixture.register(other.pid, "terminal-host", root=str(directory / "alpha"), workspace="ws-alpha")
+    output = directory / "cli-output.txt"
+    # The terminal's program: waits for the host to be registered, then runs `suit kill --all` into a file.
+    command = [sys.executable, "-c", "import subprocess, sys, time; time.sleep(2); o = open(sys.argv[1], 'w'); "
+               "subprocess.run(sys.argv[2:], stdout=o, stderr=o); o.close()", str(output), str(HL), str(SUIT), "kill", "--all"]
+    own = fake_terminal_host(fixture, directory / "hosts" / "own", [command], fixture.environment)
+    fixture.register(own.pid, "terminal-host", root=str(directory / "alpha"), workspace="ws-alpha")
+    wait_until(lambda: not alive(own), 30, "`suit kill --all` did not end the terminal it runs in")
+    wait_until(lambda: output.exists() and "ending it now" in output.read_text(), 15, f"no closing line in the output")
+    assert not alive(service) and not alive(other), "`suit kill --all` left a process running"
+    lines = output.read_text().splitlines()
+    last_others = max(i for i, line in enumerate(lines) if line.startswith((f"{service.pid} ", f"{other.pid} ")))
+    announced = next(i for i, line in enumerate(lines) if "ending it now" in line)
+    assert announced > last_others and lines[announced].startswith(f"{own.pid} "), f"the own terminal was not ended last: {lines}"
+
+
+def terminal_host_stand_ins(fixture: Fixture, directory: Path):
+    """Two registered stand-ins for terminal hosts in two workspaces, and an orphaned service stand-in."""
+    root_a, root_b = directory / "alpha", directory / "beta"
+    first = fake_terminal_host(fixture, directory / "hosts" / "first")
+    second = fake_terminal_host(fixture, directory / "hosts" / "second")
+    service = fixture.spawn()
+    fixture.register(first.pid, "terminal-host", root=str(root_a), workspace="ws-alpha")
+    fixture.register(second.pid, "terminal-host", root=str(root_b), workspace="ws-beta")
+    fixture.register(service.pid, "workspace-host", root=str(root_a))
+    return root_a, root_b, first, second, service
+
+
+def test_terminal_hosts(fixture: Fixture, directory: Path) -> None:
+    """Terminal hosts are listed in their own group, never orphaned, part of `kill --all`, and ended per workspace.
+
+    Real hosts, their end request and their folders are covered by scripts/test-terminal-hosts.py.
+    """
+    root_a, root_b, first, second, service = terminal_host_stand_ins(fixture, directory)
+    listing = fixture.listing()
+    for host in (first, second):
+        entry = find(listing, host.pid)
+        assert entry["kind"] == "terminal-host" and not entry["orphaned"], entry
+        assert entry["group"].startswith("Terminals"), entry
+    assert listing["terminals"] == 2 and listing["background"] == 3, listing
+    assert "2 terminals" in listing["summary"], listing["summary"]
+    assert find(listing, service.pid)["orphaned"], "the service stand-in should be an orphan here"
+    assert planned_kills(fixture.environment, "--all") == {service.pid, first.pid, second.pid}, "kill --all must end terminal hosts"
+    assert planned_kills(fixture.environment, "--orphans") == {service.pid}, "kill --orphans would end a terminal host"
+
+    def planned_ends(selection: str) -> set[int]:
+        output = fixture.suit("terminals", "end", selection, "--dry-run")
+        return {int(line.split()[0]) for line in output.splitlines() if line.endswith("would stop")}
+
+    assert planned_ends("--all") == {first.pid, second.pid}
+    assert planned_ends("ws-beta") == {second.pid} and planned_ends("alpha") == {first.pid} and planned_ends(str(root_b)) == {second.pid}
+    menu = fixture.suit("menu")
+    for expected in ("End all terminals (2)", "End terminals of alpha (1)", "End terminals of beta (1)",
+                     "Quit Exosuit and end everything (2 terminals)", "Quit, keep terminals running (2)",
+                     "Terminate all background processes (3)"):
+        assert expected in menu, f"{expected!r} is missing from the menu:\n{menu}"
+    assert str(first.pid) in fixture.suit("terminals") and "suit quit --keep-terminals" in fixture.suit("list")
+    # One workspace's terminals, then all of them.
+    assert str(second.pid) in fixture.suit("terminals", "end", "ws-beta")
+    wait_until(lambda: not alive(second), 15, "`terminals end <workspace>` left its host running")
+    assert alive(first), "`terminals end <workspace>` ended another workspace's terminal"
+    assert str(first.pid) in fixture.suit("terminals", "end", "--all")
+    wait_until(lambda: not alive(first), 15, "`terminals end --all` left a host running")
+    assert fixture.listing()["terminals"] == 0
+
+
+def test_full_quit_ends_terminals(fixture: Fixture, directory: Path) -> None:
+    """`suit quit` (the full quit) ends terminal hosts with everything else, and the daemon exits when nothing is left."""
+    _, _, first, second, service = terminal_host_stand_ins(fixture, directory)
+    assert "started" in fixture.suit("start")
+    said = fixture.suit("quit")
+    assert "Quitting Exosuit: ending 3 process(es) (2 terminal(s) among them)" in said, said
+    wait_until(lambda: not alive(service) and not alive(first) and not alive(second), 20, "the full quit left a process running")
+    for name in ("first", "second"):
+        assert (directory / "hosts" / name / "ended-by-request").exists(), f"the {name} host was killed, not ended through its end request"
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the full quit")
+    assert fixture.listing()["processes"] == []
+
+
+def test_full_quit_waits_for_editor_in_terminal(fixture: Fixture, directory: Path) -> None:
+    """An editor runs in an Exosuit terminal (`python scripts/run.py` started there). The full quit leaves that terminal's
+    host running while the editor is open (it may be asking to save), and ends it once the editor has exited."""
+    folder = directory / "hosts" / "with-editor"
+    host = fake_terminal_host(fixture, folder, [SLEEPER])
+    editor = int((folder / "children.txt").read_text())
+    try:
+        fixture.register(editor, "editor", roots=[str(directory / "run")])
+        fixture.register(host.pid, "terminal-host", root=str(directory / "run"), workspace="ws-run")
+        assert "started" in fixture.suit("start")
+        fixture.suit("quit")
+        time.sleep(4)
+        assert alive(host) and not (folder / "ended-by-request").exists(), \
+            "the full quit ended the terminal an editor runs in before the editor closed"
+        kill_pid(editor)  # the editor closes (its stand-in has no window to ask)
+        wait_until(lambda: not alive(host), 30, "the full quit did not end the terminal host once its editor had exited")
+        assert (folder / "ended-by-request").exists(), "the host was killed, not ended through its end request"
+        wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the full quit")
+    finally:
+        if pid_alive(editor):
+            kill_pid(editor)
+
+
+def test_polite_quit_keeps_terminals(fixture: Fixture, directory: Path) -> None:
+    """`suit quit --keep-terminals` ends everything but terminal hosts; the daemon stays up, listing them, until the last one ends."""
+    _, _, first, second, service = terminal_host_stand_ins(fixture, directory)
+    assert "started" in fixture.suit("start")
+    said = fixture.suit("quit", "--keep-terminals")
+    assert "2 terminals keep running" in said and "suit terminals end --all" in said, said
+    wait_until(lambda: not alive(service), 15, "the polite quit left a background process")
+    time.sleep(4)
+    assert alive(first) and alive(second), "the polite quit ended a terminal host"
+    status = json.loads(fixture.suit("status", "--json"))
+    assert status.get("ok") is True and status["terminals"] == 2, f"the daemon must stay up listing the kept terminals: {status}"
+    assert str(first.pid) in fixture.suit("terminals", "end", "--all")
+    wait_until(lambda: not alive(first) and not alive(second), 15, "`terminals end --all` left a host running")
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the last kept terminal ended")
+
+
+def test_polite_quit_keeps_remote_access(fixture: Fixture, directory: Path) -> None:
+    """With remote access on, the polite quit's kept terminals ending later does not take the daemon (and the phone's
+    access) down with them: the quit is over and the daemon stays up as it would have without it."""
+    if os.name != "nt":
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    credentials = directory / "credentials"
+    credentials.mkdir(exist_ok=True)
+    fixture.environment.update(EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP="1", EXOSUIT_RELAY_TEST_CREDENTIALS_DIR=str(credentials))
+    _, _, first, second, service = terminal_host_stand_ins(fixture, directory)
+    assert "started" in fixture.suit("start")
+    enabled = request_through_pipe(fixture, {"op": "remote-enable", "origin": "http://127.0.0.1:9"})
+    assert enabled.get("enabled") is True, f"remote access was not set up: {enabled}"
+    fixture.suit("quit", "--keep-terminals")
+    wait_until(lambda: not alive(service), 15, "the polite quit left a background process")
+    fixture.suit("terminals", "end", "--all")
+    wait_until(lambda: not alive(first) and not alive(second), 15, "`terminals end --all` left a host running")
+    time.sleep(12)  # longer than the daemon's 10 s rescan, which would find nothing owned left
+    status = json.loads(fixture.suit("status", "--json"))
+    assert status.get("ok") is True, f"the daemon exited after the polite quit although remote access is on: {status}"
+    assert request_through_pipe(fixture, {"op": "remote-status"}).get("enabled") is True
+
+
+def test_polite_quit_does_not_hunt_new_arrivals(fixture: Fixture, directory: Path) -> None:
+    """After `suit quit --keep-terminals` with a terminal host kept, a manager started afterwards (the user starting
+    Exosuit again, no editor registered yet) is left alone for longer than the quit's re-terminate rounds."""
+    _, _, first, second, service = terminal_host_stand_ins(fixture, directory)
+    assert "started" in fixture.suit("start")
+    fixture.suit("quit", "--keep-terminals")
+    wait_until(lambda: not alive(service), 15, "the polite quit left a background process")
+    time.sleep(3)  # the quit's rounds are over
+    manager = fixture.spawn()
+    fixture.register(manager.pid, "workspace-manager", root=str(directory / "again"))
+    time.sleep(12)  # longer than the daemon's 10 s rescan, which is when a lingering quit would find it
+    assert alive(manager), "the daemon ended a workspace manager started after the polite quit"
+    assert alive(first) and alive(second), "the polite quit ended a terminal host"
+
+
+def attach_through_pipe(fixture: Fixture) -> dict:
+    """A forged relay attach over the daemon's pipe (Windows); the reply, as a workspace service would read it."""
+    return request_through_pipe(fixture, {"op": "relay-attach", "version": 1, "pid": os.getpid()})
+
+
+def request_through_pipe(fixture: Fixture, request: dict) -> dict:
+    """One control request over the daemon's pipe (Windows); the reply."""
+    endpoint = json.loads((fixture.home / "daemon.json").read_text())["endpoint"]
+    message = json.dumps(request).encode()
+    with open(endpoint, "r+b", buffering=0) as pipe:
+        pipe.write(b"HMPK\x01\x00" + len(message).to_bytes(4, "big") + message)
+        header = pipe.read(10)
+        return json.loads(pipe.read(int.from_bytes(header[6:10], "big")))
+
+
+def test_full_quit_refuses_relay_attach(fixture: Fixture, directory: Path) -> None:
+    """With an editor kept open the daemon stays up after the full quit, but refuses relay attaches and has machine remote
+    access off until a new editor registers (the user started Exosuit again), which brings both back."""
+    if os.name != "nt":
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    credentials = directory / "credentials"
+    credentials.mkdir(exist_ok=True)
+    # Remote access set up with a relay nobody listens on (configured, never connected), with a file credential store.
+    fixture.environment.update(EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP="1", EXOSUIT_RELAY_TEST_CREDENTIALS_DIR=str(credentials))
+    editor = fixture.spawn()
+    fixture.register(editor.pid, "editor", root=str(directory / "kept"))
+    assert "started" in fixture.suit("start")
+    enabled = request_through_pipe(fixture, {"op": "remote-enable", "origin": "http://127.0.0.1:9"})
+    assert enabled.get("ok") is True and enabled.get("enabled") is True, f"remote access was not set up: {enabled}"
+    fixture.suit("quit")
+    time.sleep(3)
+    assert alive(editor), "the full quit ended an editor that was not asked to close"
+    reply = attach_through_pipe(fixture)
+    assert reply.get("error") == "suit_quitting", f"the relay attach was not refused by the quit: {reply}"
+    status = request_through_pipe(fixture, {"op": "remote-status"})
+    assert status.get("enabled") is False, f"the full quit left remote access on: {status}"
+    # A newly started editor cancels the quit; the attach then fails for its own reasons, not the quit's.
+    other = fixture.spawn()
+    fixture.register(other.pid, "editor", root=str(directory / "again"))
+    fixture.suit("status")  # the status request rescans
+    reply = attach_through_pipe(fixture)
+    assert reply.get("error") != "suit_quitting", f"a new editor did not cancel the quit: {reply}"
+    status = request_through_pipe(fixture, {"op": "remote-status"})
+    assert status.get("enabled") is True, f"cancelling the quit did not bring remote access back: {status}"
+
+
+# One stand-in per kind suit can be shown by registration alone (each a sleeper this test started).
+EVERY_KIND = ["editor", "workspace-manager", "workspace-host", "compiler-worker", "live-session", "live-host",
+              "terminal-host", "agent-provider", "language-server", "helper", "launcher", "other"]
+
+
+def start_every_kind(fixture: Fixture, directory: Path) -> dict[str, subprocess.Popen]:
+    started = {}
+    for kind in EVERY_KIND:
+        process = fixture.spawn()
+        fixture.register(process.pid, kind, root=str(directory / "every"), workspace="ws-every",
+                         **({"roots": [str(directory / "every")], "workspaces": ["ws-every"]} if kind == "editor" else {}))
+        started[kind] = process
+    listing = json.loads(fixture.suit("list", "--all", "--json"))
+    for kind in EVERY_KIND:
+        assert listing["all"]["kinds"][kind]["exosuit"] == 1, f"`suit list --all` does not count the {kind}: {listing['all']['kinds']}"
+    assert listing["all"]["daemon"] is not None, "`suit list --all` does not show the daemon"
+    assert "suit daemon" in fixture.suit("list", "--all")
+    # Only this test's processes: the isolated suit sees nothing else.
+    assert {entry["pid"] for entry in listing["processes"]} == {p.pid for p in started.values()}, listing["processes"]
+    return started
+
+
+def finish_with_editor(fixture: Fixture, editor: subprocess.Popen, expected: set[int]) -> None:
+    """The editor stand-in has no window to close, so it stays (never killed); the daemon keeps listing it. Close it."""
+    left = {entry["pid"] for entry in fixture.listing()["processes"]}
+    assert left == expected | {editor.pid}, f"after the quit {left} is left, expected {expected | {editor.pid}}"
+    assert "not running" not in fixture.suit("status"), "the daemon exited while something was left"
+    editor.kill(); editor.wait()
+
+
+def test_full_quit_ends_every_kind(fixture: Fixture, directory: Path) -> None:
+    """One of each kind, `suit quit`: nothing exosuit-related is left, then the daemon exits."""
+    assert "started" in fixture.suit("start")
+    started = start_every_kind(fixture, directory)
+    fixture.suit("quit")
+    wait_until(lambda: all(not alive(p) for kind, p in started.items() if kind != "editor"), 20, "the full quit left a process running")
+    finish_with_editor(fixture, started["editor"], set())
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the full quit")
+    assert fixture.listing()["processes"] == []
+
+
+def test_polite_quit_leaves_only_terminals(fixture: Fixture, directory: Path) -> None:
+    """One of each kind, `suit quit --keep-terminals`: only the terminal host and the daemon are left."""
+    assert "started" in fixture.suit("start")
+    started = start_every_kind(fixture, directory)
+    fixture.suit("quit", "--keep-terminals")
+    host = started["terminal-host"]
+    wait_until(lambda: all(not alive(p) for kind, p in started.items() if kind not in ("editor", "terminal-host")), 20,
+               "the polite quit left a process running")
+    finish_with_editor(fixture, started["editor"], {host.pid})
+    time.sleep(3)
+    assert alive(host), "the polite quit ended the terminal host"
+    assert {entry["pid"] for entry in fixture.listing()["processes"]} == {host.pid}
+    assert "not running" not in fixture.suit("status"), "the daemon must stay up while a terminal host runs"
+    fixture.suit("terminals", "end", "--all")
+    wait_until(lambda: not alive(host), 15, "`terminals end --all` left the host running")
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the last terminal ended")
 
 
 def run_suit(environment: dict, *arguments: str) -> str:
@@ -328,7 +660,12 @@ def test_workspace_ids_with_several_editors(fixture: Fixture, directory: Path) -
     assert "Quitting Exosuit" in fixture.suit("quit")
     wait_until(lambda: not any(alive(s) for s in services.values()), 15, "quit left a workspace service running")
     assert alive(third) and alive(fourth), "quit killed an editor that was not asked to close"
-    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after quit")
+    # The daemon exits only when nothing is left: it keeps listing the editors that stayed open.
+    time.sleep(3)
+    assert "not running" not in fixture.suit("status"), "the daemon exited while editors were still open"
+    for editor in (third, fourth):
+        editor.kill(); editor.wait()
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the last editor closed")
 
 
 def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
@@ -372,8 +709,8 @@ def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
 
 
 def test_late_child(fixture: Fixture, directory: Path) -> None:
-    """A worker started during the grace period dies: suit kills the target, then sweeps a fresh snapshot.
-    A program of another kind started then is not exosuit's to kill, and lives on."""
+    """What a service starts during the grace period dies: suit kills the target, then sweeps a fresh snapshot of its
+    whole tree, so a worker and a program of another kind started then end with it."""
     directory.mkdir(parents=True, exist_ok=True)
     state = directory / "late-state"; state.mkdir()
     marker = directory / "late-children.pid"
@@ -386,11 +723,151 @@ def test_late_child(fixture: Fixture, directory: Path) -> None:
     late_worker, late_program = (int(pid) for pid in marker.read_text().split(","))
     try:
         wait_until(lambda: not pid_alive(late_worker), 10, "a worker started during the grace period survived")
-        assert pid_alive(late_program), "suit killed a program that is not of a kind exosuit starts"
+        wait_until(lambda: not pid_alive(late_program), 10, "a program the service started during the grace period survived")
     finally:
         for pid in (late_worker, late_program):
             if pid_alive(pid):
                 kill_pid(pid)
+
+
+def test_helper_markers(fixture: Fixture, directory: Path) -> None:
+    """The Claude name bridge (node) and the profiler bridge (hl) carry `--exosuit-helper=...`: suit recognises them
+    under their workspace service, the same program without the marker is not listed as one, and ending the service ends
+    them all (its whole tree)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    state = directory / "helper-state"; state.mkdir()
+    marker = directory / "helper-children.pid"
+    helpers = [SLEEPER + ["root", "--exosuit-helper=claude-name-bridge"], SLEEPER + ["--exosuit-helper=profiler-bridge"], SLEEPER]
+    manager = fixture.spawn(LATE_PARENT + [json.dumps(helpers), str(marker)], fixture.environment)
+    fixture.register(manager.pid, "workspace-manager", root=str(directory / "helper-root"), stateDir=str(state), generation="g1")
+    wait_until(lambda: marker.exists() and marker.read_text().count(",") == 2, 20, "the fake service did not start its helpers")
+    name_bridge, profiler_bridge, stranger = (int(pid) for pid in marker.read_text().split(","))
+    try:
+        listing = scanned_listing(dict(fixture.environment, EXOSUIT_SUIT_SCAN="1"))
+        helper_pids = {entry["pid"] for entry in listing["processes"] if entry.get("kind") == "helper"}
+        assert {name_bridge, profiler_bridge} <= helper_pids, f"suit did not list the bridges as helpers: {listing['processes']}"
+        assert stranger not in helper_pids, "suit took a program without the marker for a helper"
+        output = fixture.suit("kill", str(manager.pid))
+        assert f"{manager.pid} workspace-manager: killed" in output, output
+        wait_until(lambda: not pid_alive(name_bridge) and not pid_alive(profiler_bridge) and not pid_alive(stranger), 15,
+                   "ending the service left a bridge or another child running")
+    finally:
+        for pid in (name_bridge, profiler_bridge, stranger):
+            if pid_alive(pid):
+                kill_pid(pid)
+
+
+def start_run_py(fixture: Fixture, directory: Path) -> tuple[subprocess.Popen, int]:
+    """A stand-in `python scripts/run.py --live` that runs a run session of this checkout's graphical/haxeon.json; returns
+    the launcher and, once it started, the session's pid."""
+    scripts = directory / "scripts"; scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "run.py").write_text("\n".join(["import json, os, subprocess, sys, time", _START, "time.sleep(300)", ""]))
+    session = [str(HL), str(SUIT), "watch", "--fake=haxeon-cli.hl", "run", "--project", str(ROOT / "graphical" / "haxeon.json"),
+               "--watch", "--live"]
+    launcher = fixture.spawn([sys.executable, str(scripts / "run.py"), json.dumps([session])], fixture.environment)
+    wait_until(lambda: len(child_pids(launcher.pid)) == 1, 20, "the run.py stand-in did not start its session")
+    (session_pid,) = child_pids(launcher.pid)
+    return launcher, session_pid
+
+
+def test_run_py_chain(fixture: Fixture, directory: Path, keep_terminals: bool) -> None:
+    """`python scripts/run.py --live` and what it starts, as stand-ins: the launcher runs a run session of this checkout's
+    graphical/haxeon.json; a live host of this checkout's graphical/build and a compiler worker on this checkout's hl.exe,
+    started after the session, run with no exosuit parent (as through `cmd /C` and `cmd /c start`). No editor is
+    registered: suit ties the chain by the checkout alone. A run session of another checkout, started by no run.py, stays
+    not started by exosuit and out of every bulk stop; it runs on the same hl.exe, so while it runs the worker is shared
+    with it. Once it is gone, the full quit, and the polite one, end the chain."""
+    launcher, session_pid = start_run_py(fixture, directory)
+    live_host = fixture.spawn([str(HL), str(SUIT), "watch", "--fake=live-host.hl", str(ROOT / "graphical/build/host/live.hl")],
+                              fixture.environment)
+    worker = fixture.spawn(WORKER, fixture.environment)
+    stranger = fixture.spawn([str(HL), str(SUIT), "watch", "--fake=haxeon-cli.hl", "run", "--project",
+                              str(directory / "other" / "graphical" / "haxeon.json"), "--live"], fixture.environment)
+    scanning = dict(fixture.environment, EXOSUIT_SUIT_SCAN="1")
+    try:
+        listing = json.loads(run_suit(scanning, "list", "--all", "--json"))
+        kinds = listing["all"]["kinds"]
+        for kind in ("launcher", "live-session", "live-host", "compiler-worker"):
+            assert kinds[kind]["exosuit"] == 1, f"`suit list --all` does not count the {kind} as exosuit's: {kinds}"
+        sources = {entry["pid"]: entry for entry in listing["processes"]}
+        # The scan sees the whole machine, so the not-started counts include the user's own processes: check the stranger.
+        assert sources.get(stranger.pid, {}).get("source") == "scanned", f"the other checkout's session was taken: {sources.get(stranger.pid)}"
+        ours = {launcher.pid, session_pid, live_host.pid, worker.pid}
+        for pid in ours:
+            assert pid in sources and sources[pid]["source"] != "scanned", f"{pid} is not exosuit's: {listing['processes']}"
+        # The isolated suit sees nothing it was not shown: only this test's processes are exosuit's.
+        assert {pid for pid, entry in sources.items() if entry["source"] != "scanned"} == ours, listing["processes"]
+        assert sources[worker.pid]["shared"], f"a worker another checkout's session may use is not shared: {sources[worker.pid]}"
+        planned = planned_kills(scanning, "--all")
+        assert stranger.pid not in planned and worker.pid not in planned, f"kill --all would stop the stranger or the shared worker: {planned}"
+        stranger.kill(); stranger.wait()
+        assert worker.pid in planned_kills(scanning, "--all"), "the worker is still shared after the other session ended"
+        run_suit(scanning, "quit", *(["--keep-terminals"] if keep_terminals else []))
+        wait_until(lambda: not any(pid_alive(pid) for pid in ours), 20, "the quit left part of the run.py chain running")
+    finally:
+        for pid in (session_pid,):
+            if pid_alive(pid):
+                kill_pid(pid)
+
+
+def test_terminal_build_shares_worker(fixture: Fixture, directory: Path) -> None:
+    """A run.py session's compiler worker is exosuit's, but a build the user runs in a terminal on the same hl.exe (a
+    stand-in shell running `hl haxeon-cli.hl build`) uses the same per-compiler workers: while it runs the worker is
+    listed as shared with your builds, no bulk stop plans it, and the polite quit ends the session and leaves the worker
+    and the build. Once the session is gone the worker is not exosuit's, so the orphan sweep leaves it too."""
+    launcher, session_pid = start_run_py(fixture, directory)
+    worker = fixture.spawn(WORKER, fixture.environment)
+    scanning = dict(fixture.environment, EXOSUIT_SUIT_SCAN="1")
+    build_command = [str(HL), str(SUIT), "watch", "--fake=haxeon-cli.hl", "build", "--project", str(directory / "mine" / "haxeon.json")]
+    build = None
+    try:
+        entry = find(scanned_listing(scanning), worker.pid)
+        assert entry is not None and entry["source"] == "adopted" and not entry["shared"], entry
+        assert worker.pid in planned_kills(scanning, "--all"), "the session's own worker is not in kill --all"
+        shell = fixture.spawn(SPAWNER + [json.dumps([build_command])], fixture.environment)
+        wait_until(lambda: len(child_pids(shell.pid)) == 1, 20, "the terminal stand-in did not start its build")
+        (build,) = child_pids(shell.pid)
+        listing = scanned_listing(scanning)
+        entry = find(listing, worker.pid)
+        assert entry["shared"] and not entry["orphaned"] and entry["startedByExosuit"], entry
+        assert find(listing, build) is None, "suit listed the terminal's build"
+        assert "shared with your builds" in listing["summary"] and "shared with your builds" in run_suit(scanning, "list")
+        for selection in ("--all", "--orphans"):
+            assert worker.pid not in planned_kills(scanning, selection), f"kill {selection} would stop a worker a terminal build uses"
+        run_suit(scanning, "quit", "--keep-terminals")
+        wait_until(lambda: not pid_alive(session_pid) and not alive(launcher), 20, "the polite quit left the run.py chain running")
+        time.sleep(1)
+        assert alive(worker) and pid_alive(build), "the polite quit ended a worker a terminal build uses, or the build"
+        # The build ends; the session that tied the worker to exosuit is gone, so no adoption lingers to orphan it.
+        kill_pid(build)
+        wait_until(lambda: not pid_alive(build), 10, "the build stand-in did not end")
+        entry = find(scanned_listing(scanning), worker.pid)
+        assert entry is not None and entry["source"] == "scanned" and not entry["orphaned"], entry
+        assert worker.pid not in planned_kills(scanning, "--orphans"), "the orphan sweep would stop a worker exosuit no longer uses"
+        assert not (fixture.registry / f"{worker.pid}.json").exists(), "suit persisted a checkout worker's adoption"
+    finally:
+        for pid in (session_pid, build):
+            if pid is not None and pid_alive(pid):
+                kill_pid(pid)
+
+
+def test_terminal_program_not_adopted(fixture: Fixture, directory: Path) -> None:
+    """A terminal whose program is itself of a kind exosuit starts (here a stand-in SDK-mode claude) runs the user's
+    program: suit neither adopts nor lists it, so no bulk stop takes it; the host ends it when the terminal ends."""
+    claude = SLEEPER + ["--permission-prompt-tool", "stdio", "--output-format", "stream-json"]
+    host = fixture.spawn(SPAWNER + [json.dumps([claude])], fixture.environment)
+    fixture.register(host.pid, "terminal-host", root=str(directory / "alpha"), workspace="ws-alpha")
+    wait_until(lambda: len(child_pids(host.pid)) == 1, 20, "the terminal host stand-in did not start its program")
+    (program,) = child_pids(host.pid)
+    scanning = dict(fixture.environment, EXOSUIT_SUIT_SCAN="1")
+    try:
+        listing = scanned_listing(scanning)
+        assert find(listing, host.pid)["kind"] == "terminal-host", listing["processes"]
+        assert find(listing, program) is None, f"suit listed a terminal's program by its kind: {find(listing, program)}"
+        assert planned_kills(scanning, "--all") == {host.pid}, "kill --all would stop a terminal's program directly"
+    finally:
+        if pid_alive(program):
+            kill_pid(program)
 
 
 def test_ownership(fixture: Fixture, directory: Path) -> None:
@@ -531,6 +1008,9 @@ def test_daemon(fixture: Fixture) -> None:
     wait_until(lambda: not alive(service), 15, "quit left a background process")
     # The fixture editor has no window to close, so suit leaves it running instead of killing it.
     assert alive(editor), "quit killed an editor that was not asked to close"
+    time.sleep(3)
+    assert "not running" not in fixture.suit("status"), "the daemon exited while an editor was still open"
+    editor.kill(); editor.wait()
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after quit")
     assert "started" in fixture.suit("start")
     assert "stopped" in fixture.suit("stop")
@@ -744,10 +1224,26 @@ def main() -> int:
         directory = Path(temporary)
         tests = [("registry and termination", lambda f: test_registry_and_termination(f, directory / "a")),
                  ("shared workspace", lambda f: test_shared_workspace(f, directory / "s")),
-                 ("quit spares terminals", test_quit_spares_terminals),
+                 ("quit spares a shell's programs", test_quit_spares_shell_programs),
+                 ("provider tree", lambda f: test_provider_tree(f, directory / "pt")),
+                 ("terminal hosts", lambda f: test_terminal_hosts(f, directory / "t")),
+                 ("full quit ends terminals", lambda f: test_full_quit_ends_terminals(f, directory / "tq")),
+                 ("full quit waits for an editor in a terminal", lambda f: test_full_quit_waits_for_editor_in_terminal(f, directory / "tw")),
+                 ("polite quit keeps terminals", lambda f: test_polite_quit_keeps_terminals(f, directory / "tp")),
+                 ("the CLI ends its own terminal last", lambda f: test_cli_ends_own_terminal_last(f, directory / "co")),
+                 ("polite quit keeps remote access", lambda f: test_polite_quit_keeps_remote_access(f, directory / "pr")),
+                 ("polite quit leaves new arrivals", lambda f: test_polite_quit_does_not_hunt_new_arrivals(f, directory / "pn")),
+                 ("full quit refuses relay attach", lambda f: test_full_quit_refuses_relay_attach(f, directory / "fr")),
+                 ("full quit ends every kind", lambda f: test_full_quit_ends_every_kind(f, directory / "ea")),
+                 ("polite quit leaves only terminals", lambda f: test_polite_quit_leaves_only_terminals(f, directory / "ep")),
                  ("workspace ids with several editors", lambda f: test_workspace_ids_with_several_editors(f, directory / "i")),
                  ("hosted workspace", lambda f: test_hosted_workspace(f, directory / "h")),
                  ("late child", lambda f: test_late_child(f, directory / "l")),
+                 ("helper markers", lambda f: test_helper_markers(f, directory / "h")),
+                 ("full quit ends the run.py chain", lambda f: test_run_py_chain(f, directory / "rq", False)),
+                 ("polite quit ends the run.py chain", lambda f: test_run_py_chain(f, directory / "rp", True)),
+                 ("a terminal build shares the worker", lambda f: test_terminal_build_shares_worker(f, directory / "rb")),
+                 ("a terminal's program is not adopted", lambda f: test_terminal_program_not_adopted(f, directory / "rt")),
                  ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon),
                  ("machine", lambda f: test_machine(f, directory / "m"))]
         if options.real_manager:

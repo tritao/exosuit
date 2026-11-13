@@ -21,11 +21,15 @@ class SuitMain {
 		"usage: suit <command>",
 		"  status [--json]           daemon state and process counts",
 		"  list [--json]             every exosuit process, grouped by editor; orphans, then others found, last",
+		"  list --all [--json]       also counts every kind (zero included), the daemon, remote access and paired devices",
 		"  menu                      print the tray menu as text (disabled items in brackets)",
 		"  watch [--relay] [--once]  the process viewer: list, refreshed every 2 s",
 		"  kill <pid>...             stop listed processes (graceful first, then the tree)",
 		"  kill --orphans            stop exosuit's processes whose editor is gone",
-		"  kill --all                stop exosuit's background processes; editors keep running",
+		"  kill --all                stop exosuit's background processes, terminal hosts included; editors keep running",
+		"  terminals [--json]        the terminals running in terminal hosts, with their workspaces",
+		"  terminals end --all       end every terminal (its program too)",
+		"  terminals end <workspace> end one workspace's terminals (id, root or folder name); add --dry-run to only print",
 		"  kill ... --dry-run        print what a kill would stop, and stop nothing",
 		"  relay list [--json]       workspaces hosting remote access, with devices",
 		"  relay stop <workspace>    stop hosting one workspace (root or folder name); grants persist",
@@ -34,6 +38,10 @@ class SuitMain {
 		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters); it is refused for 60 s",
 		"  relay retry <workspace>   try again to host a workspace that failed",
 		"  relay forget <workspace>  stop hosting it from suit and forget its record (needed after moving a build)",
+		"  remote [--json]           remote access: the relay connection, paired devices (name, paired, connected, workspaces), sessions",
+		"  remote disconnect <device> end a device's live session now (id, a prefix of 4+ characters, or its name); it may reconnect",
+		"  remote revoke <device>    revoke a device's pairing: it is cut off and cannot connect again",
+		"  remote off                turn remote access off: ends every remote session and the relay connection",
 		"  machine [--json]          this machine and its workspaces (the daemon must be running)",
 		"  machine rename <name>     name this machine",
 		"  workspace new [--name <name>] [<folder>...]  add a workspace; a name is needed when no folder is given",
@@ -41,7 +49,8 @@ class SuitMain {
 		"  workspace rename <id> <name> | delete <id>   rename or remove a workspace (its folders are untouched)",
 		"  workspace add-folder|remove-folder <id> <folder>  change a workspace's folders",
 		"  login [on|off|status]     start suit at login (off by default; Windows Run key, XDG autostart elsewhere)",
-		"  quit                      quit Exosuit: stop everything, editors asked to close first",
+		"  quit                      quit Exosuit and end everything it started, terminals included (editors asked to close first)",
+		"  quit --keep-terminals     the polite quit: end everything but terminals; the daemon stays up while any runs",
 		"  start                     start the daemon if it is not running",
 		"  stop                      stop only the daemon",
 		"  daemon [--login]          run the daemon in this process (--login: stay resident)",
@@ -86,12 +95,25 @@ class SuitMain {
 			case "list":
 				var running = SuitControl.request({op: "refresh"}, 1) != null;
 				var inventory = new SuitInventory();
+				if (rest.indexOf("--all") >= 0) {
+					var daemon = running ? SuitControl.request({op: "status"}, 3) : null;
+					var counts = SuitReport.kindsJson(inventory, daemon, running ? SuitControl.request({op: "remote-status"}, 3) : null,
+						running ? SuitControl.request({op: "remote-devices"}, 3) : null);
+					if (json) {
+						var value:Dynamic = SuitReport.json(inventory, running);
+						Reflect.setField(value, "all", counts);
+						print(Json.stringify(value));
+					} else
+						print(StringTools.trim(SuitReport.kindsText(counts) + "
+" + SuitReport.text(inventory, running)));
+					return 0;
+				}
 				print(json ? Json.stringify(SuitReport.json(inventory, running)) : SuitReport.text(inventory, running));
 				return 0;
 			case "menu":
 				var menu = new suit.SuitMenuModel.SuitTextMenu();
 				var ignore = function(_:Dynamic) {};
-				SuitMenuModel.build(menu, new SuitInventory(), {terminate: ignore, openViewer: ignore, quit: function() {}});
+				SuitMenuModel.build(menu, new SuitInventory(), {terminate: ignore, openViewer: ignore, quit: function() {}, quitKeepingTerminals: function() {}});
 				print(menu.toString());
 				return 0;
 			case "tray-check":
@@ -100,7 +122,7 @@ class SuitMain {
 				var inventory = new SuitInventory();
 				var tray = new suit.SuitTray(inventory.summary(), null);
 				var items = tray.build(function(menu) SuitMenuModel.build(menu, inventory,
-					{terminate: function(_) {}, openViewer: function(_) {}, quit: function() {}}));
+					{terminate: function(_) {}, openViewer: function(_) {}, quit: function() {}, quitKeepingTerminals: function() {}}));
 				tray.setTooltip(inventory.summary() + " ");
 				tray.dispose();
 				runtime.dispose();
@@ -142,8 +164,26 @@ class SuitMain {
 					print(StringTools.trim(SuitReport.plan(targets)));
 					return 0;
 				}
-				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, targets).run())));
-				SuitControl.request({op: "refresh"}, 1);
+				stopTargets(inventory, targets);
+				return 0;
+			case "terminals":
+				var inventory = new SuitInventory();
+				var words = [for (word in rest) if (word != "--json" && word != "--dry-run") word];
+				if (words.length == 0 || words[0] == "list") {
+					print(json ? Json.stringify({version: 1, terminals: [for (process in inventory.terminals()) SuitReport.processJson(inventory, process)]})
+						: StringTools.trim(SuitReport.terminalsText(inventory)));
+					return 0;
+				}
+				if (words[0] != "end" || words.length != 2)
+					throw USAGE;
+				var chosen = SuitActions.terminals(inventory, words[1] == "--all" ? null : words[1]);
+				if (chosen.length == 0 && words[1] != "--all")
+					throw 'No kept terminal belongs to ${words[1]} (see `suit terminals`)';
+				if (rest.indexOf("--dry-run") >= 0) {
+					print(StringTools.trim(SuitReport.plan(chosen)));
+					return 0;
+				}
+				stopTargets(inventory, chosen);
 				return 0;
 			case "relay":
 				var inventory = new SuitInventory();
@@ -237,13 +277,59 @@ class SuitMain {
 				print("start at login: " + (SuitLogin.enabled() ? "on" : "off") + (Sys.systemName() == "Windows" ? " (" + SuitLogin.key() + "\\" + SuitLogin.valueName() + ")" : ""));
 				return 0;
 			case "quit":
-				var reply = SuitControl.request({op: "quit"});
+				var keepTerminals = rest.remove("--keep-terminals");
+				var reply = SuitControl.request({op: "quit", keepTerminals: keepTerminals});
 				if (reply != null) {
-					print('Quitting Exosuit: stopping ${reply.terminating} process(es); the daemon exits when done.');
+					var terminals = suit.SuitRecord.SuitRecords.intField(reply, "terminals");
+					if (keepTerminals) {
+						print('Quitting Exosuit, keeping terminals: stopping ${reply.terminating} process(es).');
+						if (terminals != null && terminals > 0)
+							print(SuitReport.keptTerminals(terminals));
+						else
+							print("No terminal is running; the daemon exits when done.");
+					} else
+						print('Quitting Exosuit: ending ${reply.terminating} process(es)' + (terminals != null && terminals > 0 ? ' ($terminals terminal(s) among them)' : "")
+							+ '; the daemon exits when nothing is left.');
 					return 0;
 				}
 				var inventory = new SuitInventory();
-				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, SuitActions.everything(inventory)).run())));
+				stopTargets(inventory, SuitActions.quit(inventory, keepTerminals));
+				if (keepTerminals && inventory.terminals().length > 0)
+					print(SuitReport.keptTerminals(inventory.terminals().length));
+				return 0;
+			case "remote":
+				var words = [for (word in rest) if (word != "--json") word];
+				var verb = words.length > 0 ? words[0] : "list";
+				var listing = SuitControl.request({op: "remote-devices"}, 5);
+				if (listing == null)
+					throw "suit is not running, so nothing is connected through it (remote access needs the daemon)";
+				if (verb == "list") {
+					var status = SuitControl.request({op: "remote-status"}, 5);
+					if (json) {
+						print(Json.stringify({version: 1, status: status, devices: Reflect.field(listing, "devices"), pending: Reflect.field(listing, "pending")}));
+						return 0;
+					}
+					print(StringTools.trim(SuitReport.remoteText(status, listing)));
+					return 0;
+				}
+				if (words.length != (verb == "off" ? 1 : 2))
+					throw USAGE;
+				if (verb == "off") {
+					var reply = SuitControl.request({op: "remote-disable"}, 10);
+					if (reply == null || Reflect.field(reply, "ok") != true)
+						throw "could not turn remote access off: " + (reply == null ? "no reply" : Std.string(Reflect.field(reply, "error")));
+					print("remote access is off: every remote session and the relay connection are ended (turn it on again from Remote Access)");
+					return 0;
+				}
+				if (verb != "disconnect" && verb != "revoke")
+					throw USAGE;
+				var device = SuitReport.findDevice(listing, words[1]);
+				if (device == null)
+					throw 'No paired device matches ${words[1]} (see `suit remote`)';
+				var reply = SuitControl.request({op: "remote-" + verb, deviceId: device}, 15);
+				if (reply == null || Reflect.field(reply, "ok") != true)
+					throw verb + " failed: " + (reply == null ? "no reply" : Std.string(Reflect.field(reply, "error")));
+				print((verb == "revoke" ? "revoked " : "disconnected ") + device);
 				return 0;
 			case "machine":
 				var renaming = args.length == 3 && args[1] == "rename";
@@ -347,4 +433,22 @@ class SuitMain {
 
 	static function print(text:String):Void
 		Sys.stdout().writeString(text + "\n");
+
+	/**
+		Stops `targets` and prints what happened. The terminal host this command runs in (suit typed into an Exosuit
+		terminal), when it is one of them, is ended last, after everything else is printed and the daemon told: ending it
+		ends this command too, which would otherwise cut the rest of the stop short.
+	**/
+	static function stopTargets(inventory:SuitInventory, targets:Array<SuitInventory.SuitProcess>):Void {
+		var own = inventory.ownTerminal();
+		var last = [for (target in targets) if (own != null && target.pid == own.pid) target];
+		var first = [for (target in targets) if (last.indexOf(target) < 0) target];
+		print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, first).run())));
+		SuitControl.request({op: "refresh"}, 1);
+		if (own == null || last.length == 0)
+			return;
+		print('${own.pid} terminal-host: ending it now, the terminal this command runs in');
+		Sys.stdout().flush();
+		print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, last).run())));
+	}
 }

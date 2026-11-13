@@ -8,7 +8,8 @@ icon. Its command line works with or without the daemon.
 python scripts/suit.py list            every exosuit process, grouped by editor; orphans last
 python scripts/suit.py kill --orphans  stop exosuit's processes whose editor is gone
 python scripts/suit.py kill --all --dry-run   what a bulk kill would stop, stopping nothing
-python scripts/suit.py quit            quit Exosuit: editors are asked to close, exosuit's own processes stop
+python scripts/suit.py quit            quit Exosuit and end everything it started, terminals included (editors asked to close)
+python scripts/suit.py quit --keep-terminals   the polite quit: everything but terminals; suit stays up while one runs
 python scripts/suit.py help            all commands
 ```
 
@@ -106,8 +107,21 @@ Every stop is graceful first:
   prompt. An editor that is still open after 10 s is reported and left
   running. It is never killed while it might have unsaved work.
 
+suit is the final arbiter: its full Quit (`suit quit`, tray "Quit Exosuit and
+end everything") ends everything exosuit started, terminal hosts included, and
+the daemon exits only once a fresh inventory holds nothing of exosuit's.
+Background processes that reappear during a quit (a service an editor restarts
+while closing) are ended again, up to 3 rounds; editors are asked to close
+once, and one kept open over unsaved work keeps the daemon up, listed, until it
+closes. The polite quit (`suit quit --keep-terminals`, tray "Quit, keep
+terminals running (N)") does the same but leaves terminal hosts running; the
+daemon stays up, listing them, and exits after the last one ends. Use it
+before a rebuild or a switch of checkout: hosts run from a runtime copy in the
+state folder, not from the checkout.
+
 Quit, Terminate and `suit kill` stop exosuit's own processes: editors,
-workspace managers and daemons, compiler workers, live sessions and hosts.
+workspace managers and daemons, compiler workers, live sessions and hosts,
+terminal hosts.
 Terminals end the way closing them in the app ends them: the manager's
 graceful stop makes the daemon close its PTYs and ConPTY sessions. suit never
 kills a process tree wholesale, so a program the user started from a terminal
@@ -133,6 +147,43 @@ was reused: only children that started before the new process are the
 target's. With an earlier start time the snapshot predates the target, and
 suit does not look below it.
 
+## Terminal hosts
+
+A terminal host (`hl terminal-host.hl --terminal-host DIR`, docs/design/terminal-host-status.md) keeps one terminal
+alive while its workspace service is stopped. suit treats it as its own kind, `terminal-host`:
+
+- It registers itself; one started by an older build is adopted when its environment registers with this suit and
+  `host.json` in the folder its command line names holds its pid.
+- It is listed in the group "Terminals" with its workspace and terminal (`terminal.json` in its folder), and counted
+  in the summary ("2 terminals"). It is never orphaned, so `suit kill --orphans` and the orphan sweep never end it.
+- The stop of its service and the close of its editor leave it running: that is the feature.
+- The full Quit (`suit quit`, tray "Quit Exosuit and end everything (N terminals)"), "Terminate all background
+  processes" and `suit kill --all` end it. The polite quit (`suit quit --keep-terminals`, tray "Quit, keep terminals
+  running (N)") leaves it running and says how many terminals stay.
+- `suit terminals` lists hosts; `suit terminals end --all` or `end <workspace>` (id, root or folder name), "End all
+  terminals (N)" in the tray, a host's own submenu and `suit kill <pid>` end them: suit writes `end-request.json` into
+  the host's folder, the host ends its program and itself, and suit kills it after 3 seconds if it has not.
+- Removing a workspace (`suit workspace delete`) ends its hosts.
+
+## What is connected from outside
+
+suit holds the machine's relay connection and every remote device session itself (`suit/src/suit/remote`), so it
+lists them and can cut them off:
+
+- `suit remote` (and `--json`) shows remote access (on or off, relay origin, connected, live sessions) and each paired
+  device: name when it gave one, when it was paired (`pairedAt` in `machine-devices.json`, kept for devices paired
+  from this build on), connected now or not, and the workspaces it may use. `suit relay list` still shows the
+  per-workspace relay hosting.
+- `suit remote disconnect <device>` ends a device's live session now (the pairing stays, so the device may dial
+  again); `suit remote revoke <device>` revokes its pairing (cut off for good); `suit remote off` turns remote access
+  off, ending every remote session and the relay connection. The tray has the same under "Paired devices (N)", with
+  "Turn remote access off".
+- The full Quit ends every remote session, the machine's relay connection and the workspaces' relay links at once,
+  not only when the daemon exits. Remote access stays configured and is back when suit next starts. The polite quit
+  leaves them.
+- A phone cannot be made to quit its app. suit cuts it off (its session and the relay connection end, or its pairing
+  is revoked) and the app shows the machine as offline or unpaired.
+
 ## Tray menu (Windows)
 
 The tray menu is built from a fresh scan each time it opens:
@@ -145,8 +196,9 @@ The tray menu is built from a fresh scan each time it opens:
 - Remote access: each hosting workspace with its relay state, Stop hosting,
   Stop all hosting, and Open Remote Access…
 - Terminate orphaned processes, Terminate all background processes (editors
-  keep running; both cover only exosuit's processes), Open process viewer… (a console running `suit watch`), and
-  Quit Exosuit
+  keep running, terminal hosts end; both cover only exosuit's processes), End all terminals (N) and per workspace,
+  Open process viewer… (a console running `suit watch`), Quit Exosuit and end everything (N terminals), and, when
+  terminals run, Quit, keep terminals running (N)
 
 Two commands show the menu without clicking. `suit menu` prints it as text.
 `suit tray-check` creates the icon, builds the native menu and removes both.

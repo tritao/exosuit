@@ -26,6 +26,8 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 	/** One grant per device and workspace. Kept apart from the records: a grant may precede its record's approval. */
 	var grants:Array<DeviceWorkspaceGrant> = [];
 	var names:Map<String, String> = [];
+	/** When each device was paired (ms since the epoch), for suit's device list; absent for devices paired before it was kept. */
+	var pairedAt:Map<String, Float> = [];
 
 	/** True when the file could not be read: the store is then empty and never writes, so the file stays as it is. */
 	public final unreadable:Bool;
@@ -57,6 +59,9 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 				var given = SuitRecords.stringField(item, "name");
 				if (given != null)
 					names.set(id, given);
+				var paired = SuitRecords.floatField(item, "pairedAt");
+				if (paired != null)
+					pairedAt.set(id, paired);
 			}
 		var granted:Dynamic = Reflect.field(value, "workspaces");
 		if (granted != null && Reflect.isObject(granted))
@@ -100,7 +105,7 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 		var listed:Array<Dynamic> = [];
 		for (record in devices)
 			listed.push({deviceId: record.deviceId, key: toHex(record.staticPublicKey), grants: record.grants, revoked: record.revoked,
-				name: names.get(record.deviceId)});
+				name: names.get(record.deviceId), pairedAt: pairedAt.get(record.deviceId)});
 		var granted:Dynamic = {};
 		for (entry in grants) {
 			var entries:Dynamic = Reflect.field(granted, entry.device);
@@ -127,8 +132,17 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 				return;
 			}
 		devices.push(copy);
+		pairedAt.set(record.deviceId, Date.now().getTime());
 		save();
 	}
+
+	/** A device's name, when it gave one. */
+	public function nameOf(deviceId:String):Null<String>
+		return names.get(deviceId);
+
+	/** When a device was paired (ms since the epoch), or null when not known. */
+	public function pairedAtOf(deviceId:String):Null<Float>
+		return pairedAt.get(deviceId);
 
 	public function revokeDevice(deviceId:String):Void {
 		for (record in devices)
@@ -146,6 +160,7 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 		devices = [for (record in devices) if (record.deviceId != deviceId) record];
 		dropGrants(deviceId);
 		names.remove(deviceId);
+		pairedAt.remove(deviceId);
 		save();
 	}
 

@@ -49,7 +49,31 @@ class SuitDaemon {
 	var inventory:SuitInventory;
 	var refreshedAt:Float = 0;
 	var idleSince:Float;
-	var stopAfterJobs:Bool = false;
+	/**
+		Set by a quit. "full": end everything exosuit started, terminal hosts included; "polite": everything but terminal
+		hosts. Either way the daemon exits only once a fresh inventory holds nothing of exosuit's. Background processes
+		that reappear are ended again, up to QUIT_ROUNDS rounds; editors are asked to close once. Whatever is still
+		running after that (an editor kept open over unsaved work, the hosts a polite quit kept) stays listed, and the
+		daemon exits when the last of it ends.
+
+		Ending again is over once a check finds nothing left to end or the rounds are used up (`quitPending` false): what
+		is started afterwards is the user's new session, never touched, and the periodic scan stops. The daemon then only
+		exits when nothing owned is left. An editor that registers after the quit (not one of `quitEditors`) cancels the
+		whole quit state: the user started Exosuit again.
+	**/
+	var quitting:Null<String> = null;
+	var quitPending:Bool = false;
+	var quitEditors:Array<Int> = [];
+	/** The compiler workers a quit spared as shared with a build exosuit did not start, when it began. */
+	var quitSharedWorkers:Array<{pid:Int, started:Float}> = [];
+	/** The full quit's terminal hosts an editor ran in when it began: ended once no editor runs in them (endReleasedHosts). */
+	var quitHeldHosts:Array<{pid:Int, started:Float}> = [];
+	var quitRounds:Int = 0;
+	var quitCheckAt:Float = 0;
+	/** True from a full quit until a new editor registers: the relay link of a restarted workspace service is refused. */
+	var relayRefused:Bool = false;
+	final refusedAttaches:Array<{transport:NativeRpcTransport, until:Float}> = [];
+	static inline var QUIT_ROUNDS:Int = 3;
 	/** When set, the loop ends at this time; the delay lets the reply to a stop or quit request flush. */
 	var stopAt:Float = -1;
 	var menuRequested:Bool = false;
@@ -136,6 +160,12 @@ class SuitDaemon {
 				showMenu();
 			}
 			serveClients();
+			var refusedIndex = refusedAttaches.length;
+			while (refusedIndex-- > 0)
+				if (Sys.time() >= refusedAttaches[refusedIndex].until || !refusedAttaches[refusedIndex].transport.isOpen()) {
+					refusedAttaches[refusedIndex].transport.close();
+					refusedAttaches.splice(refusedIndex, 1);
+				}
 			relay.poll();
 			remote.poll();
 			SuitLogin.poll();
@@ -153,8 +183,8 @@ class SuitDaemon {
 				}
 			if (Sys.time() - refreshedAt >= REFRESH_SECONDS)
 				refresh();
-			if (stopAfterJobs && jobs.length == 0 && stopAt < 0)
-				stopAt = Sys.time() + 0.3;
+			if (quitting != null && quitPending && jobs.length == 0 && stopAt < 0 && Sys.time() >= quitCheckAt)
+				afterQuitJobs();
 			if (inventory.owned().length > 0 || clients.length > 0 || jobs.length > 0 || relay.hostingCount() > 0 || remote.hosting() || resident)
 				idleSince = Sys.time();
 			else if (Sys.time() - idleSince >= idleSeconds)
@@ -165,7 +195,72 @@ class SuitDaemon {
 	function refresh():Void {
 		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
+		checkQuitState();
 		updateTooltip();
+	}
+
+	/** After a scan: a new editor ends any quit state; a finished quit exits once nothing owned is left. */
+	function checkQuitState():Void {
+		if (quitting == null && !relayRefused)
+			return;
+		for (editor in inventory.editors())
+			if (quitEditors.indexOf(editor.pid) < 0) {
+				cancelQuit();
+				return;
+			}
+		if (quitting == "full" && jobs.length == 0)
+			endReleasedHosts();
+		if (quitting != null && !quitPending && stopAt < 0 && inventory.owned().length == 0)
+			quitDone();
+	}
+
+	/**
+		Nothing owned is left after a quit. The full quit ends with the daemon. The polite quit does only when nothing else
+		keeps the daemon up: started at login, remote access on, or a workspace hosted. Otherwise its state is dropped and
+		the daemon carries on as usual (a phone using this machine hours after the kept terminals ended keeps its access).
+	**/
+	function quitDone():Void {
+		if (quitting == "polite" && (resident || remote.hosting() || relay.hostingCount() > 0)) {
+			quitting = null;
+			quitPending = false;
+			quitEditors = [];
+			return;
+		}
+		stopAt = Sys.time() + 0.3;
+	}
+
+	/**
+		The full quit's terminal hosts that had an editor running in them (`python scripts/run.py` from an Exosuit terminal)
+		were left running for that editor (SuitKinds.hostsEditors). Once no editor runs in one any more it is ended, also
+		after the quit's rounds are over: it is the quit's, not something the user started since.
+	**/
+	function endReleasedHosts():Void {
+		var released:Array<SuitProcess> = [];
+		var index = quitHeldHosts.length;
+		while (index-- > 0) {
+			var held = quitHeldHosts[index];
+			var host = inventory.find(held.pid);
+			if (host == null || host.started != held.started) {
+				quitHeldHosts.splice(index, 1);
+				continue;
+			}
+			if (inventory.hostedEditors(host.pid, host.started).length == 0) {
+				quitHeldHosts.splice(index, 1);
+				released.push(host);
+			}
+		}
+		terminate(released);
+	}
+
+	/** The user started Exosuit again: nothing of the quit applies to what runs from now on, and remote access is back. */
+	function cancelQuit():Void {
+		quitting = null;
+		quitPending = false;
+		quitEditors = [];
+		quitHeldHosts = [];
+		quitSharedWorkers = [];
+		relayRefused = false;
+		remote.resumeAfterQuit();
 	}
 
 	function tooltip():String {
@@ -202,7 +297,13 @@ class SuitDaemon {
 		if (current == null)
 			return;
 		current.show(function(menu) SuitMenuModel.build(menu, inventory, {
-			terminate: terminate, openViewer: openViewer, quit: quitEverything,
+			terminate: terminate, openViewer: openViewer, quit: quitEverything, quitKeepingTerminals: quitKeepingTerminals,
+			remote: {
+				devices: function() return remote.handle({op: "remote-devices"}), enabled: remote.hosting,
+				disconnect: function(id:String) { remote.disconnectDevice(id); },
+				revoke: function(id:String) { remote.handle({op: "remote-revoke", deviceId: id}); },
+				off: function() { remote.handle({op: "remote-disable"}); }
+			},
 			hosting: {
 				hosts: relay.views, stopHosting: function(root) stopHosting(root), resumeHosting: function(root) relay.resume(root),
 				disconnect: function(client) relay.disconnect(client),
@@ -219,10 +320,61 @@ class SuitDaemon {
 		return plan;
 	}
 
-	/** Stops everything, editors included (asked to close first), then exits. */
-	function quitEverything():Void {
-		terminate(SuitActions.everything(inventory));
-		stopAfterJobs = true;
+	/** The full Quit: ends everything exosuit started, terminal hosts included, editors asked to close first, then exits. */
+	function quitEverything():Void
+		quit(false);
+
+	/** The polite quit: as quitEverything, but terminal hosts keep running and the daemon stays up while any lives. */
+	function quitKeepingTerminals():Void
+		quit(true);
+
+	function quit(keepTerminals:Bool):Void {
+		refresh();
+		quitting = keepTerminals ? "polite" : "full";
+		quitPending = true;
+		quitEditors = [for (editor in inventory.editors()) editor.pid];
+		quitHeldHosts = keepTerminals ? [] : [
+			for (host in inventory.terminals()) if (inventory.hostedEditors(host.pid, host.started).length > 0) {pid: host.pid, started: host.started}
+		];
+		quitSharedWorkers = [for (worker in inventory.shared()) {pid: worker.pid, started: worker.started}];
+		quitRounds = 1;
+		quitCheckAt = 0;
+		terminate(SuitActions.quit(inventory, keepTerminals));
+		// The full quit cuts off everything connected from outside now: every remote device session, the machine's relay
+		// connection and the workspaces' relay links. They would end with the daemon, which may stay up for an editor.
+		if (!keepTerminals) {
+			remote.cutOff();
+			relay.dispose();
+			relayRefused = true;
+		}
+	}
+
+	/** A quit's jobs are done: exit when nothing is left, else run another round or carry on as usual. */
+	function afterQuitJobs():Void {
+		refresh();
+		if (quitting == null)
+			return; // A new editor registered: the quit is cancelled.
+		var again = [for (process in SuitActions.quit(inventory, quitting == "polite")) if (process.kind != SuitKind.Editor) process];
+		// A worker the quit spared as shared with a build that has since ended (it ran in a terminal the quit ended) is no
+		// longer adopted once its session is gone (SuitInventory.adoptCheckoutChains): end it as the quit's.
+		for (worker in quitSharedWorkers) {
+			var process = inventory.find(worker.pid);
+			if (process != null && process.started == worker.started && !inventory.usedByBuild(process) && again.indexOf(process) < 0)
+				again.push(process);
+		}
+		if (again.length > 0 && quitRounds < QUIT_ROUNDS) {
+			// Something reappeared (a service an editor restarted while closing, a host a service started): end it too.
+			quitRounds++;
+			terminate(again);
+			return;
+		}
+		if (inventory.owned().length == 0) {
+			quitDone();
+			return;
+		}
+		// Something is left (an editor kept open, the hosts a polite quit kept) and nothing more to end: keep listing it,
+		// stop ending and scanning, and exit when the last of it ends (checked by the ordinary rescan).
+		quitPending = false;
 	}
 
 	/** Opens a console running `suit watch`. */
@@ -271,6 +423,13 @@ class SuitDaemon {
 			var request:Dynamic = null;
 			try request = Json.parse(message.toString()) catch (_:Dynamic) {}
 			if (SuitRelayHosting.isAttach(request)) {
+				if (relayRefused) {
+					// The full quit ended remote access: a restarted workspace service does not get it back.
+					client.send(Bytes.ofString(Json.stringify({ok: false, error: "suit_quitting"})));
+					refusedAttaches.push({transport: client, until: Sys.time() + 2}); // closed later, so the reply is read first
+					clients.splice(index, 1);
+					continue;
+				}
 				// A hosting daemon's relay link: from here on it carries relay frames, not control requests.
 				clients.splice(index, 1);
 				relay.attach(client, request);
@@ -294,7 +453,7 @@ class SuitDaemon {
 				return {
 					ok: true, pid: Sys.getPid(), home: SuitPaths.home(), summary: inventory.summary(), tray: tray != null,
 					editors: inventory.editors().length, background: inventory.background().length,
-					orphaned: inventory.orphans().length, terminating: jobs.length, hosting: relay.hostingCount(),
+					orphaned: inventory.orphans().length, terminals: inventory.terminals().length, terminating: jobs.length, hosting: relay.hostingCount(),
 					tooltip: tooltip(), connections: clients.length, idleFor: Sys.time() - idleSince
 				};
 			case "refresh":
@@ -302,9 +461,11 @@ class SuitDaemon {
 				return {ok: true};
 			case "quit":
 				refresh();
-				var count = SuitActions.everything(inventory).length;
-				quitEverything();
-				return {ok: true, terminating: count};
+				var keepTerminals = Reflect.field(request, "keepTerminals") == true;
+				var count = SuitActions.quit(inventory, keepTerminals).length;
+				quit(keepTerminals);
+				// The reply says how many terminals are ended or kept, so `suit quit` can say so.
+				return {ok: true, terminating: count, terminals: inventory.terminals().length, keepTerminals: keepTerminals};
 			case "stop":
 				stopAt = Sys.time() + 0.3;
 				return {ok: true};
@@ -353,6 +514,10 @@ class SuitDaemon {
 				return {ok: true, workspace: renamed, machine: machine().json(services)};
 			case "workspace-delete":
 				machine().delete(SuitRecords.stringField(request, "workspace"));
+				// Its terminals have nothing to come back to: end their hosts, with or without a running service.
+				refresh();
+				var deleted = SuitRecords.stringField(request, "workspace");
+				terminate([for (host in inventory.terminals()) if (deleted != null && host.workspace == deleted) host]);
 				remote.workspaceDeleted(SuitRecords.stringField(request, "workspace"));
 				return {ok: true, machine: machine().json(services)};
 			case "workspace-add-folder":

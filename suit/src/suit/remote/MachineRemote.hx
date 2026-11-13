@@ -91,6 +91,8 @@ class MachineRemote implements MachineSessionHost {
 	/** Why machine-devices.json could not be read at startup; remote access stays off while it is set. */
 	var storeError:Null<String> = null;
 	var version:Int = 0;
+	/** True from a full quit's `cutOff` until `resumeAfterQuit`: remote access is configured but ended by the quit. */
+	var cutByQuit:Bool = false;
 
 	public function new(events:EventPump, hub:NativeRpcHub, catalog:Void->MachineCatalog) {
 		this.events = events;
@@ -304,6 +306,59 @@ class MachineRemote implements MachineSessionHost {
 		sessions.push(new MachineDeviceSession(device, secure, this, now));
 	}
 
+	/** Closes every live session of one device; returns how many. Its pairing and grants stay. */
+	public function disconnectDevice(deviceId:String):Int {
+		var closed = 0;
+		for (session in sessions.copy())
+			if (session.deviceId == deviceId) {
+				session.close();
+				sessions.remove(session);
+				closed++;
+			}
+		if (closed > 0)
+			version++;
+		return closed;
+	}
+
+	/**
+		suit's full quit: ends every remote session and the machine's relay connection now, so no device reaches this
+		machine while the daemon finishes the quit. Remote access stays configured (machine-relay.json is kept) and is
+		back when suit next starts. A phone's app is not quit by this; it is cut off and shows the machine as offline.
+	**/
+	public function cutOff():Void {
+		if (host == null && sessions.length == 0)
+			return;
+		teardown();
+		setupError = "remote access was ended by Quit; it resumes when suit starts again or Exosuit is started again";
+		cutByQuit = true;
+		version++;
+	}
+
+	/**
+		A quit the daemon survived was cancelled (the user started Exosuit again): remote access comes back as it was set
+		up, as when suit starts. Does nothing unless `cutOff` ended it.
+	**/
+	public function resumeAfterQuit():Void {
+		if (!cutByQuit)
+			return;
+		cutByQuit = false;
+		setupError = storeError;
+		if (storeError == null && FileSystem.exists(configFile()))
+			try load() catch (error:Dynamic) {
+				setupError = Std.string(error);
+				teardown();
+			}
+		version++;
+	}
+
+	/** Live remote sessions, for suit's list. */
+	public function sessionCount():Int
+		return sessions.length;
+
+	/** Whether the machine socket to the relay is open. */
+	public function relayConnected():Bool
+		return host != null && host.connected;
+
 	public function dispose():Void {
 		teardown();
 		for (start in starts)
@@ -480,6 +535,11 @@ class MachineRemote implements MachineSessionHost {
 					});
 				case "remote-devices":
 					return devices();
+				case "remote-disconnect":
+					// Ends a device's live session now; the pairing stays, so the device may connect again (revoke to cut it off).
+					var id = SuitRecords.stringField(request, "deviceId");
+					var closed = id == null ? 0 : disconnectDevice(id);
+					return closed > 0 ? {ok: true, sessions: closed} : {ok: false, error: "device_not_connected"};
 				case "remote-approve":
 					var id = SuitRecords.stringField(request, "deviceId");
 					var granted = workspaceGrants(request);
@@ -587,7 +647,12 @@ class MachineRemote implements MachineSessionHost {
 				for (workspace => grants in map)
 					granted.push({workspace: workspace, grants: grants, preset: MachineGrants.presetOf(grants)});
 				granted.sort(function(a, b) return Reflect.compare(a.workspace, b.workspace));
-				listed.push({deviceId: item.deviceId, connected: item.connected, revoked: item.revoked, workspaces: granted});
+				var open = 0;
+				for (session in sessions)
+					if (session.deviceId == item.deviceId && session.isOpen())
+						open++;
+				listed.push({deviceId: item.deviceId, name: store.nameOf(item.deviceId), pairedAt: store.pairedAtOf(item.deviceId),
+					connected: item.connected || open > 0, sessions: open, revoked: item.revoked, workspaces: granted});
 			}
 		}
 		var names:Array<Dynamic> = [for (entry in catalog().state.workspaces) {id: entry.id, name: entry.name}];

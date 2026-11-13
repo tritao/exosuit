@@ -17,15 +17,31 @@ interface SuitMenuSink {
 typedef SuitMenuHandlers = {
 	var terminate:Array<SuitProcess>->Void;
 	var openViewer:Array<String>->Void;
+	/** The full Quit: ends everything exosuit started, terminal hosts included. */
 	var quit:Void->Void;
+	/** The polite quit: ends everything but terminal hosts. */
+	@:optional var quitKeepingTerminals:Void->Void;
 	/** Relay hosting and Start at login; where the menu is only printed, suit's published state is shown. */
 	@:optional var hosting:suit.relay.SuitRelayMenu.SuitHostingActions;
+	/** What is connected from outside (paired devices, remote access); only the daemon has it. */
+	@:optional var remote:SuitRemoteActions;
+}
+
+typedef SuitRemoteActions = {
+	/** A `remote-devices` reply: `devices`, `workspaces`, `pending`. */
+	var devices:Void->Dynamic;
+	var enabled:Void->Bool;
+	var disconnect:String->Void;
+	var revoke:String->Void;
+	var off:Void->Void;
 }
 
 /**
-	The tray menu: a title with counts, processes grouped by editor (orphans, then processes exosuit did not
-	start, last), remote access, then bulk actions. Bulk actions cover only exosuit's processes; one not
-	started by exosuit can still be terminated from its own submenu.
+	The tray menu: a title with counts, processes grouped by editor (terminal hosts, orphans, then processes
+	exosuit did not start, last), remote access, then bulk actions. Bulk actions cover only exosuit's processes; one not
+	started by exosuit can still be terminated from its own submenu. Terminal hosts are ended by "Terminate all
+	background processes", "End all terminals" (and its per-workspace entries), their own submenus and the full Quit,
+	which says how many it ends; "Quit, keep terminals running" leaves them.
 **/
 class SuitMenuModel {
 	static inline var GROUP_LIMIT:Int = 30;
@@ -70,6 +86,8 @@ class SuitMenuModel {
 		}
 		var hosting = handlers.hosting != null ? handlers.hosting : printedHosting();
 		suit.relay.SuitRelayMenu.build(menu, inventory, hosting, handlers.openViewer);
+		if (handlers.remote != null)
+			remoteSection(menu, handlers.remote);
 		menu.separator(0);
 		var orphans = inventory.orphans();
 		menu.item("Terminate orphaned processes (" + orphans.length + ")",
@@ -77,10 +95,52 @@ class SuitMenuModel {
 		var background = inventory.background();
 		menu.item("Terminate all background processes (" + background.length + ")",
 			background.length == 0 ? null : function() handlers.terminate(SuitActions.background(inventory)), 0);
+		// The orphan sweep never ends terminal hosts; "all background processes" above and the full Quit do. These end only them.
+		var terminals = inventory.terminals();
+		menu.item("End all terminals (" + terminals.length + ")",
+			terminals.length == 0 ? null : function() handlers.terminate(SuitActions.terminals(inventory)), 0);
+		var workspaces = SuitActions.terminalWorkspaces(inventory);
+		if (workspaces.length > 1)
+			for (workspace in workspaces) {
+				var key = workspace.key;
+				menu.item("    End terminals of " + workspace.label + " (" + workspace.count + ")",
+					function() handlers.terminate(SuitActions.terminals(inventory, key)), 0);
+			}
 		menu.item("Open process viewer…", function() handlers.openViewer(["watch"]), 0);
 		suit.relay.SuitRelayMenu.login(menu, hosting);
 		menu.separator(0);
-		menu.item("Quit Exosuit", handlers.quit, 0);
+		menu.item(terminals.length == 0 ? "Quit Exosuit and end everything" : "Quit Exosuit and end everything (" + terminals.length
+			+ (terminals.length == 1 ? " terminal)" : " terminals)"), handlers.quit, 0);
+		if (terminals.length > 0)
+			menu.item("Quit, keep terminals running (" + terminals.length + ")", handlers.quitKeepingTerminals, 0);
+	}
+
+	/** Paired devices, each with its state and Disconnect now / Revoke pairing, then Turn remote access off. */
+	static function remoteSection(menu:SuitMenuSink, remote:SuitRemoteActions):Void {
+		var listing:Dynamic = null;
+		try listing = remote.devices() catch (_:Dynamic) {}
+		var devices:Array<Dynamic> = listing != null && Std.isOfType(Reflect.field(listing, "devices"), Array) ? Reflect.field(listing, "devices") : [];
+		if (devices.length == 0 && !remote.enabled())
+			return;
+		menu.separator(0);
+		menu.item("Paired devices (" + devices.length + ")", null, 0);
+		var names = new Map<String, String>();
+		var workspaces:Dynamic = listing == null ? null : Reflect.field(listing, "workspaces");
+		if (Std.isOfType(workspaces, Array))
+			for (entry in (workspaces : Array<Dynamic>))
+				names.set(Std.string(entry.id), Std.string(entry.name));
+		var live = 0;
+		for (device in devices) {
+			var id = Std.string(device.deviceId);
+			var entry = menu.submenu("    " + StringTools.trim(SuitReport.deviceLine(device, names)), 0);
+			if (device.connected == true) {
+				live++;
+				menu.item("Disconnect now (it may reconnect)", function() remote.disconnect(id), entry);
+			} else
+				menu.item("Not connected", null, entry);
+			menu.item("Revoke pairing (cut off for good)", device.revoked == true ? null : function() remote.revoke(id), entry);
+		}
+		menu.item("Turn remote access off (" + live + " connected)", remote.enabled() ? remote.off : null, 0);
 	}
 }
 
