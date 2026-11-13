@@ -719,6 +719,28 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return true;
 	}
 
+	/** A tab dragged onto another tab of its pane takes that tab's place; the others keep their order. */
+	public function moveEditorTab(paneId:String, key:String, targetKey:String):Bool {
+		var pane = paneById(paneId);
+		if (pane == null || key == targetKey) return false;
+		var from = -1, to = -1;
+		for (index in 0...pane.items.length) {
+			var itemKey = UiEditorTabs.key(pane.items[index]);
+			if (itemKey == key) from = index;
+			if (itemKey == targetKey) to = index;
+		}
+		if (from < 0 || to < 0) return false;
+		var active = pane.activeIndex < 0 ? null : pane.items[pane.activeIndex];
+		var moving = pane.items.splice(from, 1)[0];
+		pane.items.insert(to, moving);
+		if (active != null) {
+			pane.activeIndex = pane.items.indexOf(active);
+			if (pane == activePane) activeIndex = pane.activeIndex;
+		}
+		requestFrame();
+		return true;
+	}
+
 	public function reorderActiveTab(delta:Int):Bool {
 		if (activeIndex < 0) return false;
 		var target = activeIndex + delta;
@@ -1188,6 +1210,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var lost = documentsLostByClosingTab(item);
 		if (!force) for (document in lost) if (document.dirty) return false;
 		pane.items.splice(index, 1);
+		rememberClosedTab(item, index);
         var terminal = UiEditorTabs.terminal(item);
         if (terminal != null && terminal.retainOnClose) hiddenTerminals.push(terminal);
         else if (terminal == null || allTerminalTabs().indexOf(terminal) < 0) UiEditorTabs.dispose(item);
@@ -1202,6 +1225,45 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 		requestFrame();
 		return true;
+	}
+
+	/** The files whose tabs were closed in each context, the last closed last, with the place each tab had. */
+	final closedTabs:Map<String, Array<ClosedTab>> = new Map();
+
+	function rememberClosedTab(item:UiEditorTab, index:Int):Void {
+		var view = UiEditorTabs.document(item);
+		if (view == null || !view.document.hasBackingPath()) return;
+		var closed = closedTabs.get(contextKey);
+		if (closed == null) { closed = []; closedTabs.set(contextKey, closed); }
+		closed.push(new ClosedTab(view.document.requirePath(), index));
+		if (closed.length > 20) closed.shift();
+	}
+
+	public function canReopenClosedTab():Bool {
+		var closed = closedTabs.get(contextKey);
+		return closed != null && closed.length > 0;
+	}
+
+	/** Opens the file whose tab was closed last in this context again, in the place it had, and remembers the one before it. */
+	public function reopenClosedTab():Bool {
+		var closed = closedTabs.get(contextKey);
+		while (closed != null && closed.length > 0) {
+			var last = closed.pop();
+			if (!workspace.fileSystem.exists(last.path)) continue;
+			var view = openFile(last.path);
+			var from = -1;
+			for (index in 0...activePane.items.length) if (UiEditorTabs.document(activePane.items[index]) == view) from = index;
+			var to = Std.int(Math.min(last.index, activePane.items.length - 1));
+			if (from >= 0 && from != to) {
+				var item = activePane.items[from];
+				activePane.items.splice(from, 1);
+				activePane.items.insert(to, item);
+				setActiveIndex(to, true);
+			}
+			requestFrame();
+			return true;
+		}
+		return false;
 	}
 
 	public function closeDocument(document:Document):Bool {
@@ -1711,6 +1773,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
 	}
 
+	/**
+		Given the chrome lines of the context being left, the ones a context without a saved layout starts with, on top
+		of the defaults. Null starts every such context from the defaults alone.
+	**/
+	public var firstContextLines:Null<Array<String>->Array<String>>;
+
 	/** Set around a switch the user made from a sidebar row: the editor does not take the keyboard from the row. */
 	public var keepFocusOnSwitch = false;
 
@@ -1720,8 +1788,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var started = Sys.time();
 		contextUse.remove(contextKey); contextUse.unshift(contextKey);
 		contextUse.remove(key);
+		var leaving = chromeLines(layoutLines());
 		contextLayouts.set(contextKey, new UiContextLayout(panes, activePane, panelTerminals, hiddenTerminals,
-			activePanelTerminalIndex, chromeLines(layoutLines())));
+			activePanelTerminalIndex, leaving));
 		beforeContextDetach();
 		focus.activate(null);
 		dismissLanguagePopup();
@@ -1749,7 +1818,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		} else {
 			var lines = pendingContextLayouts.get(key);
 			pendingContextLayouts.remove(key);
-			restoreLayoutLines(lines == null ? defaultContextLines : lines, resolveContextDocument);
+			// A context shown for the first time may keep some of the chrome the window has now (see firstContextLines).
+			if (lines == null) lines = firstContextLines == null ? defaultContextLines : defaultContextLines.concat(firstContextLines(leaving));
+			restoreLayoutLines(lines, resolveContextDocument);
 			restoreEvictedSelections(key);
 		}
 		var editorFocused = !keepFocusOnSwitch && dockActions.model.activePanelId == activePane.id;
@@ -2213,6 +2284,13 @@ class UiWorkbenchHost implements WorkbenchHost {
 			return languagePopup(scroll);
 		});
 	}
+}
+
+/** A closed document tab: its file and the place it had in its pane. */
+private class ClosedTab {
+	public final path:String;
+	public final index:Int;
+	public function new(path:String, index:Int) { this.path = path; this.index = index; }
 }
 
 private class ScmSideBySidePair {

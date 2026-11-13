@@ -122,6 +122,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineClient:Null<workspace.client.MachineClient>;
 	var sessionFolderChooser:Null<SessionFolderChooser>;
 	var machineActions:Null<WorkbenchMachineActions>;
+	final automationCommands:Bool = devtools.AutomationProbe.directoryFromEnvironment() != null;
 	/** Tells suit which context this window shows, so other windows can mark it (M19 Phase 8). */
 	var presence:workspace.WindowPresence = new workspace.WindowPresence(function() return Sys.time(), function(key) suit.SuitClient.editorFocus(key));
 	/** The context a window opened by Open in New Window was asked for (`--context=`), until it is applied. */
@@ -243,6 +244,12 @@ class ExosuitApp implements DesktopUiApplication {
 	var viewRevision:Int = 0;
 	var submittedBuildKey:Null<String>;
 	var nextBackgroundPoll:Float = 0.0;
+	/**
+		Until then the background poll runs on every turn of the host loop instead of twenty times a second. Connecting to a
+		workspace is a chain of small replies (pipe, handshake, identity, catalog, first reads), each handled by a poll: at
+		50 ms a step the chain alone took 0.3 to 0.5 s. Set when a workspace is opened or its status changes, for a few seconds.
+	**/
+	var eagerPollUntil:Float = 0.0;
 	var nextExplorerPoll:Float = 0.0;
 	var nextScmPoll:Float = 0.0;
 	final scmAutoFetchPending:Map<String, Bool> = [];
@@ -483,6 +490,20 @@ class ExosuitApp implements DesktopUiApplication {
 			phoneLayoutActive = true; phoneModeApplying = false; syncPhoneDockRoot();
 		};
 		host.afterContextRestore = function() { layoutModes.resume(); layoutModes.refreshContext(); };
+		// A context shown for the first time keeps the side bar the window has now: its destination, width and whether
+		// it shows, and whether the user chose that by hand (then the layout mode leaves it alone). A workspace made or
+		// opened from the Workbench tree opens with the tree still there. The bottom and right regions start from the mode.
+		host.firstContextLines = function(leaving) {
+			var kept:Array<String> = [];
+			for (line in leaving) {
+				if (StringTools.startsWith(line, "B\tsidebar\t")) kept.push(line);
+				else if (StringTools.startsWith(line, "N\tlayout-mode\t")) {
+					var fields = line.split("\t");
+					if (fields.length == 7) { fields[5] = "0"; fields[6] = "0"; kept.push(fields.join("\t")); }
+				}
+			}
+			return kept;
+		};
 		var defaultSidebar = sidebar.encode();
 		host.restoreSidebar = function(lines) {
 			var saved = defaultSidebar, layoutSaved = false;
@@ -556,7 +577,8 @@ class ExosuitApp implements DesktopUiApplication {
 			explorerRoot = roots.length == 0 ? null : roots[0];
 			clearExplorerModel(); filesScroll.jumpTo(0, 0);
 			if (roots.length > 0 && !contextLayoutsReady) openExplorer();
-			else if (roots.length == 0) { sidebar.setVisible(false); dock.close("explorer"); }
+			// A workspace without folders keeps the side bar: the Workbench is where its terminals, sessions and groups are made.
+			else if (roots.length == 0 && application.savedWorkspaces.current == null) { sidebar.setVisible(false); dock.close("explorer"); }
 			requestFrame();
 		};
 		if (desktop != null) {
@@ -1241,6 +1263,8 @@ class ExosuitApp implements DesktopUiApplication {
 			new Shortcut(UiKey.S, UiModifier.Control)));
 		ui.commands.register(new Command("file.close-tab", "Close Tab", function() application.requestCloseActiveTab(),
 			new Shortcut(87 /* W */, UiModifier.Control)));
+		ui.commands.register(new Command("file.reopen-closed-tab", "Reopen Closed Tab", function() host.reopenClosedTab(),
+			new Shortcut(84 /* T */, UiModifier.Control | UiModifier.Shift), function() return host.canReopenClosedTab()));
 		for (mode in [LayoutMode.Editor, LayoutMode.Agents]) {
 			var selected = mode;
 			ui.commands.register(new Command("view.mode-" + mode.id, "Use " + mode.label + " Layout", function() layoutModes.select(selected.id), null, function() return !phoneLayoutActive));
@@ -1386,7 +1410,9 @@ class ExosuitApp implements DesktopUiApplication {
 			default:
 		}
 		var content = haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer");
-		var width = Math.max(1.0, workbenchAvailableWidth() - DockWorkspace.DividerExtent);
+		// The split's ratio is of the whole width: the dock's dividers are hairlines laid over the split and take no room
+		// (DockWorkspace, dividerHairline). A divider taken off here made the side bar ~0.66 % wider at each show.
+		var width = Math.max(1.0, workbenchAvailableWidth());
 		dock.setRoot(DockNode.Split(DockSplitAxis.Horizontal, sidebar.width / width,
 			DockNode.Panel("explorer"), content));
 	}
@@ -1660,6 +1686,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchPanel.machine = machineActions;
 		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
 		workbenchPanel.hasFolder = function() return application.savedWorkspaces.isOpen();
+		workbenchPanel.connectionFailure = function() return workspaceError;
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
 		syncWorkbenchSessionSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
@@ -1939,6 +1966,7 @@ class ExosuitApp implements DesktopUiApplication {
 		// no folders opens its scratch folder as a folder.
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
 			workspace.client.ConnectTimeline.mark("open-workspace", entry.id, entry.name);
+			pollEagerly(8.0, true);
 			if (workspace.client.WorkspaceServiceTarget.enabled() && entry.folders.length == 0) {
 				machine.scratch(entry.id, function(path, failure) {
 					if (report(failure, entry.id) || path == null) return;
@@ -2304,14 +2332,18 @@ class ExosuitApp implements DesktopUiApplication {
 		for (pane in host.panes) {
 			var tabs:Array<Dynamic> = [];
 			for (item in pane.items) {
-				var title = "", kind = "", lines:Null<Array<String>> = null;
+				var title = "", kind = "", lines:Null<Array<String>> = null, agentState:Null<String> = null, agentError:Null<String> = null;
 				switch item {
 					case Document(view): kind = "document"; title = view.document.hasBackingPath() ? view.document.requirePath() : "(untitled)";
 					case Terminal(terminal):
 						kind = "terminal"; title = terminal.title;
 						// What the terminal shows, so a test can see input from another window arrive.
 						if (Std.isOfType(terminal.panel, TerminalPane)) lines = cast(terminal.panel, TerminalPane).diagnosticState().lines;
-					case Agent(agent): kind = "agent"; title = agent.title;
+					case Agent(agent):
+						kind = "agent"; title = agent.title;
+						// The conversation as items, so a test can see a reply arrive.
+						var transcript = agent.panel.automationTranscript();
+						lines = transcript.lines; agentState = transcript.state; agentError = transcript.error;
 					case WorkspaceFile(file): kind = "workspace-file"; title = file.root + "|" + file.path;
 					case Settings(_): kind = "settings";
 					case Image(_): kind = "image";
@@ -2319,6 +2351,7 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 				var tab:Dynamic = {kind: kind, title: title};
 				if (lines != null) tab.lines = lines;
+				if (kind == "agent") { tab.agentState = agentState; tab.agentError = agentError; }
 				tabs.push(tab);
 			}
 			panes.push({id: pane.id, active: pane.activeIndex, tabs: tabs});
@@ -2341,8 +2374,27 @@ class ExosuitApp implements DesktopUiApplication {
 			windowId: suit.SuitClient.windowIdentity(), otherWindows: otherWindows(), newWindowMs: Std.int(workspace.NewWindow.slowestOpen * 1000 * 10) / 10,
 			contextKind: Std.string(active.kind), layoutMode: layoutModes.current.id, railHidden: layoutModes.hiddenOnRail().copy(),
 			workbenchEmptyState: workbenchPanel != null && workbenchPanel.showsEmptyState(),
+			workbench: workbenchAutomationState(),
 			remoteAccess: remoteAccessPanel == null ? null : remoteAccessPanel.automationState()
 		};
+	}
+
+	/** What the Workbench can create now and which workspace its rows belong to, for a test driver. */
+	function workbenchAutomationState():Dynamic {
+		var client = workbenchClient, panel = workbenchPanel;
+		if (client == null || panel == null) return null;
+		var catalog = client.terminalCatalog(), attached = workspaceAttachment;
+		var served:Null<String> = null, servedRoot:Null<String> = null;
+		if (attached != null && Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) {
+			var local:workspace.client.LocalWorkspaceClient = cast attached;
+			served = local.servedWorkspace(); servedRoot = local.rootPath();
+		}
+		return {catalog: catalog != null, catalogRoot: catalog == null ? null : catalog.workspaceRoot,
+			agentsLoaded: client.agentService().agents() != null,
+			canCreateTerminal: client.canCreateGroupedTerminals() && !client.terminalCatalogBusy(), canCreateAgent: canCreateAgentSession(),
+			canEditGroups: client.canEditGroups(), openRow: panel.model.openRow, groupParent: panel.model.groupParent,
+			selected: panel.tree.selectedKey, connectingTo: panel.connectingTo(), servedWorkspace: served, servedRoot: servedRoot,
+			catalogError: client.terminalCatalogError(), agentError: client.agentService().agentError()};
 	}
 
 	/** The quick switch: recent contexts first, then the machine's workspaces and the current workspace's groups. */
@@ -2386,6 +2438,12 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 			requestFrame();
 		}));
+	}
+
+	/** A test run's command (devtools.AutomationProbe.takeCommand): `open-workspace <id>` does what a double click on its row does. */
+	function runAutomationCommand(command:String):Void {
+		var words = command.split(" ");
+		if (words[0] == "open-workspace" && words.length == 2) openMachineWorkspace(words[1]);
 	}
 
 	/** Opens the machine workspace `id` unless it is open; its clients then follow the workspace's manager choice. */
@@ -3461,11 +3519,25 @@ class ExosuitApp implements DesktopUiApplication {
 		// The Agents layout belongs to a workspace service that holds groups, even with none yet: the workspace itself
 		// takes sessions and terminals. Once it had one, removing the last group does not take the layout (and the
 		// Activity Rail's destinations) away: the workspace still has its sessions.
-		if (client == null || catalog == null || !client.canReadTerminals()) { layoutModes.setServiceAvailable(false); return; }
+		if (client == null || catalog == null || !client.canReadTerminals()) {
+			// A machine workspace always has such a service. While the window is on its way to it (a new workspace's takes
+			// seconds to start; every switch drops the catalog for a moment) the layout stays, or the Workbench the workspace
+			// was opened from would give way to Files, where nothing reads the catalog that brings the layout back.
+			layoutModes.setServiceAvailable(client != null && awaitingWorkspaceService());
+			return;
+		}
 		var hasGroups = catalog.groups.length > 0 || client.canEditGroups();
 		if (hasGroups) agentsLayoutInstance = catalog.instance;
 		layoutModes.setServiceAvailable(hasGroups || catalog.instance == agentsLayoutInstance);
 		leaveRemovedGroup(client, catalog);
+	}
+
+	/** Whether the window is on a machine workspace with a service of its own that it has not attached to yet, and has not failed to. */
+	function awaitingWorkspaceService():Bool {
+		var machine = machineClient;
+		return machine != null && machine.enabled && workspace.client.WorkspaceServiceTarget.enabled()
+			&& application.savedWorkspaces.current != null && machine.workspaceById(application.savedWorkspaces.current.id) != null
+			&& workspaceError == null;
 	}
 
 	/** The group the window works in was removed (here or from another window): the window moves to the workspace root. */
@@ -3490,7 +3562,11 @@ class ExosuitApp implements DesktopUiApplication {
 		// The window size, the right panel and the workspace decide what the rail hides.
 		layoutModes.syncRail((phoneLayoutActive ? 1 : 0) | (responsiveRightHidden ? 2 : 0) | (remoteAgentsLayout() ? 4 : 0));
 		var now = Sys.time();
-		if (now < nextBackgroundPoll) return;
+		if (now < nextBackgroundPoll) {
+			// While a workspace connects, its attachment alone is polled on every turn; everything else keeps its cadence.
+			if (now < eagerPollUntil) pollWorkspaceAttachment();
+			return;
+		}
 		nextBackgroundPoll = now + 0.05;
 		syncLayoutService();
 		if (zoomOverlayUntil > 0 && now >= zoomOverlayUntil) {
@@ -3542,52 +3618,27 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 	}
 
-	function pumpApplication():Void {
-		nextBackgroundPoll = Sys.time() + 0.05;
-		if(workbenchClient!=null) {
-   var agentService=workbenchClient.agentService();
-   agentService.refreshAgents();
-   if(agentRevision!=agentService.agentRevision()) {
-    agentRevision=agentService.agentRevision();
-    var names=agentService.agents();
-    if(names!=null) UiEditorTabs.syncAgentNames(host.panes,names);
-    requestFrame();
-   }
-   var now=Sys.time(), catalog=agentService.agents();
-   if(catalog!=null && catalog.records.length>0 && now>=codexPoll) {
-    codexPoll=now+0.2;
-    var active=host.activeTab(), activeAgent=active==null?null:UiEditorTabs.agent(active);
-    var selected=activeAgent!=null && activeAgent.workspaceRoot==catalog.root && now>=nextActiveCodexRead
-      ? activeAgent.resource : null;
-    if(selected!=null) nextActiveCodexRead=now+1;
-    else {
-     var count=catalog.records.length;
-     if(codexReadIndex>=count) codexReadIndex=0;
-     selected=catalog.records[codexReadIndex++].id;
-    }
-    agentService.agentAction(selected,"read","",null);
-   }
-  }
-        if((sidebar.visible && sidebar.activeId == "workbench") && workbenchClient!=null) workbenchClient.refreshTerminals(false);
-        if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=lastTerminalCatalogRevision) {
-            lastTerminalCatalogRevision=workbenchClient.terminalCatalogRevision();
-            var catalog=workbenchClient.terminalCatalog();
-            if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
-                if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.updateWorkspaceName(record.name); tab.cwd=record.cwd; }
-            requestFrame();
-        }
-		var previousLanguageStatus = application.language.statusLabel();
-		var previousProblems = host.getProblems().revision;
-		var previousNotification = visibleNotification;
-		var previousBuildBytes = application.build.output.byteCount;
-		var liveFeed = application.build.live;
-		var previousLiveEvents = liveFeed == null ? 0 : liveFeed.applied;
-		var previousBuild = application.build.active;
-		var previousDecorations = host.getPluginDecorations().revision;
-		var previousPluginStatus = host.getPluginStatusItems().revision;
-		var previousPluginPanels = host.getPluginPanels().revision;
-		var previousExternal = application.documents.externalRevision;
-		application.update();
+	/**
+		How long one open may poll eagerly in all, and how long after a budget ended a status change may begin another:
+		a connection that flaps between reconnecting and connected does not keep the eager cadence on.
+	**/
+	static inline final EAGER_BUDGET = 10.0;
+	static inline final EAGER_REST = 60.0;
+	var eagerBudgetEnd:Float = 0.0;
+
+	/** Polls eagerly for `seconds` more, within the budget of the open (or status change) that began it. */
+	function pollEagerly(seconds:Float, begins:Bool):Void {
+		var now = Sys.time();
+		if (begins || now >= eagerBudgetEnd + EAGER_REST) eagerBudgetEnd = now + EAGER_BUDGET;
+		eagerPollUntil = Math.min(now + seconds, eagerBudgetEnd);
+	}
+
+	/**
+		The window's attachment to its workspace service: selects the service, drives the connection and follows its
+		status. Called with the application's poll, and alone on every loop turn while a workspace connects (see
+		`eagerPollUntil`), so the rest of the background work keeps its cadence.
+	**/
+	function pollWorkspaceAttachment():Void {
 		var attachment = workspaceAttachment;
 		if (attachment != null) {
 			var project = application.workspace.activeProject;
@@ -3615,14 +3666,94 @@ class ExosuitApp implements DesktopUiApplication {
 			var label = attachment.statusLabel();
 			if (workbenchClient != null && workbenchClient.terminalCatalog() != null)
 				workspace.client.ConnectTimeline.markOnce("rows-own:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own");
+			markFirstViews(attachment);
 			if (workspaceStatus != label) {
+				// Connecting: poll eagerly until it is done; connected: a little longer, for the first catalog and file reads.
+				pollEagerly(StringTools.startsWith(label, "Connecting") || label == "Workspace reconnecting" ? 8.0 : 1.5, false);
 				workspace.client.ConnectTimeline.mark("status", currentWorkspaceName(), label);
-				if (StringTools.startsWith(label, "Connecting")) workspace.client.ConnectTimeline.rearm("rows-own:" + currentWorkspaceName());
+				if (StringTools.startsWith(label, "Connecting"))
+					for (key in ["rows-own:", "files:", "scm:"]) workspace.client.ConnectTimeline.rearm(key + currentWorkspaceName());
 				workspaceStatus = label;
 				requestFrame();
 			}
 			leaveMissingGroup();
 		}
+	}
+
+	/**
+		Marks in the connect timeline when the open workspace's file tree first lists its root and when its source control
+		first has a snapshot (terminal tabs mark their screens themselves, document tabs their reads: `tab-file-read`).
+	**/
+	function markFirstViews(attachment:workspace.client.WorkspaceAttachment):Void {
+		var name = currentWorkspaceName();
+		if (!workspace.client.ConnectTimeline.marked("files:" + name) && Std.isOfType(explorerModel, WorkspaceFileTreeModel)
+			&& (cast(explorerModel, WorkspaceFileTreeModel)).rootListed())
+			workspace.client.ConnectTimeline.markOnce("files:" + name, "files-visible", name);
+		if (!workspace.client.ConnectTimeline.marked("scm:" + name)) {
+			var source = attachment.sourceControlSource();
+			if (source != null)
+				for (repository in source.repositories())
+					if (source.snapshot(repository.id) != null) {
+						workspace.client.ConnectTimeline.markOnce("scm:" + name, "scm-visible", name, source.repositories().length + " repositories");
+						break;
+					}
+		}
+	}
+
+	function pumpApplication():Void {
+		var pumpedAt = Sys.time();
+		nextBackgroundPoll = pumpedAt + 0.05;
+		if (automationCommands) {
+			var command = devtools.AutomationProbe.takeCommand();
+			if (command != null) runAutomationCommand(command);
+		}
+		if(workbenchClient!=null) {
+   var agentService=workbenchClient.agentService();
+   agentService.refreshAgents();
+   if(agentRevision!=agentService.agentRevision()) {
+    agentRevision=agentService.agentRevision();
+    var names=agentService.agents();
+    if(names!=null) UiEditorTabs.syncAgentNames(host.panes,names);
+    requestFrame();
+   }
+   var now=Sys.time(), catalog=agentService.agents();
+   if(catalog!=null && catalog.records.length>0 && now>=codexPoll) {
+    codexPoll=now+0.2;
+    var active=host.activeTab(), activeAgent=active==null?null:UiEditorTabs.agent(active);
+    var selected=activeAgent!=null && activeAgent.workspaceRoot==catalog.root && now>=nextActiveCodexRead
+      ? activeAgent.resource : null;
+    if(selected!=null) nextActiveCodexRead=now+1;
+    else {
+     var count=catalog.records.length;
+     if(codexReadIndex>=count) codexReadIndex=0;
+     selected=catalog.records[codexReadIndex++].id;
+    }
+    agentService.agentAction(selected,"read","",null);
+   }
+  }
+        // The catalog is read while the Workbench shows it, and while a switch to a group of another workspace waits for it
+        // (whatever the side bar shows, or the switch would time out without ever seeing the group).
+        if(workbenchClient!=null && ((sidebar.visible && sidebar.activeId == "workbench") || pendingContextTarget != null && workbenchClient.terminalCatalog() == null)) workbenchClient.refreshTerminals(false);
+        if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=lastTerminalCatalogRevision) {
+            lastTerminalCatalogRevision=workbenchClient.terminalCatalogRevision();
+            var catalog=workbenchClient.terminalCatalog();
+            if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
+                if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.updateWorkspaceName(record.name); tab.cwd=record.cwd; }
+            requestFrame();
+        }
+		var previousLanguageStatus = application.language.statusLabel();
+		var previousProblems = host.getProblems().revision;
+		var previousNotification = visibleNotification;
+		var previousBuildBytes = application.build.output.byteCount;
+		var liveFeed = application.build.live;
+		var previousLiveEvents = liveFeed == null ? 0 : liveFeed.applied;
+		var previousBuild = application.build.active;
+		var previousDecorations = host.getPluginDecorations().revision;
+		var previousPluginStatus = host.getPluginStatusItems().revision;
+		var previousPluginPanels = host.getPluginPanels().revision;
+		var previousExternal = application.documents.externalRevision;
+		application.update();
+		pollWorkspaceAttachment();
 		remoteFileSearch.update(Sys.time());
 		// O(1) per frame: the key (strings built and escaped) is made only when the context, workspace or machine id changed.
 		var shown = application.activeContext;
@@ -3999,10 +4130,12 @@ class ExosuitApp implements DesktopUiApplication {
 		// Search here follows the scope; outside the Agents layout it is the workspace's Search, unless the sidebar shows it.
 		var searchContent:View = scope != null ? scopedSearch : sidebar.visible && sidebar.activeId == "search"
 			? new Text("Search is open in the sidebar.", null, theme.tokens.textSecondary, TextStyleOverride.text(12)) : searchPanel;
-		// Labels give way to icons when the panel is too narrow for all three.
-		var compact = dock.isOpen("context-panel") && contextPanelWidth() < 230;
+		// Icons go first and labels last as the panel narrows: Files, Search and Changes with their icons need about
+		// 252 px; the labels alone fit from about 200 px (the default 1280 px window gives the panel 248 px).
+		var contextWidth = dock.isOpen("context-panel") ? contextPanelWidth() : 1000.0;
+		var compact = contextWidth < 200, withIcons = contextWidth >= 258;
 		var tab = function(key:ContextPanelTab, label:String, icon:IconName, content:View):TabItem
-			return new TabItem(key, label, content, true, icon, compact ? "" : null);
+			return new TabItem(key, label, content, true, compact || withIcons ? icon : null, compact ? "" : null);
 		var tabs = new Tabs("context-panel-tabs", [tab(ContextPanelTab.Files, "Files", IconName.FolderOpen, contextFiles),
 			tab(ContextPanelTab.Search, "Search", IconName.Search, searchContent),
 			tab(ContextPanelTab.Changes, "Changes", IconName.Hierarchy, sourceControlPanel())], contextTab,
@@ -4342,11 +4475,14 @@ class ExosuitApp implements DesktopUiApplication {
 		var indentSettings = active == null ? null : application.configuration.settingsFor(active);
 		var indentation = indentSettings == null ? "" : (indentSettings.insertSpaces ? "Spaces: " : "Tabs: ") + indentSettings.indentSize;
 		var indentationDetails = active == null || indentSettings == null ? "" : indentation + " · Tab width: " + indentSettings.tabWidth + " · " + active.indentation.source;
+		var cursor = active == null || activeView == null || image != null || unsupported != null ? null
+			: StatusBarCursor.label(active.buffer, activeView.selection);
 		var trailing = languageStatus.length > 0 ? languageStatus : '${host.activePane.items.length} open';
 		if (image != null) trailing = "Whole Image · " + image.image.width + " × " + image.image.height + " px · " + FileSizeLabel.format(image.sizeBytes);
 		else if (unsupported != null) trailing = (unsupported.file.binary ? "Binary file" : "Unsupported encoding") + " · " + FileSizeLabel.format(unsupported.file.sizeBytes);
 		return new RetainedView("status-bar", function(_) return new StatusBarView({
 			document: label,
+			cursor: cursor,
 			indentation: active == null ? null : indentation,
 			indentationDetails: indentationDetails,
 			openIndentation: function() application.configuration.openIndentationCommandView(active),
@@ -4363,7 +4499,7 @@ class ExosuitApp implements DesktopUiApplication {
 			showNotification: function(entry) showNotifications(entry),
 			dismissNotification: function() { center.dismissToast(); requestFrame(); },
 			toggleNotifications: function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }
-		}), function() return indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" +
+		}), function() return cursor + ":" + indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" +
 			host.getPluginStatusItems().revision + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision + ":" + application.settings.current.tabTooltipDelay);
 	}
 
@@ -5094,6 +5230,9 @@ class ExosuitApp implements DesktopUiApplication {
 			var content = new Column("document-content:" + documentView.id, contentItems, contentStyle);
 			var title = diffDocument == null ? (document.dirty ? "* " : "") + document.title :
 				documentView.sideBySideDiff ? document.title : haxe.io.Path.withoutDirectory(diffDocument.path) + " (diff)";
+			// A document's tab shows only the file's name; its tooltip says where the file is.
+			if (diffDocument == null && document.path != null)
+				tooltips.set(documentKey, document.path.indexOf("\\") >= 0 ? StringTools.replace(document.path, "/", "\\") : document.path);
 			if (diffDocument != null) {
 				var path = diffDocument.path;
 				var source = editorSourceControlSource();
@@ -5134,9 +5273,23 @@ class ExosuitApp implements DesktopUiApplication {
 		var options = new TabsOptions();
 		options.style = tabsStyle;
 		options.selectionMode = TabsSelectionMode.Controlled;
+		// A tab dragged along the strip and dropped on another tab takes that tab's place.
+		var headers:Map<String, RenderNode> = new Map();
+		options.onTabDragEnd = function(key, event) {
+			for (target => node in headers) {
+				if (target == key) continue;
+				var bounds = node.globalBounds();
+				if (event.globalX >= bounds.x && event.globalX < bounds.x + bounds.width
+					&& event.globalY >= bounds.y - 12 && event.globalY < bounds.y + bounds.height + 12) {
+					host.moveEditorTab(paneId, key, target);
+					return;
+				}
+			}
+		};
 		var widget = Tabs.withOptions("exosuit-editor-tabs:" + paneId, items, active == null ? "" : UiEditorTabs.key(active),
 			function(key) host.activateEditorTab(key, paneId), options);
 		widget.onTabHeaderBuilt = function(key, node) {
+			headers.set(key, node);
 			node.on(haxeon.ui.core.UiEventKind.Click, function(event) {
 				if (event.button != 0 || tabClicks.register(paneId + ":" + key, event) != 2) return;
 				for (view in tabs) if (key == "doc:" + view.document.id) host.keepDocument(view.document, paneId);
@@ -5355,13 +5508,19 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (actions != null && actions.recentProjects.length > 0) {
 			var recentStyle = new LayoutStyle();
+			recentStyle.width = LayoutAxis.grow();
 			recentStyle.direction = LayoutDirection.TopToBottom;
 			recentStyle.childGap = 4.0;
 			var recentRows:Array<KeyedView> = [];
 			for (index in 0...actions.recentProjects.length) {
 				var path = actions.recentProjects[index];
-				recentRows.push(new KeyedView("recent" + index,
-					new Button(path, null, function() actions.openRecent(path), "welcome-recent-" + index)));
+				// A folder path can be wider than the editor area: the button fills at most the panel and the path ellipsizes in the middle.
+				var recent = new Button(path, null, function() actions.openRecent(path), "welcome-recent-" + index);
+				recent.style.width = LayoutAxis.grow(0, path.length * 8.0 + 32); recent.style.clipHorizontal = true;
+				recent.labelView = new haxeon.ui.widgets.text.MiddleEllipsisText("welcome-recent-label", path, true,
+					new TextStyleOverride(null, null, null, haxeon.ui.TextWrap.None));
+				recent.accessibilityLabel = path;
+				recentRows.push(new KeyedView("recent" + index, recent));
 			}
 			items.push(new KeyedView("recent", new Column("welcome-recent", recentRows, recentStyle)));
 		}

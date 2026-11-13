@@ -60,6 +60,8 @@ class WorkbenchPanel implements View {
 	/** Opens a folder picker; with `hasFolder` and no machine, the empty Workbench offers it when no folder is open. */
 	public var chooseFolder:Null<Void->Void>;
 	public var hasFolder:Null<Void->Bool>;
+	/** Why the window could not attach to the open workspace's service, or null; set by the app, which owns the attachment. */
+	public var connectionFailure:Null<Void->Null<String>>;
 	var lastReportedError:Null<String>;
 	// Selection actions run one step at a time: the service drops a mutation while another is in flight.
 	var batchKeys:Array<String> = [];
@@ -95,8 +97,11 @@ class WorkbenchPanel implements View {
     var pendingReveal:Null<String>;
     /** The row that entered a context: the tree's selection is kept per context, so the entered context's own selection must yield to it. */
     var pendingEnterKey:Null<String>;
-    /** Updates left in which the re-keyed tree may still come back with the old selection. */
-    var pendingEnterFrames = 0;
+    /**
+        Until when the re-keyed tree may still come back with the old selection. A time, not a count of updates: the
+        switch can take many frames (a group to its workspace's root, say), and the clicked row stays selected meanwhile.
+    **/
+    var pendingEnterUntil:Float = 0;
     var revealRoot:Null<String>;
     var scrollTarget:Null<String>;
     var scrollPasses = 0;
@@ -130,7 +135,12 @@ class WorkbenchPanel implements View {
 		tree.canDragItem = canDragNode;
 		tree.canDropItem = canDropNode;
 		tree.onItemDrop = dropNode;
-		tree.onSelectionChanged = function(_) requestFrame();
+		tree.onSelectionChanged = function(key) {
+			// The user chose another row (a key, a click): the entered row's wish is over. The re-keyed tree's restore of
+			// a context's old selection does not notify, so it still yields to the entered row.
+			if (pendingEnterKey != null && key != pendingEnterKey) pendingEnterKey = null;
+			requestFrame();
+		};
 		tree.onExpandedChanged = function(key, expanded) {
 			if (WorkbenchRowKey.workspaceId(key) != null) {
 				if (expanded) expandedWorkspaces.set(key, true);
@@ -183,6 +193,7 @@ class WorkbenchPanel implements View {
 		model.agentEditor = function(id) return agentDraft != null && agentDraft.id == id ? agentEditor : null;
 		tree.onItemClicked = function(key, count) {
 			if (agentDraft != null || draft != null) return;
+			pendingEnterKey = null; // a later click is the user's choice; enterRow below makes a new wish for its own row
 			if (key == WorkbenchRowKey.NEW_WORKSPACE && count == 1) { createWorkspace(); return; }
 			// A single click on another workspace's item only selects it; Enter or a double click opens it (see onItemActivatedWithEvent).
 			if (WorkbenchRowKey.isForeign(key)) return;
@@ -211,18 +222,19 @@ class WorkbenchPanel implements View {
 	}
 
 	function selectAfterEnter(key:String):Void {
-		pendingEnterKey = key; pendingEnterFrames = 3;
+		pendingEnterKey = key; pendingEnterUntil = Sys.time() + 1.5;
 		requestFrame();
 	}
 
 	/**
 		The re-keyed tree comes back with the selection the entered context last had; the row that was entered wins. Only
-		for the few updates the switch takes, so a selection made after it (by the user or by code) is never overridden.
+		for the moment the switch takes (and not past the user's next choice of row), so a later selection is never
+		overridden.
 	**/
 	function applyPendingEnterSelection():Void {
 		var key = pendingEnterKey;
 		if (key == null) return;
-		if (--pendingEnterFrames < 0) { pendingEnterKey = null; return; }
+		if (Sys.time() > pendingEnterUntil) { pendingEnterKey = null; return; }
 		if (tree.selectedKey == key) { requestFrame(); return; }
 		pendingEnterKey = null;
 		try tree.select(key, false) catch (_:Dynamic) {}
@@ -1044,6 +1056,9 @@ class WorkbenchPanel implements View {
 		observedOpenRow = open;
 		if (previous != null) tree.setExpanded(previous, false);
 		if (open != null) tree.setExpanded(open, true);
+		// A workspace just made from New Workspace… takes the selection from that row, so the keyboard and the header
+		// buttons act on the new workspace.
+		if (open != null && tree.selectedKey == WorkbenchRowKey.NEW_WORKSPACE) selectAfterEnter(open);
 	}
 
 	public function headerActions(availableWidth:Float = 260):View return new WorkbenchHeaderActions(this, availableWidth);
@@ -1092,7 +1107,9 @@ class WorkbenchPanel implements View {
 		function tip(key:String, anchor:View, label:String):View return new TabTooltip(key, anchor, new Text(label),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), delay, Below, hover, visibleTooltip.value == key);
 		var actions:Array<KeyedView> = [];
-		if (availableWidth >= 170) actions.push(new KeyedView("terminal", tip("new-terminal-tip", terminal, !client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
+		var waiting = connectingTo();
+		if (availableWidth >= 170) actions.push(new KeyedView("terminal", tip("new-terminal-tip", terminal, waiting != null && !terminal.enabled ? "Connecting to " + waiting + "…"
+				: !client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
 				: !client.canControlTerminals() ? "Terminal creation requires terminal control permission"
 				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal")));
 		if (availableWidth >= 210) actions.push(new KeyedView("agent", tip("new-agent-tip", agent, "New Codex")));
@@ -1105,6 +1122,17 @@ class WorkbenchPanel implements View {
 	public static function workspaceIsEmpty(catalog:Null<TerminalCatalog>, agents:Null<WorkspaceAgentProtocol.AgentCatalog>):Bool {
 		if (catalog == null || catalog.groups.length != 0 || catalog.terminals.length != 0) return false;
 		return agents == null || agents.records.length == 0;
+	}
+
+	/**
+		The name of the open machine workspace while its rows are not in the tree yet: its service is still starting, or
+		the window is on its way to it. Null once they are, and without a machine or an open workspace.
+	**/
+	public function connectingTo():Null<String> {
+		var open = model.openRow;
+		if (machine == null || open == null || model.groupParent == open) return null;
+		var id = WorkbenchRowKey.workspaceId(open), entry = id == null ? null : model.workspaces.get(id);
+		return entry == null ? null : entry.name;
 	}
 
 	/** Whether the "Nothing here yet" start is on screen (a test seam for the automation snapshot). */
@@ -1127,15 +1155,37 @@ class WorkbenchPanel implements View {
 				new KeyedView("open", button)
 			], style);
 		}
+		var waiting = connectingTo();
+		if (waiting != null) {
+			// The open workspace's service is starting or the window is still switching to it: say so where its rows will be,
+			// instead of an open row with nothing under it and buttons that do nothing yet.
+			var failed = connectionFailure == null ? null : connectionFailure();
+			var message = failed != null ? "Could not connect to " + waiting + ": " + failed
+				: "Connecting to " + waiting + "… Its terminals, sessions and groups appear here in a moment.";
+			return new Column("workbench-empty", [new KeyedView("text", new Text(message, null, null, hint))], style);
+		}
 		if (workspaceIsEmpty(catalog, client.agentService().agents()) && draft == null && client.canEditGroups()) {
 			var button = new Button("New group", null, function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
 				name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true), "workbench-first-group");
-			button.variant = ButtonVariant.Primary;
 			button.enabled = !pending;
-			return new Column("workbench-empty", [
-				new KeyedView("text", new Text("Nothing here yet. Sessions and terminals go in the workspace; groups sort them.", null, null, hint)),
-				new KeyedView("new", button)
-			], style);
+			// Everything an empty workspace can start with is one click away: a session, a terminal, or a group to sort them.
+			var starts:Array<KeyedView> = [new KeyedView("text", new Text("Nothing here yet. Sessions and terminals go in the workspace; groups sort them.", null, null, hint))];
+			var primary = button;
+			if (canCreateAgent()) {
+				var session = new Button("New agent session…", null, function() edit(null, "new-agent"), "workbench-first-agent");
+				starts.push(new KeyedView("agent", session));
+				primary = session;
+			}
+			if (client.canCreateGroupedTerminals()) {
+				var terminal = new Button("New terminal", null, function() createTerminal(WorkspaceProtocol.ROOT_GROUP), "workbench-first-terminal");
+				terminal.accessibilityLabel = "New terminal in this workspace";
+				terminal.enabled = !client.terminalCatalogBusy();
+				starts.push(new KeyedView("terminal", terminal));
+				if (primary == button) primary = terminal;
+			}
+			primary.variant = ButtonVariant.Primary;
+			starts.push(new KeyedView("new", button));
+			return new Column("workbench-empty", starts, style);
 		}
 		return null;
 	}
