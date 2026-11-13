@@ -97,7 +97,7 @@ TERMINALKIT_API int terminalkit_checkpoint(terminalkit_handle *kit, void *buffer
     uint64_t capacity, uint64_t *written TK_OUT);
 TERMINALKIT_API int terminalkit_restore(terminalkit_handle *kit, const void *data, uint64_t size);
 /* Rendered scrollback and screen as bounded UTF-8/SGR, independent of live VT
- * modes and checkpoint recording. Oldest whole rows are trimmed at 4 MiB. */
+ * modes and checkpoint recording. Oldest whole rows are trimmed at 16 MiB. */
 TERMINALKIT_API int terminalkit_history_copy(terminalkit_handle *kit,
     uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
 /* Replaces the active viewport from a bounded, versioned screen snapshot and

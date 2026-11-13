@@ -31,6 +31,7 @@ class RpcTerminalBackend implements TerminalBackend {
   final autoClaimControl:Bool;
   var controlReleased:Bool = false;
   var controlUnavailable:Bool = false;
+  var controlOffered:Bool = false;
   var terminalState:String = "running";
   var historyError:Bool = false;
   var historyAvailable:Bool = true;
@@ -60,6 +61,18 @@ class RpcTerminalBackend implements TerminalBackend {
   var replayCursor:Int64 = 0;
   var snapshotOnly:Bool = false;
   var snapshotPending:Bool = false;
+  // Counts attachments. Retry attaches again on the same RpcConnection object, so the connection alone does not tell a
+  // reply to a call of the failed attachment from one of the new: every callback also compares the count it started under.
+  var attachEpoch:Int = 0;
+  inline function current(c:RpcConnection, epoch:Int):Bool return connection == c && attachEpoch == epoch;
+  // The next snapshot also brings the lines above the screen: set whenever this view's own scrollback cannot be
+  // trusted (it just attached, or output was lost to a replay gap).
+  var historyWanted:Bool = false;
+  // A new service generation owns the terminal: what this view shows is replaced when that service's history and screen
+  // arrive, in one step, and stays on screen until then.
+  var resetPending:Bool = false;
+  static inline final HISTORY_LIMIT = 16 * 1024 * 1024; // terminalkit_history_copy's bound
+  static inline final SCREEN_LIMIT = 3 * 1024 * 1024;
   // Expired paged snapshots in a row, and when the next attempt may start.
   var snapshotExpiries:Int = 0;
   var snapshotRetryAt:Float = 0;
@@ -106,6 +119,8 @@ class RpcTerminalBackend implements TerminalBackend {
     Sys.putEnv(CLIENT_KEY, Sys.getPid() + ":" + key);
   }
   public function id():String return terminalId;
+  /** A Claude Code or Codex terminal: restarting it continues the same conversation. */
+  public function resumesConversation():Bool return agentProvider == "claude" || agentProvider == "codex";
   public function configureAgent(provider:String):Void {
     if (!create || attached || pending || ["codex","claude","pi"].indexOf(provider) < 0)
       throw "Agent launch mode must be selected before creating the terminal";
@@ -146,40 +161,66 @@ class RpcTerminalBackend implements TerminalBackend {
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
     if (controller) return "You are controlling this terminal";
+    if (asking()) return "Take control back?";
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || terminalState == "starting" ? "" : terminalState != "running" ? (restartable ? "Restart Terminal" : "") : controller ? "Release" : "Take control";
+  public function controlAction():String return failure != null ? (closed ? "" : "Retry") : !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || terminalState == "starting" ? "" : terminalState != "running" ? (restartable ? "Restart Terminal" : "") : controller ? "Release" : "Take control";
   /** This view holds the terminal's control lease. */
   public function isController():Bool return attached && controller;
-  /** A host that held control before its process was killed asks for it back once the view is attached and has its history:
-      the editor (or another client) may have claimed the freed lease meanwhile, and the person's own phone returning is
-      the intent. Returns true when the request was made or nothing is left to ask (already in control). False: not ready yet. */
-  public function reclaimControl():Bool {
-    if (controller) return true;
-    if (!attached || !synchronized || controlPending || terminalState != "running" || controlUnavailable || !hasControlGrant()) return false;
-    controlReleased = false;
-    setControl(true, true);
-    return true;
+  /** For a host that held control before its process was killed and reopens the terminal by itself (the phone): another
+      client (the editor) may have claimed the freed lease meanwhile, and this view must ask its person before taking it
+      back. Call right after opening. While the question is open the notice reads "Take control back?" with Take control
+      (activateControl, the usual takeover) and Not now (declineControl), and the view does not claim a lease that falls
+      free by itself. A view the service puts in control when it opens (nobody else held the lease) has nothing to ask. */
+  public function offerControlBack():Void controlOffered = true;
+  /** The offer was made and is not answered yet (it may not be on screen yet: the view is still attaching). */
+  public function controlOfferOpen():Bool return controlOffered;
+  /** Label of the action that answers the offer with no; "" while no question is on screen. */
+  public function controlDeclineAction():String return asking() ? "Not now" : "";
+  /** The person keeps observing: the view is an ordinary observer with Take control from here on, and does not claim a free lease. */
+  public function declineControl():Void {
+    if (!controlOffered) return;
+    controlOffered = false;
+    controlReleased = true;
+  }
+  function asking():Bool
+    return controlOffered && failure == null && attached && synchronized && !historyError && terminalState == "running" && !controlUnavailable && hasControlGrant() && !controlPending && !controller;
+  /** Attaches again after a failure, from the service's current screen, as a view that was just opened does. */
+  function retry():Void {
+    if (closed || failure == null) return;
+    failure = null;
+    failureReported = false;
+    if (releaseEvents != null) { releaseEvents(); releaseEvents = null; }
+    // The next poll sees a new connection and an unknown service generation: it resets the view and opens the terminal again.
+    connection = null;
+    attachEpoch++;
+    instance = "retry";
+    writing = false;
+    pending = false;
+    snapshotRetryAt = 0;
+    snapshotExpiries = 0;
   }
   public function activateControl():Void {
+    if (failure != null) { retry(); return; }
     if (terminalState != "running") { restartShell(); return; }
     controlReleased = controller;
     setControl(!controller, true);
   }
   function restartShell():Void {
     var c = connection;
+    var epoch = attachEpoch;
     if (closed || !attached || !synchronized || !restartable || controlPending || c == null || !c.isOpen() || !hasControlGrant()) return;
     controlPending = true; restartError = null;
     var owner = instance;
     WorkspaceTerminalRestart.request(c,owner,terminalId,theme,
-      function() return !closed && connection == c && instance == owner && hasControlGrant(), function(info) {
-      if (closed || connection != c) return;
+      function() return !closed && current(c, epoch) && instance == owner && hasControlGrant(), function(info) {
+      if (closed || !current(c, epoch)) return;
       controlPending = false;
       if (!observe(info)) return;
       replayDirty = true; nextRead = 0;
     }, function(error) {
-      if (closed || connection != c) return;
+      if (closed || !current(c, epoch)) return;
       controlPending = false;
       // Another viewer may have restarted it first. Refresh rather than retry input.
       replayDirty = true; nextRead = 0;
@@ -189,13 +230,14 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   function setControl(claim:Bool, takeover:Bool = false):Void {
     var c = connection;
+    var epoch = attachEpoch;
     if (closed || !attached || controlUnavailable || c == null || !c.isOpen() || !hasControlGrant() || controlPending) return;
     controlPending = true;
     c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
       workspace: "workspace", instance: instance, id: terminalId,
       claim: claim, takeover: claim && takeover, clientKey: clientKey()
     }, 2000, function(info) {
-      if (closed || connection != c) {
+      if (closed || !current(c, epoch)) {
         if (info.controller == true && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
           workspace: "workspace", instance: instance, id: terminalId,
           claim: false, takeover: false
@@ -205,8 +247,8 @@ class RpcTerminalBackend implements TerminalBackend {
       controlPending = false;
       if (!observe(info)) return;
     }, function(error) {
-      if (connection == c) controlPending = false;
-      if (!closed && connection == c) {
+      if (current(c, epoch)) controlPending = false;
+      if (!closed && current(c, epoch)) {
         if (error.code == "unknown_method") controlUnavailable = true;
         else if (error.code != "disconnected" && error.code != "timeout") fail(error.code);
       }
@@ -229,13 +271,15 @@ class RpcTerminalBackend implements TerminalBackend {
     if (!controller && info.controller == true && theme != null) themePending = true;
     controller = info.controller == true;
     controlled = info.controlled == true;
+    // In control (the service gave it at open, or the person took it), or nothing left to control: the offer is answered.
+    if (controller || ended()) controlOffered = false;
     resizePending = terminalState == "running" && controller && (columns != observedColumns || rows != observedRows);
     if (terminalState == "running" || terminalState == "starting") restoreStreamGeometry();
     if (attached && !controller) {
       writes.resize(0);
       writeBytes = 0;
     }
-    if (autoClaimControl && !controlReleased && attached && !controlled && info.state == "running")
+    if (autoClaimControl && !controlReleased && !controlOffered && attached && !controlled && info.state == "running")
       setControl(true);
     return true;
   }
@@ -278,6 +322,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (c != null && c.isOpen()) flushInput(c);
   }
   function flushInput(c:RpcConnection):Void {
+    var epoch = attachEpoch;
     if (writing || writeBytes == 0 || resizePending || themePending || !synchronized || !attached || !controller) return;
     var bytes = writes.length == 1 ? writes[0] : Bytes.alloc(writeBytes);
     if (writes.length > 1) {
@@ -299,14 +344,14 @@ class RpcTerminalBackend implements TerminalBackend {
       sequence: sequence,
       data: bytes
     }, 2000, function(_) {
-      if (connection == c) {
+      if (current(c, epoch)) {
         writing = false;
         terminalsession.TerminalLatencyTrace.mark("terminal.input.acknowledged");
         nextRead = 0;
         flushInput(c);
       }
     }, function(e) {
-      if (connection == c) {
+      if (current(c, epoch)) {
         writing = false;
         if (e.code == "terminal_controlled") loseControl();
         else fail((e.ambiguous ? "Terminal input delivery uncertain: " : "Terminal input refused: ") + e.code);
@@ -360,10 +405,11 @@ class RpcTerminalBackend implements TerminalBackend {
     }
     var c = connection;
     if (c == null || !c.isOpen() || instance.length == 0) throw "Terminal is not connected";
+    var epoch = attachEpoch;
     c.call(WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "workspace", instance: instance, id: terminalId}, 2000, function(_) {
     }, function(e) {
-      if (!closed && connection == c) {
+      if (!closed && current(c, epoch)) {
         if (e.code == "terminal_controlled") loseControl();
         else fail(e.code);
       }
@@ -413,6 +459,7 @@ class RpcTerminalBackend implements TerminalBackend {
       return;
     }
     var c = serves(client) ? client.rpcConnection() : null;
+    var epoch = attachEpoch;
     if (c != connection) {
       if (writing) {
         fail("Terminal input delivery uncertain after disconnect");
@@ -424,7 +471,7 @@ class RpcTerminalBackend implements TerminalBackend {
       replayDirty = true;
       var events = c == null ? null : client.terminalEvents();
       if (events != null) releaseEvents = events.listen(terminalId, function(event) {
-        if (closed || connection != c || event.workspace != "workspace" || event.instance != instance) return;
+        if (closed || !current(c, epoch) || event.workspace != "workspace" || event.instance != instance) return;
         replayDirty = true;
         nextRead = 0;
       });
@@ -447,7 +494,8 @@ class RpcTerminalBackend implements TerminalBackend {
         writes.resize(0); writeBytes = 0;
         position = 0; replayCursor = 0;
         viewColumns = 0; viewRows = 0; streamColumns = 0; streamRows = 0;
-        output = [TerminalEvent.resetReplay()];
+        output = [];
+        resetPending = true;
         snapshotOnly = false; snapshotPending = true; replayAfterResize = false;
         replayDirty = true; nextRead = 0;
       }
@@ -457,6 +505,7 @@ class RpcTerminalBackend implements TerminalBackend {
         pending = true;
         var router = client.terminalEvents();
         var creating = create;
+        ConnectTimeline.mark("terminal-open", root, terminalId);
         c.call(WorkspaceTerminalProtocol.OPEN, {
           workspace: "workspace",
           instance: instance,
@@ -470,7 +519,7 @@ class RpcTerminalBackend implements TerminalBackend {
           // The daemon owns the resource even if its view closed before the reply.
           // Keep this on the captured connection's router across reconnects.
           if (creating && router != null && info.id == terminalId) router.invalidateCatalog();
-          if (closed || connection != c) {
+          if (closed || !current(c, epoch)) {
             if (info.notifications == true && c.isOpen() && router != null && !router.hasListeners(terminalId)) {
               c.call(WorkspaceTerminalProtocol.UNWATCH, {workspace:"workspace", instance:instance, id:terminalId},
                 1000, function(_) {}, function(_) {});
@@ -484,12 +533,13 @@ class RpcTerminalBackend implements TerminalBackend {
           attached = true;
           eventDriven = info.notifications == true && releaseEvents != null;
           create = false;
-          // Every attach starts from the service's current screen; replay continues from its cursor.
+          // Every attach starts from the service's history and current screen; replay continues from its cursor.
           snapshotPending = true;
+          historyWanted = true;
           if (!observe(info)) return;
           // Lifecycle follows the applied snapshot, including when attaching after exit.
         }, function(e) {
-          if (!closed && connection == c) {
+          if (!closed && current(c, epoch)) {
             pending = false;
             if (!retryable(e.code)) fail(e.message == null || StringTools.trim(e.message) == "" ? e.code : e.message);
           }
@@ -509,7 +559,7 @@ class RpcTerminalBackend implements TerminalBackend {
           rows: rows,
           theme: theme
         }, 2000, function(info) {
-          if (connection == c) {
+          if (current(c, epoch)) {
             pending = false;
             if (!observe(info)) return;
             replayAfterResize = true;
@@ -517,7 +567,7 @@ class RpcTerminalBackend implements TerminalBackend {
             nextRead = 0;
           }
         }, function(e) {
-          if (connection == c) {
+          if (current(c, epoch)) {
             pending = false;
             if (e.code == "terminal_controlled") loseControl();
             else if (retryable(e.code)) { resizePending = true; themePending = theme != null; }
@@ -549,6 +599,7 @@ class RpcTerminalBackend implements TerminalBackend {
   function idleReadDelay():Float return eventDriven || Sys.time() < interactiveUntil ? 0 : 0.05;
 
   function requestReplayBatch(c:RpcConnection):Void {
+    var epoch = attachEpoch;
     pending = true;
     replayDirty = false;
     var requested = replayCursor;
@@ -556,7 +607,7 @@ class RpcTerminalBackend implements TerminalBackend {
     c.call(WorkspaceTerminalProtocol.REPLAY, {
       workspace:"workspace", instance:instance, id:terminalId, cursor:requested
     }, 2000, function(value) {
-      if (closed || connection != c) return;
+      if (closed || !current(c, epoch)) return;
       pending = false;
       if (value.terminal == null || value.terminal.id != terminalId || value.events == null
           || value.events.length > 128 || value.next != requested + value.events.length || value.next > value.end) {
@@ -597,7 +648,7 @@ class RpcTerminalBackend implements TerminalBackend {
       replayAfterResize = false;
       nextRead = Sys.time() + (value.events.length == 0 ? idleReadDelay() : 0);
     }, function(error) {
-      if (closed || connection != c) return;
+      if (closed || !current(c, epoch)) return;
       pending = false;
       replayDirty = true;
       if (error.code == "unknown_method") {
@@ -605,23 +656,26 @@ class RpcTerminalBackend implements TerminalBackend {
         // are safe; combining current dimensions with historical bytes is not.
         snapshotOnly = true;
         snapshotPending = true;
-      } else if (error.code == "replay_gap") snapshotPending = true;
+      } else if (error.code == "replay_gap") { snapshotPending = true; historyWanted = true; }
       else if (!retryable(error.code)) fail(error.code);
     });
   }
   function requestScreenSnapshot(c:RpcConnection):Void {
-    if (closed || connection != c || pending) return;
+    var epoch = attachEpoch;
+    if (closed || !current(c, epoch) || pending) return;
     pending = true;
     replayDirty = false;
     requestSnapshotPage(c, null, null, 0);
   }
   /** Reads the snapshot page by page: `head` is its first page, `data` holds the `offset` bytes read so far. */
   function requestSnapshotPage(c:RpcConnection, head:Null<WorkspaceTerminalProtocol.TerminalScreenSnapshot>, data:Null<Bytes>, offset:Int):Void {
+    var epoch = attachEpoch;
     var token = head == null ? 0 : head.token;
     c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
-      workspace: "workspace", instance: instance, id: terminalId, token: token, offset: offset
+      workspace: "workspace", instance: instance, id: terminalId, token: token, offset: offset,
+      history: head == null && historyWanted ? true : null
     }, 3000, function(value) {
-      if (closed || connection != c) return;
+      if (closed || !current(c, epoch)) return;
       if (value.total == null) {
         // Older daemons send the whole snapshot in one reply.
         pending = false;
@@ -632,8 +686,10 @@ class RpcTerminalBackend implements TerminalBackend {
       var first = head == null ? value : head;
       var total:Int = first.total == null ? -1 : first.total;
       var pageToken:Int = value.token == null ? -1 : value.token;
+      var historyBytes:Int = first.history == null ? 0 : first.history;
       if (value.data == null || pageToken < 0 || value.token != first.token || value.offset != offset
-          || value.total != total || total < 64 || total > 3 * 1024 * 1024
+          || historyBytes < 0 || historyBytes > HISTORY_LIMIT || historyBytes > total - 64
+          || value.total != total || total < 64 || total - historyBytes > SCREEN_LIMIT
           || value.data.length == 0 || value.data.length > total - offset
           || (offset + value.data.length < total && pageToken == 0)) {
         pending = false;
@@ -643,11 +699,73 @@ class RpcTerminalBackend implements TerminalBackend {
       var bytes = data == null ? Bytes.alloc(total) : data;
       bytes.blit(offset, value.data, 0, value.data.length);
       var filled = offset + value.data.length;
-      if (filled < total) { requestSnapshotPage(c, first, bytes, filled); return; }
+      if (filled < total) {
+        // The service cuts every page but the last at the first page's size: the rest is read through a window of requests.
+        requestRemainingPages(c, first, bytes, filled, value.data.length);
+        return;
+      }
       pending = false;
+      ConnectTimeline.mark("terminal-shown", root, terminalId + " " + total + " bytes");
       applyScreenSnapshot(first, bytes);
-    }, function(error) {
-      if (connection != c) return;
+    }, function(error) snapshotFailed(c, epoch, error));
+  }
+
+  /**
+    Snapshot pages kept in flight at once. A 10000-line history is up to 16 MiB: 128 pages on a local connection, 512 over
+    a remote one; read one round trip after another that was hundreds of sequential calls per tab open.
+  **/
+  static inline final PARALLEL_PAGES = 16;
+  /**
+    The most page bytes in flight at once. The service answers as fast as it can, and a NativeKit connection closes
+    when more than its 1 MiB receive buffer waits unread (NativeRpcHub.local): 16 local pages of 128 KiB did that to a
+    view of a long coloured history, which then never attached. Half the buffer: 4 local pages, 16 remote ones.
+  **/
+  static inline final PARALLEL_BYTES = 512 * 1024;
+
+  /**
+    Reads the pages of a snapshot after the first through a window of PARALLEL_PAGES requests, asked for in order (the
+    service drops the snapshot once its last page is read, and one connection answers in order): each page that arrives
+    lets the next one be asked for. The snapshot is applied when all have come; the first failure ends it.
+  **/
+  function requestRemainingPages(c:RpcConnection, first:WorkspaceTerminalProtocol.TerminalScreenSnapshot, bytes:Bytes, from:Int, size:Int):Void {
+    var epoch = attachEpoch;
+    var total:Int = first.total == null ? 0 : first.total;
+    var left = Math.ceil((total - from) / size), failed = false;
+    var offset = from;
+    var ask:Void->Void = null;
+    ask = function() {
+      if (offset >= total || failed || closed || !current(c, epoch)) return;
+      var at = offset, length = total - at < size ? total - at : size;
+      offset += length;
+      c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
+        workspace: "workspace", instance: instance, id: terminalId, token: first.token, offset: at, history: null
+      }, 3000, function(value) {
+        if (failed || closed || !current(c, epoch)) return;
+        if (value.data == null || value.token != first.token || value.offset != at || value.total != total
+            || value.data.length != length) {
+          failed = true;
+          pending = false;
+          fail("Invalid terminal screen snapshot");
+          return;
+        }
+        bytes.blit(at, value.data, 0, length);
+        left--;
+        if (left > 0) { ask(); return; }
+        pending = false;
+        ConnectTimeline.mark("terminal-shown", root, terminalId + " " + total + " bytes");
+        applyScreenSnapshot(first, bytes);
+      }, function(error) {
+        if (failed) return;
+        failed = true;
+        snapshotFailed(c, epoch, error);
+      });
+    };
+    var parallel = size >= PARALLEL_BYTES ? 1 : Std.int(PARALLEL_BYTES / size);
+    for (_ in 0...(parallel > PARALLEL_PAGES ? PARALLEL_PAGES : parallel)) ask();
+  }
+
+  function snapshotFailed(c:RpcConnection, epoch:Int, error:Dynamic):Void {
+      if (!current(c, epoch)) return;
       pending = false;
       replayDirty = true;
       if (closed) return;
@@ -656,20 +774,26 @@ class RpcTerminalBackend implements TerminalBackend {
         // so many views do not keep pushing out each other's snapshots.
         snapshotExpiries += 1;
         if (snapshotExpiries > SNAPSHOT_RETRIES) {
-          fail("Terminal screen snapshot kept expiring before it was read; reopen the terminal");
+          fail("Terminal screen snapshot kept expiring before it was read");
           return;
         }
         snapshotRetryAt = Sys.time() + 0.1 * Math.pow(2, snapshotExpiries - 1) * (1 + Math.random());
         nextRead = snapshotRetryAt;
       } else if (!retryable(error.code)) fail(error.code == "snapshot_unavailable"
         ? "Terminal screen snapshot is unavailable" : error.code);
-    });
   }
   /** The viewer shows the service's screen as of the snapshot, then replays from the cursor it was taken at. */
   function applyScreenSnapshot(value:WorkspaceTerminalProtocol.TerminalScreenSnapshot, data:Bytes):Void {
+    // A service that was asked for the history sends it ahead of the screen (see TerminalScreenSnapshot.history).
+    var historyBytes:Int = value.history == null || value.total == null ? 0 : value.history;
+    var history:Null<Bytes> = null;
+    if (data != null && historyBytes > 0 && historyBytes <= HISTORY_LIMIT && historyBytes <= data.length - 64) {
+      history = data.sub(0, historyBytes);
+      data = data.sub(historyBytes, data.length - historyBytes);
+    } else if (historyBytes != 0) data = null;
     if (value.terminal == null || value.terminal.id != terminalId
         || value.terminal.end < position || value.terminal.end < value.terminal.start
-        || data == null || data.length < 64 || data.length > 3 * 1024 * 1024
+        || data == null || data.length < 64 || data.length > SCREEN_LIMIT
         || value.terminal.columns < 1 || value.terminal.columns > 512
         || value.terminal.rows < 1 || value.terminal.rows > 256) {
       fail("Invalid terminal screen snapshot");
@@ -689,6 +813,15 @@ class RpcTerminalBackend implements TerminalBackend {
     // The snapshot carries its own grid and replaces any local view geometry.
     viewColumns = 0; viewRows = 0;
     streamColumns = value.terminal.columns; streamRows = value.terminal.rows;
+    historyWanted = false;
+    // The history replaces the view's content by itself; without one (an older service) the view is cleared first.
+    if (resetPending && history == null) output.push(TerminalEvent.resetReplay());
+    resetPending = false;
+    if (history != null) {
+      // The history is rendered at the service's width, and replaces this view's content and scrollback.
+      output.push(TerminalEvent.geometry(streamColumns, streamRows));
+      output.push(TerminalEvent.history(history));
+    }
     output.push(TerminalEvent.screenSnapshot(position, data));
     output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
     // Output recorded after the snapshot follows by replay.

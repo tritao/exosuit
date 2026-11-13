@@ -268,7 +268,9 @@ void terminalkit_scrollback(terminalkit_handle *kit, int position, int *current,
     if (position >= 0 && current && *current != before) kit->dirty = 1;
 }
 
-#define TERMINALKIT_HISTORY_LIMIT (4u * 1024u * 1024u)
+/* What the owner keeps above the screen (TerminalHostProtocol.SCROLLBACK_ROWS), and a byte bound for its rendering. */
+#define TERMINALKIT_HISTORY_ROWS 10000
+#define TERMINALKIT_HISTORY_LIMIT (16u * 1024u * 1024u)
 typedef struct history_export {
     uint32_t *sizes;
     int origin, first, previous;
@@ -320,8 +322,8 @@ int terminalkit_history_copy(terminalkit_handle *kit, uint8_t *buffer, uint32_t 
     if (!kit || !inout_size) return -1;
     int current = 0, total = 0, x = 0, y = 0, mode = 0;
     terminal_emulator_scrollback(kit->emulator, -1, &current, &total);
-    /* The owner uses at most 1000 history rows; bound standalone callers too. */
-    if (total > 1000) total = 1000;
+    /* The owner keeps at most TERMINALKIT_HISTORY_ROWS rows; bound standalone callers too. */
+    if (total > TERMINALKIT_HISTORY_ROWS) total = TERMINALKIT_HISTORY_ROWS;
     if (kit->columns > 512 || kit->rows > 256) return -1;
     size_t count = (size_t)total + (size_t)kit->rows;
     uint32_t *sizes = calloc(count, sizeof(*sizes));

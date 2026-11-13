@@ -86,6 +86,9 @@ class TerminalSession {
         status = "closed";
     }
 
+    /** Lines the view was scrolled up by when a history event replaced its content. */
+    var keptScroll:Int = 0;
+
     private function applyEvent(event:TerminalEvent):Void {
         if (event.kind == "reset") {
             offset = 0;
@@ -98,8 +101,20 @@ class TerminalSession {
             exitCode = event.exitCode;
         } else if (event.kind == "geometry") {
             emulator.resize(event.columns, event.rows);
+        } else if (event.kind == "history") {
+            // It starts by clearing the screen and the scrollback; whatever was queued belongs to the replaced stream.
+            pending.resize(0);
+            pendingBytes = 0;
+            replayAt = -1;
+            // The view keeps its place in the scrollback across the replacement (the snapshot that follows puts it back).
+            keptScroll = emulator.scrollback(-1).current;
+            emulator.feedRange(event.data, 0, event.length);
+            // Rendered text asks nothing; drop anything a stray sequence queued so it is not typed into the program.
+            emulator.takeReplies();
         } else if (event.kind == "snapshot") {
             applyScreenSnapshot(event.data, event.offset);
+            if (keptScroll > 0) emulator.scrollback(keptScroll);
+            keptScroll = 0;
         } else if (event.kind == "output") {
             applyOutput(event);
         }

@@ -878,7 +878,14 @@ int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
   if (scan != size) return 0;
 
   terminal->replaying = 1;
-  terminal_emulator_reset_internal(terminal);
+  /* The snapshot replaces the screen and the modes, not the lines above the
+   * screen: a view or a service that was just given a terminal's history
+   * (terminalkit_history_copy) keeps it as scrollback. So this is a hard reset
+   * without libtsm's tsm_screen_clear_sb. */
+  tsm_vte_reset(terminal->vte);
+  terminal->name[0] = 0;
+  tsm_screen_erase_screen(terminal->screen, false);
+  tsm_screen_move_to(terminal->screen, 0, 0);
   if (columns != (uint32_t)terminal->columns || rows != (uint32_t)terminal->rows) {
     if (tsm_screen_resize(terminal->screen, columns, rows)) {
       terminal->replaying = 0;
@@ -888,7 +895,6 @@ int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
     terminal->rows = (int)rows;
   }
   tsm_screen_set_max_sb(terminal->screen, (unsigned int)terminal->scrollback_limit);
-  tsm_screen_clear_sb(terminal->screen);
   if (alternate) snapshot_feed_mode(terminal, "\x1b[?1049h", 8);
   if (cursor_keys) snapshot_feed_mode(terminal, "\x1b[?1h", 5);
   if (keypad) snapshot_feed_mode(terminal, "\x1b=", 2);

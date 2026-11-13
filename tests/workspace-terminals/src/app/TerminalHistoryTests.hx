@@ -84,6 +84,7 @@ class TerminalHistoryTests {
   }
   public static function run(root:String):Void {
     legacyRecovery(root);
+    widenedHistory(root);
     var path = root + "/terminal-history.sqlite";
     var seed:WorkspaceSnapshot = {epoch:"history", cursor:0, groups:[{id:"work",name:"Work",cwd:root,revision:1}]};
     var store = new WorkspaceSqliteStore(path,"workspace",seed);
@@ -155,6 +156,23 @@ class TerminalHistoryTests {
     step(); step(); require(error=="terminal_running","Duplicate restart replaced running shell");
     session.write(TestShell.line("exit"));
     until(function() return session.status=="exited","Replacement shell did not exit");
+    // An ended terminal nobody reads gives up its emulator; the open view keeps what it shows, and a view that opens it
+    // later gets its whole history from disk.
+    manager.unloadSeconds = 0.2;
+    until(function() return manager.loadedCount()==0,"Ended terminal kept its emulator");
+    var shown = allText(session.emulator);
+    for (_ in 0...20) step();
+    require(manager.loadedCount()==0 && allText(session.emulator)==shown && backend.isAvailable(),"The open view of an unloaded terminal changed or reloaded it");
+    var later = new RpcTerminalBackend(function() return endpoint,"history-shell",root,false);
+    var laterSession = new TerminalSession(later,Emulator.open(80,24,1000,"xterm-256color",false),false);
+    until(function() { laterSession.pollEvents(); return later.isSynchronized(); },"A view of an unloaded terminal did not attach");
+    var reloaded = allText(laterSession.emulator);
+    require(manager.loadedCount()==1 && reloaded.indexOf("SAVED_000")>=0 && reloaded.indexOf("NEW_SHELL")>=0 && laterSession.status=="exited",
+      "An unloaded terminal came back without its history");
+    laterSession.close();
+    until(function() return manager.loadedCount()==0,"A reloaded ended terminal kept its emulator");
+    manager.unloadSeconds = WorkspaceTerminalManager.UNLOAD_SECONDS;
+    Sys.println("PASS: an ended terminal nobody reads is unloaded, and comes back with its whole history from disk");
     manager.dispose(); store.close();
     store = new WorkspaceSqliteStore(path,"workspace",seed);
     var combined:Null<workspace.service.TerminalHistory> = store.loadTerminalHistory("history-shell");
@@ -163,6 +181,35 @@ class TerminalHistoryTests {
     require(!store.hasTerminalHistory("history-shell") && store.loadTerminals().length==0,"Forget retained terminal history");
     session.close(); endpoint.connection.close(); server.close(); store.close();
     Sys.println("PASS: durable styled history, live-pane recovery, explicit restart, permission checks and atomic removal");
+  }
+
+  /**
+    10000 coloured lines render to up to 16 MiB, and the history table was made holding 4 MiB: every save of such a
+    history failed, again every two seconds. A store opened on such a table widens it and keeps its rows.
+  **/
+  static function widenedHistory(root:String):Void {
+    var path = root+"/narrow-terminal-history.sqlite";
+    var seed:WorkspaceSnapshot = {epoch:"narrow",cursor:0,groups:[{id:"work",name:"Work",cwd:root,revision:1}]};
+    var store = new WorkspaceSqliteStore(path,"workspace",seed);
+    store.saveTerminal({id:"narrow-shell",name:"Narrow shell",group:"",cwd:root,workspaceRoot:root,
+      instance:"previous-service",state:"exited",exitCode:0,available:true,revision:1});
+    store.saveTerminalHistory("narrow-shell",{version:1,columns:80,rows:24,data:Bytes.ofString("OLD_ROW")});
+    store.close();
+    var db = sqlitekit.Database.open(path,1000);
+    db.exec("CREATE TABLE narrow_copy AS SELECT id,payload FROM workspace_terminal_history");
+    db.exec("DROP TABLE workspace_terminal_history");
+    db.exec("CREATE TABLE workspace_terminal_history (id TEXT PRIMARY KEY REFERENCES workspace_terminals(id) ON DELETE CASCADE, payload BLOB NOT NULL CHECK(length(payload)<=4194432))");
+    db.exec("INSERT INTO workspace_terminal_history SELECT id,payload FROM narrow_copy");
+    db.exec("DROP TABLE narrow_copy");
+    db.close();
+    store = new WorkspaceSqliteStore(path,"workspace",seed);
+    var old = store.loadTerminalHistory("narrow-shell");
+    require(old != null && old.data.toString()=="OLD_ROW","Widening the history table lost a saved history");
+    var large:Bytes = Bytes.alloc(6*1024*1024);
+    store.saveTerminalHistory("narrow-shell",{version:1,columns:80,rows:24,data:large});
+    var back = store.loadTerminalHistory("narrow-shell");
+    require(back != null && back.data.length==large.length,"A 6 MiB terminal history was not saved");
+    store.close();
   }
 
   static function legacyRecovery(root:String):Void {

@@ -46,6 +46,15 @@ class TerminalEvent {
         return new TerminalEvent("snapshot", offset, data, data.length, "", 0);
     }
 
+    /**
+        Rendered history (Emulator.historySnapshot) that replaces the renderer's content and scrollback: the lines above
+        the screen of a terminal this view attaches to. A screen snapshot follows and sets the output offset.
+    **/
+    public static function history(data:Bytes):TerminalEvent {
+        if (data == null || data.length == 0) throw "Invalid terminal history event";
+        return new TerminalEvent("history", 0, data, data.length, "", 0);
+    }
+
     public static function geometry(columns:Int, rows:Int):TerminalEvent {
         if (columns < 1 || columns > 65535 || rows < 1 || rows > 65535) throw "Invalid terminal geometry";
         return new TerminalEvent("geometry", 0, null, 0, "", 0, columns, rows);

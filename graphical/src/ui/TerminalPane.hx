@@ -73,6 +73,7 @@ class TerminalPane implements AgentTerminalPanel {
 	final remoteBackend:Null<workspace.client.RpcTerminalBackend>;
 	var controlStatusText:String = "";
 	var controlActionText:String = "";
+	var controlDeclineText:String = "";
 	var foreground:Color;
 	var background:Color;
 	var cellWidth:Float;
@@ -133,7 +134,7 @@ class TerminalPane implements AgentTerminalPanel {
 	public static function openRemote(provider:Void->Null<workspace.client.WorkspaceRpcEndpoint>, id:String, cwd:String, restored:Bool,
 		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String, ?providedFonts:FontCollection, autoClaimControl:Bool = false):TerminalPanel {
 		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory,autoClaimControl,true);
-		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
+		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,10000,"xterm-256color",false),false);
 		try return new TerminalPane(session,requestFrame,palette,providedFonts,backend)
 		catch (failure:Dynamic) { session.close(); throw failure; }
 	}
@@ -147,8 +148,10 @@ class TerminalPane implements AgentTerminalPanel {
 	public function controlStatus():Null<String> return remoteBackend == null ? null : remoteBackend.controlStatus();
 	/** A workspace terminal whose view holds the control lease. */
 	public function controlling():Bool return remoteBackend != null && remoteBackend.isController();
-	/** Asks the service for control back (takeover); see RpcTerminalBackend.reclaimControl. False: not attached yet. */
-	public function reclaimControl():Bool return remoteBackend == null || remoteBackend.reclaimControl();
+	/** The view asks "Take control back?" instead of an observer's plain notice; see RpcTerminalBackend.offerControlBack. */
+	public function offerControlBack():Void if (remoteBackend != null) remoteBackend.offerControlBack();
+	/** The offer was made and the person has not answered it yet. */
+	public function controlOfferOpen():Bool return remoteBackend != null && remoteBackend.controlOfferOpen();
 
 	public function status():String
 		return session.status;
@@ -249,6 +252,11 @@ class TerminalPane implements AgentTerminalPanel {
 		}
 		if (action != controlActionText) {
 			controlActionText = action;
+			requestFrame();
+		}
+		var decline = remoteBackend.controlDeclineAction();
+		if (decline != controlDeclineText) {
+			controlDeclineText = decline;
 			requestFrame();
 		}
 	}
@@ -625,13 +633,21 @@ class TerminalPane implements AgentTerminalPanel {
 				var buttonStyle = new LayoutStyle();
 				buttonStyle.height = LayoutAxis.fixed(CONTROL_BAR_HEIGHT - 2);
 				buttonStyle.padding = new haxeon.ui.Insets(8, 0, 8, 0);
-				var action = new haxeon.ui.widgets.controls.Button(controlActionText == "Restart Terminal" ? "Restart" : controlActionText,buttonStyle,function() {
+				var action = new haxeon.ui.widgets.controls.Button(controlActionText == "Restart Terminal" ? (remoteBackend.resumesConversation() ? "Resume" : "Restart") : controlActionText,buttonStyle,function() {
 					remoteBackend.activateControl();syncControlLayout();requestFrame();
 					if (terminalNode != null) context.requestFocusAfterLayout(terminalNode.id);
 				},"terminal-control-action");
 				action.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
 				action.accessibilityLabel = controlActionText;
 				controls.push(new haxeon.ui.widgets.KeyedView("action",action));
+				if (controlDeclineText.length > 0) {
+					var decline = new haxeon.ui.widgets.controls.Button(controlDeclineText,buttonStyle,function() {
+						remoteBackend.declineControl();syncControlLayout();requestFrame();
+					},"terminal-control-decline");
+					decline.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
+					decline.accessibilityLabel = controlDeclineText;
+					controls.push(new haxeon.ui.widgets.KeyedView("decline",decline));
+				}
 			}
 			var strip = new haxeon.ui.widgets.layout.Row("terminal-control-strip",controls,controlStyle);
 			layers.push(new StackChild("control-strip", strip, 0.0, 0.0, 2,

@@ -92,6 +92,16 @@ class TerminalCapabilitiesTests {
     require(lists==2,"Failed creation triggered a success refresh");
     require(failed.controlStatus()=="Terminal unavailable: Terminal creation failed: The pi CLI was not found on the workspace host PATH",
       "Terminal startup discarded the actionable service error");
+    // A failed view offers Retry, which asks the service again; the same failure comes back from the service, not from the view.
+    require(failed.controlAction()=="Retry","A failed terminal offered no retry");
+    failed.activateControl();
+    require(failed.controlStatus().indexOf("Terminal unavailable")!=0 && failed.controlAction()=="","Retry left the failure in place");
+    for (_ in 0...5) {
+      try failed.pollEvents(function(_) {}) catch (_:Dynamic) {}
+      step();
+    }
+    require(failed.controlStatus()=="Terminal unavailable: Terminal creation failed: The pi CLI was not found on the workspace host PATH"
+      && failed.controlAction()=="Retry" && lists==2,"A retried creation did not report the service's failure again");
     var closed=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",true);
     closed.pollEvents(function(_) {});closed.close();for (_ in 0...5) step();
     require(lists==3,"Closing the view discarded confirmed creation invalidation");

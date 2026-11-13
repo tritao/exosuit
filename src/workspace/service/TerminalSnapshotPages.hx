@@ -12,7 +12,9 @@ private typedef StoredSnapshot = {
 	var data:Bytes;
 	var info:TerminalInfo;
 	var cursor:Null<Int64>;
+	var history:Int;
 	var touched:Float;
+	var pageBytes:Int;
 }
 
 /**
@@ -28,6 +30,11 @@ private typedef StoredSnapshot = {
 class TerminalSnapshotPages {
 	/** A page and the terminal info beside it fit a remote (Noise) message. */
 	public static inline final PAGE_BYTES = 32 * 1024;
+	/**
+		A local connection's page (its messages carry 256 KiB): a 10000-line history of 16 MiB is 128 pages instead of
+		512 round trips.
+	**/
+	public static inline final LOCAL_PAGE_BYTES = 128 * 1024;
 	static inline final PER_VIEWER = 4;
 	static inline final TOTAL = 16;
 	static inline final IDLE_SECONDS = 30.0;
@@ -37,26 +44,31 @@ class TerminalSnapshotPages {
 
 	public function new() {}
 
-	/** The first page of a snapshot just taken; keeps the rest for `next`. */
+	/**
+		The first page of a snapshot just taken; keeps the rest for `next`. `history` is the number of leading bytes of
+		`data` that are rendered history rather than the screen (0: the screen alone).
+	**/
 	public function start(viewer:RpcConnection, terminal:String, data:Bytes, info:TerminalInfo, cursor:Null<Int64>,
-			now:Float):TerminalScreenSnapshot {
-		if (data.length <= PAGE_BYTES)
-			return page(0, data, info, cursor, 0);
+			now:Float, history:Int = 0, pageBytes:Int = PAGE_BYTES):TerminalScreenSnapshot {
+		if (pageBytes < PAGE_BYTES || pageBytes > LOCAL_PAGE_BYTES) pageBytes = PAGE_BYTES;
+		if (data.length <= pageBytes)
+			return page(0, data, info, cursor, 0, history, pageBytes);
 		if (count(viewer) >= PER_VIEWER) evictOldest(viewer);
 		else if (stored.length >= TOTAL) evictOldest(largestViewer(viewer));
 		lastToken = lastToken >= 0x3fffffff ? 1 : lastToken + 1;
-		stored.push({viewer: viewer, terminal: terminal, token: lastToken, data: data, info: info, cursor: cursor, touched: now});
-		return page(lastToken, data, info, cursor, 0);
+		stored.push({viewer: viewer, terminal: terminal, token: lastToken, data: data, info: info, cursor: cursor, history: history,
+			touched: now, pageBytes: pageBytes});
+		return page(lastToken, data, info, cursor, 0, history, pageBytes);
 	}
 
 	/** The page at `offset` of a kept snapshot, or null once it was read to the end, evicted or expired. */
 	public function next(viewer:RpcConnection, terminal:String, token:Int, offset:Int, now:Float):Null<TerminalScreenSnapshot> {
 		for (entry in stored) {
 			if (entry.viewer != viewer || entry.terminal != terminal || entry.token != token) continue;
-			if (offset <= 0 || offset >= entry.data.length || offset % PAGE_BYTES != 0) return null;
+			if (offset <= 0 || offset >= entry.data.length || offset % entry.pageBytes != 0) return null;
 			entry.touched = now;
-			if (offset + PAGE_BYTES >= entry.data.length) stored.remove(entry);
-			return page(entry.token, entry.data, entry.info, entry.cursor, offset);
+			if (offset + entry.pageBytes >= entry.data.length) stored.remove(entry);
+			return page(entry.token, entry.data, entry.info, entry.cursor, offset, entry.history, entry.pageBytes);
 		}
 		return null;
 	}
@@ -68,6 +80,12 @@ class TerminalSnapshotPages {
 	}
 
 	public function clear():Void stored.resize(0);
+
+	/** Whether a viewer is still reading a snapshot of `terminal`. */
+	public function holds(terminal:String):Bool {
+		for (entry in stored) if (entry.terminal == terminal) return true;
+		return false;
+	}
 
 	function count(viewer:RpcConnection):Int {
 		var n = 0;
@@ -90,8 +108,9 @@ class TerminalSnapshotPages {
 			if (entry.viewer == viewer) { stored.remove(entry); return; }
 	}
 
-	static function page(token:Int, data:Bytes, info:TerminalInfo, cursor:Null<Int64>, offset:Int):TerminalScreenSnapshot {
-		var size = data.length - offset < PAGE_BYTES ? data.length - offset : PAGE_BYTES;
-		return {terminal: info, data: data.sub(offset, size), cursor: cursor, token: token, offset: offset, total: data.length};
+	static function page(token:Int, data:Bytes, info:TerminalInfo, cursor:Null<Int64>, offset:Int, history:Int, pageBytes:Int):TerminalScreenSnapshot {
+		var size = data.length - offset < pageBytes ? data.length - offset : pageBytes;
+		return {terminal: info, data: data.sub(offset, size), cursor: cursor, token: token, offset: offset, total: data.length,
+			history: history > 0 ? history : null};
 	}
 }

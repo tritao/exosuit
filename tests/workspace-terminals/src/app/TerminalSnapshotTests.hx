@@ -92,6 +92,21 @@ class TerminalSnapshotTests {
 		require(pages.next(viewer, "t", int(idle.token), TerminalSnapshotPages.PAGE_BYTES, 100) == null, "Idle snapshot kept");
 		var small = pages.start(viewer, "t", Bytes.alloc(100), info, 1, 5);
 		require(int(small.token) == 0 && int(small.total) == 100 && small.data.length == 100, "Single-page snapshot was kept");
+		// A local connection's pages are four times larger: a history of 1 MiB and 5 bytes is 9 pages, not 33.
+		var history = Bytes.alloc(1024 * 1024 + 5);
+		for (i in 0...history.length) history.set(i, i * 7);
+		var big = pages.start(viewer, "h", history, info, 3, 6, 1024 * 1024, TerminalSnapshotPages.LOCAL_PAGE_BYTES);
+		require(big.data.length == TerminalSnapshotPages.LOCAL_PAGE_BYTES, "A local page is not the local size");
+		var read = big.data.length, count = 1, whole = Bytes.alloc(history.length);
+		whole.blit(0, big.data, 0, big.data.length);
+		while (read < history.length) {
+			var page = pages.next(viewer, "h", int(big.token), read, 6);
+			if (page == null) throw "Local page missing at " + read;
+			whole.blit(read, page.data, 0, page.data.length);
+			read += page.data.length;
+			count++;
+		}
+		require(count == 9 && whole.compare(history) == 0, "Local pages did not reassemble the history (" + count + " pages)");
 		viewer.close(); other.close();
 		source.close();
 		Sys.println("PASS: 277x65 Claude Code screen snapshot (" + shot.length + " bytes) restores exactly and is served in pages");

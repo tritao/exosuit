@@ -62,6 +62,8 @@ import haxeon.wire.MessagePack;
 @:id(3) var id:String;
 @:optional @:id(4) var token:Null<Int>;
 @:optional @:id(5) var offset:Null<Int>;
+/** With `token` 0: also send the rendered history (the lines above the screen), ahead of the screen in the same pages. */
+@:optional @:id(6) var history:Null<Bool>;
 }
 /** `data` is the page at `offset` of a `total`-byte snapshot; older daemons send no `total` and the whole snapshot. */
 @:wire typedef TerminalScreenSnapshot = {@: id(1) var terminal:TerminalInfo;
@@ -70,6 +72,9 @@ import haxeon.wire.MessagePack;
 @:optional @:id(4) var token:Null<Int>;
 @:optional @:id(5) var offset:Null<Int>;
 @:optional @:id(6) var total:Null<Int>;
+/** The first `history` bytes of the paged data are the rendered history (Emulator.historySnapshot), to feed a view's
+    emulator before the screen snapshot that follows them. Absent from services that send the screen alone. */
+@:optional @:id(7) var history:Null<Int>;
 }
 /** Cursor counts immutable records, including resizes with no output between them. */
 @:wire typedef TerminalReplayQuery = {
@@ -140,6 +145,10 @@ import haxeon.wire.MessagePack;
 @:optional @:id(11) var agentProvider:Null<String>;
 /** Position among the siblings in its group (groups, sessions and terminals share one order); absent means not yet placed. */
 @:optional @:id(12) var order:Null<Int>;
+/** A provider terminal's conversation id (Claude Code's session id, Codex's thread id), so a restart resumes it. */
+@:optional @:id(13) var agentSession:Null<String>;
+/** Seconds since 1970 when the provider terminal last began a conversation; finds a Codex conversation afterwards. */
+@:optional @:id(14) var agentStarted:Null<Int>;
 }
 @:wire typedef TerminalCatalog = {@: id(1) var instance: String;
 @:id(2) var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>;

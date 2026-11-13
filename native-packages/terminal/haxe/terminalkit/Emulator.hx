@@ -14,7 +14,7 @@ class Emulator {
 
     private function new(handle:TerminalHandle) this.handle = handle;
 
-    public static function open(columns:Int, rows:Int, scrollbackLimit:Int = 1000,
+    public static function open(columns:Int, rows:Int, scrollbackLimit:Int = 10000,
             term:String = "xterm-256color", recordCheckpoints:Bool = true):Emulator {
         var opened = TerminalKit.terminalkit_open(columns, rows, scrollbackLimit, term);
         if (opened.status != 1 || opened.out_kit == null)

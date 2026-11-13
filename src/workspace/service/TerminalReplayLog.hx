@@ -52,6 +52,25 @@ class TerminalReplayLog {
       startCursor = old.sequence + 1;
     }
   }
+  /**
+    Forgets every record, keeping the counters: a reader behind this point gets a replay gap and takes a snapshot. For
+    content that reached the emulator outside this journal (a screen restored from a terminal host).
+  **/
+  public function cut():Void {
+    entries.resize(0);
+    retained = 0;
+    startOffset = endOffset;
+    startCursor = endCursor;
+  }
+  /**
+    Forgets every record and continues numbering at `cursor` and `offset` when they are ahead: for a journal rebuilt from
+    saved history, so a view that read the earlier journal of the same terminal is not ahead of it (and is not refused).
+  **/
+  public function continueFrom(cursor:Int64, offset:Int64):Void {
+    cut();
+    if (cursor > endCursor) { startCursor = cursor; endCursor = cursor; }
+    if (offset > endOffset) { startOffset = offset; endOffset = offset; }
+  }
   public function read(cursor:Int64):{events:Array<TerminalReplayEvent>, next:Int64} {
     if (cursor < startCursor || cursor > endCursor) throw "Invalid terminal replay cursor";
     var result:Array<TerminalReplayEvent> = [], size = 0, next = cursor;
