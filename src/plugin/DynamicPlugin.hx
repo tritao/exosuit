@@ -204,9 +204,10 @@ class DynamicPlugin implements Plugin {
 				}
 			} else if (build.requiresReload) {
 				reload(build);
-			} else {
+			} else if (!build.unchanged) {
 				// Nothing the runtime runs changed, so there is nothing to apply. Handing the revision back keeps the
-				// compiler at the one the runtime has, which the next patch must start from.
+				// compiler at the one the runtime has, which the next patch must start from. A build the compiler found
+				// unchanged (the published revision's source restored after a failed compile) left nothing pending.
 				compiler.rejectPublication(build.revision);
 			}
 			lastError = null;

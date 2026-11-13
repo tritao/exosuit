@@ -79,7 +79,7 @@ class DynamicPluginTestMain {
 			&& plugin.callInt("eventCount") == eventsBeforeCompileFailureProbe + 1,
 			"compile failure disabled the last working plugin");
 		File.saveContent(arguments[1], compatibleSource);
-		require(plugin.refresh() && plugin.lastError == null, "restoring last-good source did not clear the compile diagnostic");
+		require(plugin.refresh() && plugin.lastError == null, 'restoring last-good source did not clear the compile diagnostic: ${plugin.lastError}');
 		File.saveContent(arguments[1], StringTools.replace(compatibleSource, "public static var events = 0;",
 			"public static var events = 0;\n\tpublic static var structural = 7;"));
 		require(plugin.refresh(), 'structural source edit did not publish: ${plugin.lastError}');
