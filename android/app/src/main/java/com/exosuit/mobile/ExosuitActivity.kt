@@ -134,7 +134,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
                 )
                 started = true
                 sendInsets()
-                while (pendingCommands.isNotEmpty()) command(pendingCommands.removeFirst())
+                runRigCommands()
             } else {
                 check(HaxeonRuntime.resizeSurface(surface, width, height) == 0) { "Surface resize failed" }
                 command(geometry.put("type", "resize"))
@@ -186,7 +186,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         }
     }
 
-    /** Answers what the Haxe module asked of the host since the last frame (today only: store the credentials). */
+    /** Answers what the Haxe module asked of the host since the last frame (store the credentials; keep a document it could not read). */
     private fun serveRequests() {
         while (true) {
             val frame = HaxeonRuntime.takeRequest() ?: return
@@ -197,7 +197,11 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
                     ((frame[3].toInt() and 0xff) shl 8) or (frame[4].toInt() and 0xff)
                 val payload = frame.copyOfRange(5, frame.size)
                 val stored = try {
-                    kind == REQUEST_SAVE_CREDENTIALS && vault.write(payload)
+                    when (kind) {
+                        REQUEST_SAVE_CREDENTIALS -> vault.write(payload)
+                        REQUEST_CREDENTIALS_UNREADABLE -> { vault.markUnreadable(); true }
+                        else -> false
+                    }
                 } finally {
                     CredentialVault.wipe(payload)
                 }
@@ -213,7 +217,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         setIntent(intent)
         applyLivePatch(intent)
         queueIntentCommands(intent)
-        if (started) while (pendingCommands.isNotEmpty()) runCatching { command(pendingCommands.removeFirst()) }.onFailure { fail(it) }
+        if (started) runCatching { runRigCommands() }.onFailure { fail(it) }
     }
 
     /**
@@ -246,6 +250,23 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     private fun command(value: JSONObject) {
         val result = HaxeonRuntime.command(value.toString().toByteArray(Charsets.UTF_8))
         check(result == 1) { "Haxeon rejected the ${value.optString("type")} command (code $result)" }
+    }
+
+    /**
+     * Sends the queued test-rig commands. Their content comes from an intent, so the module may turn one down (code 2: a
+     * `pairing_url` that is no pairing link). That is logged and dropped, and the app keeps running; the UI already shows why,
+     * as it does for a link typed by hand. Any other failure is the module's own and stays fatal.
+     */
+    private fun runRigCommands() {
+        while (pendingCommands.isNotEmpty()) {
+            val value = pendingCommands.removeFirst()
+            val result = HaxeonRuntime.command(value.toString().toByteArray(Charsets.UTF_8))
+            if (result == COMMAND_REFUSED) {
+                Log.w(TAG, "exosuit-rig: the ${value.optString("type")} command from the intent was refused and ignored")
+                continue
+            }
+            check(result == 1) { "Haxeon rejected the ${value.optString("type")} command (code $result)" }
+        }
     }
 
     /**
@@ -351,6 +372,9 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     private companion object {
         const val TAG = "Exosuit"
         const val REQUEST_SAVE_CREDENTIALS = 1
+        const val REQUEST_CREDENTIALS_UNREADABLE = 2
+        /** UiBridge's answer to a command it understood and turned down for its content (0 is a failure of the module). */
+        const val COMMAND_REFUSED = 2
         /** Test-rig intent extras (queueIntentCommands) that a process restart carries to the new instance. */
         val RIG_EXTRAS = listOf("pairing_url", "clipboard_text")
         /** The process's runtime is bound to an Activity instance's views (one per process; see restartProcess). */

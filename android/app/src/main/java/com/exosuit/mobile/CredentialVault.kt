@@ -5,6 +5,7 @@ import android.os.Looper
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
+import android.util.Log
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -26,8 +27,10 @@ class CredentialVault(context: Context) {
     private val file = AtomicFile(File(directory, "credentials.bin"))
 
     /**
-     * The last [read] found a stored document it could not open (a missing or failing key, a damaged file). It is not the
-     * same as no document: the next [write] first moves that file aside, so saving a new pairing never destroys it.
+     * The last [read] found a stored document it could not open (a missing or failing key, a damaged file), or the Haxe
+     * module could not read what it held ([markUnreadable]). It is not the same as no document: the next [write] first
+     * moves that file aside, so saving a new pairing never destroys it. A later start brings such a file back when it
+     * opens again and no current file stands in its place ([restoreAside]).
      */
     var unreadable = false
         private set
@@ -56,20 +59,59 @@ class CredentialVault(context: Context) {
     fun read(): ByteArray? {
         check()
         unreadable = false
-        if (!file.baseFile.exists()) return null
-        val document = try {
-            val data = file.readFully()
-            val secret = if (data.size <= IV_BYTES + TAG_BYTES) null else key(false)
-            if (secret == null) null else {
-                val cipher = Cipher.getInstance(TRANSFORM)
-                cipher.init(Cipher.DECRYPT_MODE, secret, GCMParameterSpec(TAG_BYTES * 8, data, 0, IV_BYTES))
-                cipher.doFinal(data, IV_BYTES, data.size - IV_BYTES)
-            }
-        } catch (_: Exception) {
-            null
+        val base = file.baseFile
+        if (!base.exists() || base.length() == 0L) {
+            restoreAside()?.let { return it }
+            if (!base.exists()) return null
         }
+        val document = try { open(file.readFully()) } catch (_: Exception) { null }
         unreadable = document == null
         return document
+    }
+
+    /** The plaintext of a stored blob (IV, then ciphertext and tag); null when it is too short or there is no key. Throws when it does not open. */
+    private fun open(data: ByteArray): ByteArray? {
+        val secret = if (data.size <= IV_BYTES + TAG_BYTES) null else key(false)
+        if (secret == null) return null
+        val cipher = Cipher.getInstance(TRANSFORM)
+        cipher.init(Cipher.DECRYPT_MODE, secret, GCMParameterSpec(TAG_BYTES * 8, data, 0, IV_BYTES))
+        return cipher.doFinal(data, IV_BYTES, data.size - IV_BYTES)
+    }
+
+    /**
+     * The way back for a document [write] moved aside: called only when there is no current file, or an empty one (nothing
+     * to lose). The newest `credentials.unreadable-<time>.bin` that opens now (the Keystore failure that hid it has passed)
+     * becomes `credentials.bin` again and its document is returned. A current file with content is never replaced; when
+     * the rename fails the document is still returned and the aside file stays where it is.
+     */
+    private fun restoreAside(): ByteArray? {
+        val base = file.baseFile
+        // AtomicFile's leftovers of an interrupted write belong to the current file: leave those to AtomicFile.
+        if (File(base.path + ".bak").exists() || File(base.path + ".new").exists()) return null
+        val asides = directory.listFiles { candidate ->
+            candidate.isFile && candidate.name.startsWith(ASIDE_PREFIX) && candidate.name.endsWith(ASIDE_SUFFIX)
+        } ?: return null
+        fun time(aside: File) = aside.name.removePrefix(ASIDE_PREFIX).removeSuffix(ASIDE_SUFFIX).toLongOrNull() ?: 0L
+        for (aside in asides.sortedByDescending { time(it) }) {
+            val document = (try { open(aside.readBytes()) } catch (_: Exception) { null }) ?: continue
+            // renameTo replaces its target, so the target must be gone first; only an empty file is ever deleted here.
+            val free = !base.exists() || (base.length() == 0L && base.delete())
+            val moved = free && aside.renameTo(base)
+            Log.i("Exosuit", "exosuit-credentials: saved pairings that were moved aside open again (${aside.name}); " +
+                if (moved) "restored as the current file" else "used for this run, the file could not be moved back")
+            return document
+        }
+        return null
+    }
+
+    /**
+     * The Haxe module could not read the document the last [read] returned (it opened, but is not a credentials
+     * document this version understands). From here on it is treated like a file that did not open: the next [write]
+     * moves it aside instead of replacing it.
+     */
+    fun markUnreadable() {
+        check()
+        if (file.baseFile.exists()) unreadable = true
     }
 
     /**
@@ -83,7 +125,7 @@ class CredentialVault(context: Context) {
             cipher.init(Cipher.ENCRYPT_MODE, key(true))
             val sealed = cipher.doFinal(document)
             if (unreadable) {
-                val aside = File(directory, "credentials.unreadable-${System.currentTimeMillis()}.bin")
+                val aside = File(directory, "$ASIDE_PREFIX${System.currentTimeMillis()}$ASIDE_SUFFIX")
                 if (!file.baseFile.renameTo(aside)) return false
                 unreadable = false
             }
@@ -108,6 +150,8 @@ class CredentialVault(context: Context) {
         private const val TRANSFORM = "AES/GCM/NoPadding"
         private const val IV_BYTES = 12
         private const val TAG_BYTES = 16
+        private const val ASIDE_PREFIX = "credentials.unreadable-"
+        private const val ASIDE_SUFFIX = ".bin"
 
         fun wipe(bytes: ByteArray?) = bytes?.fill(0)
     }

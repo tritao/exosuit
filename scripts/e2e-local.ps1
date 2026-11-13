@@ -227,6 +227,7 @@ function Start-Phone($info) {
         }
     }
     # The app's automation snapshot and its test-rig intent extras (pairing_url) need files/automation.on, read at launch.
+    # It stays for as long as the rig is up (steps run against it); Stop-Rig removes it, and every `up` puts it back.
     Adb shell run-as $package mkdir -p files | Out-Null
     Adb shell run-as $package touch files/automation.on | Out-Null
 }
@@ -371,7 +372,12 @@ function Show-Status {
 function Stop-Rig {
     $state = Read-State
     # The emulator saves its quick-boot snapshot when it is killed this way.
-    if (((& $script:Adb devices) -join "`n") -match "$script:Serial\s+device") { & $script:Adb -s $script:Serial emu kill 2>$null | Out-Null; Start-Sleep -Seconds 5 }
+    if (((& $script:Adb devices) -join "`n") -match "$script:Serial\s+device") {
+        # Before the snapshot is saved: a stopped rig must not leave the debug app open to test-rig intents (any app on the
+        # device could start a pairing screen). The next `up` creates the marker again before it starts or resumes the app.
+        try { & $script:Adb -s $script:Serial shell run-as $package rm -f files/automation.on 2>$null | Out-Null } catch {}
+        & $script:Adb -s $script:Serial emu kill 2>$null | Out-Null; Start-Sleep -Seconds 5
+    }
     if ($state.emulator) { Get-Process -Id $state.emulator -ErrorAction SilentlyContinue | Stop-Process -Force }
     if (Test-Path (Join-Path $hostDir 'host.log')) { & $python $hostScript stop --out $hostDir 2>&1 | Out-Host }
     foreach ($id in $state.editorPid, $state.editorLauncher, $state.host) {

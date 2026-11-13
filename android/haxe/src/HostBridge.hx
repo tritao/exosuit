@@ -5,11 +5,14 @@ import haxe.io.Bytes;
 	`UiBridge.commandJSON` to deliver and `UiBridge.takeHostRequest` to collect; both run on the Activity's UI thread.
 
 	A request is one frame: kind, request id, payload bytes. The host answers with a `hostResult` command carrying the
-	request id. Today the one kind is credential storage (KIND_SAVE_CREDENTIALS): the payload is the whole credential
-	document, which the host encrypts under a key that never leaves the Android Keystore.
+	request id. The kinds are credential storage (KIND_SAVE_CREDENTIALS): the payload is the whole credential
+	document, which the host encrypts under a key that never leaves the Android Keystore; and
+	KIND_CREDENTIALS_UNREADABLE (no payload): the document the host handed over could not be read, so the host must move
+	that file aside instead of replacing it at the next save.
 **/
 class HostBridge {
 	public static inline final KIND_SAVE_CREDENTIALS = 1;
+	public static inline final KIND_CREDENTIALS_UNREADABLE = 2;
 
 	static var next = 1;
 	static final queue:Array<Bytes> = [];

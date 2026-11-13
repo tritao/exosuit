@@ -9,6 +9,12 @@ function Enable-PhoneAutomation {
     & $script:Adb -s $script:Serial shell run-as $script:PhonePackage touch files/automation.on | Out-Null
 }
 
+# While files/automation.on exists, any app on the device can start a pairing screen in the debug app (the test-rig intent
+# extras), so a run that enabled automation takes the marker away again when it ends, also when it fails. Never throws.
+function Disable-PhoneAutomation {
+    try { & $script:Adb -s $script:Serial shell run-as $script:PhonePackage rm -f files/automation.on 2>$null | Out-Null } catch {}
+}
+
 # A fresh AVD shows Gboard onboarding sheets (stylus) over the app that swallow `input text`.
 function Initialize-PhoneSettings {
     & $script:Adb -s $script:Serial shell settings put secure stylus_handwriting_enabled 0 | Out-Null

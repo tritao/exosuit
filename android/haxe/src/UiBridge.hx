@@ -62,7 +62,9 @@ class UiBridge {
 				case "pair":
 					var remote = AndroidExosuitFactory.remote;
 					if (remote == null) return 0;
-					return remote.beginPairing(text(command, "url")) ? 1 : 0;
+					// 2: the link was turned down (the UI says why). It came from a test rig's intent, so the host logs it and
+					// carries on; 0 would put the app on its fatal error screen.
+					return remote.beginPairing(text(command, "url")) ? 1 : 2;
 				case "close":
 					if (host != null) host.close();
 					host = null;

@@ -311,6 +311,7 @@ if (-not (Test-Path $apk)) { throw "Build the APK first: $apk" }
 
 $hostProcess = $null
 $emulator = $null
+$automationEnabled = $false
 try {
     if ($Reuse) {
         $info = Get-Content (Join-Path $hostDir 'ready.json') -Raw | ConvertFrom-Json
@@ -335,6 +336,7 @@ try {
         & $script:Adb -s $script:Serial reverse "tcp:$($info.relayPort)" "tcp:$($info.relayPort)" | Out-Null
         & $script:Adb -s $script:Serial shell pm clear com.exosuit.mobile | Out-Null
         Initialize-PhoneSettings
+        $automationEnabled = $true
         Enable-PhoneAutomation
         & $script:Adb -s $script:Serial logcat -c
 
@@ -496,6 +498,8 @@ esume"
     Write-Host "OK: screenshots in $OutDir; look at each one"
 } finally {
     try { Logcat | Set-Content (Join-Path $OutDir 'logcat.txt') } catch {}
+    # The AVD's data outlives this run: do not leave the debug app open to test-rig intents.
+    if ($automationEnabled) { Disable-PhoneAutomation }
     if ($emulator) { Stop-Emulator $emulator }
     if (-not $Reuse) { & $python $hostScript stop --out $hostDir 2>&1 | Out-Host }
     if ($hostProcess -and -not $hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }

@@ -23,7 +23,7 @@ class PhoneCredentials {
 	public static inline final MAX_DEVICES = 16;
 
 	public var devices(default, null):Array<SavedDevice> = [];
-	/** The host has saved pairings it could not open (Keystore or file failure); `devices` is empty but nothing was lost yet. */
+	/** The host has saved pairings that could not be opened (Keystore or file failure) or read (not a document this version understands); `devices` is empty but nothing was lost yet. */
 	public var unreadable(default, null):Bool = false;
 
 	public function new() {}
@@ -32,15 +32,31 @@ class PhoneCredentials {
 		devices = [];
 		this.unreadable = unreadable;
 		if (document == null || document.length == 0) return;
+		if (read(document)) return;
+		// The document opened but is not one this version reads (damaged text, an unknown version). That is not "no
+		// pairings": the host is told, so the next save moves the file aside instead of replacing it.
+		devices = [];
+		this.unreadable = true;
+		HostBridge.request(HostBridge.KIND_CREDENTIALS_UNREADABLE, Bytes.alloc(0), function(_) {});
+	}
+
+	/** Fills `devices` from the document. False when it is not a credentials document this version can read. */
+	function read(document:Bytes):Bool {
 		try {
 			var value:Dynamic = Json.parse(document.toString());
-			if (value == null || value.version != VERSION || !Std.isOfType(value.devices, Array)) return;
-			for (entry in (cast value.devices:Array<Dynamic>)) {
+			if (value == null) return false;
+			var version:Dynamic = Reflect.field(value, "version");
+			// Version 1 is known and deliberately not read (see VERSION): an empty list that the next save may replace.
+			if (version == 1) return true;
+			var entries:Dynamic = Reflect.field(value, "devices");
+			if (version != VERSION || !Std.isOfType(entries, Array)) return false;
+			for (entry in (cast entries:Array<Dynamic>)) {
 				if (devices.length >= MAX_DEVICES) break;
 				var device = validate(entry);
 				if (device != null) devices.push(device);
 			}
-		} catch (_:Dynamic) devices = [];
+			return true;
+		} catch (_:Dynamic) return false;
 	}
 
 	static function validate(entry:Dynamic):Null<SavedDevice> {
