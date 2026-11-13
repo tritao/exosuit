@@ -15,8 +15,8 @@ for the next work phase. Severity is the reviewer's, not a priority order.
 
 ## Medium
 
-- **suit: Quit with an editor kept open.** suit exits, then the editor respawns services that nothing tracks. Either
-  keep suit alive while editors run, or have the editor restart suit before spawning.
+- **suit: Quit with an editor kept open.** Done on `suit-arbiter`: after a quit the daemon exits only when nothing of
+  exosuit's is left, so it keeps listing (and the next quit ends) what an editor kept open respawns.
 - **Live: a removed method is still reachable through dynamic dispatch.** Guards cover closures and direct calls.
   A `Dynamic` call or reflection lookup can still reach a dropped method.
 - **Workbench: Ctrl-click focus jumps.** `TreeView.toggleSelection` picks the focused key from hash order, so the
@@ -195,6 +195,93 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   it is more than the one-second throttle. Needs a look at when the sidebar becomes active after a switch.
   Remaining idea: walk the file list once per
   state home per minute, or let the manager report its build identity, to drop the last 0.8 s.
+- **Opening a workspace took seconds; now about 0.1 s for a running service and 1 s for a cold one (2026-11-12,
+  branch `ws-speed`).** Measured with `ws_open_real` (perf harness; a copy of a real state, opened through the
+  automation command `open-workspace <id>`, no real input), milliseconds from the open to "Workspace connected":
+  a running service 1510 before, 106 to 128 after; a cold one 3208 before, 980 to 1010 after (rows 11 to 20 later).
+  What changed: (1) the window reads the service's `endpoint.json` itself (`LocalServiceDescriptor`) and connects
+  while the launcher's discovery still runs; the launcher's answer then confirms the connection and adds the expected
+  build, about 0.4 s later, so "update available" shows that much after the workspace does. (2) With no descriptor in
+  the state folder the window starts the service at once instead of asking a discovery first. (3) The app polls the
+  attachment every loop turn while a workspace connects, not every 50 ms. (4) The build identity walk resolves only
+  its roots (listing 590 to 720 ms before, 155 to 180 after), which the manager waits for before it spawns the service
+  and every launcher run repeats. (5) Opening another workspace no longer raises "Workspace connection changed".
+  Left: a cold start is HashLink starting three times (launcher, manager, service) plus the identity walk and compare
+  (about 0.25 s, before the spawn: the service could be spawned first and told its build afterwards); a workspace with
+  terminal tabs starts two launch helpers at once (the window's client and the terminal pool's); a service that
+  crashes while starting keeps its launcher waiting up to 90 s; the `exosuit` workspace (a large tree) was not timed.
+  On Windows `scripts/test-service-updates.py` fails with "Array index out of bounds" in `AttachmentTestMain` with and
+  without these changes, `scripts/test-workspace-attachment.py` is POSIX only (it fails with "Could not start process:
+  267"), and `scripts/test-agent-idle.py` fails with "Manager exited before readiness" (not compared with the base).
+- **Opening a workspace, round two (2026-11-12, branch `ws-speed2`).** One `ws_open_real` run before and one after,
+  targets `exosuit,eon-series`, the `exosuit` workspace (6 terminal records, one terminal tab restored, its catalog 0.9 MB)
+  served from a junction to a worktree (`WS_OPEN_REMAP_TO`, a sibling folder with a name as long as the checkout's, so the
+  catalog's records could be rewritten in place). Milliseconds from the open:
+  `exosuit` cold, the first service start in a fresh state: connected 6856 before, 906 after; its terminal tab's screen
+  (239 KB, read in 32 KB pages one after another) shown at 1091, 180 ms after it asked. The 6.8 s before is not explained
+  by this work alone: it was the first start ever in that worktree and state (every build file hashed for the build
+  identity, by three launcher processes at once, and whatever else a first start does); the after run was the second
+  build's first start. `eon-series` cold, second start: 1149 before, 956 after. Warm (service running): `exosuit` 95 and
+  115 before, 99 and 93 after; `eon-series` 139 before, 122 after. Editor start with the last workspace restored (after
+  run, cold service): the window attaches 0.70 s after the process begins, is connected at 2.09 s and shows its rows at
+  2.13 s; of that the service's start is 1.35 s. Not profiled further, nothing changed for it.
+  What changed: (1) the manager spawns the service first and settles the build identity while it starts
+  (`service-build.txt` in the state folder, read by the service when first asked); (2) a terminal tab of the window's
+  workspace uses the window's connection, so an open starts one launch helper where it started two (the pool waits up to
+  150 ms for the window before it makes a client of its own); (3) a service that throws while starting ends its start at
+  once: with a catalog whose terminal records name another root the launcher waited 90.2 s and said "Timed out starting
+  workspace daemon", now 1.7 s and "The workspace service failed while starting: Invalid persisted terminal record",
+  which the Workbench shows after "Could not connect to <name>:"; (4) while a workspace connects only its attachment is
+  polled on every loop turn, for at most 10 s per open; (5) a connection the launcher's answer replaces is not reported
+  as lost.
+  Left: the tree, the tabs and SCM have no marks in the ConnectTimeline, so "everything shown" is timed for terminals
+  only; terminal snapshots are still read page by page (8 requests for 239 KB, 180 ms: one request for a local
+  connection would do); a cold start is still three HashLink processes (the editor could start the background manager
+  itself and drop the launcher); the launcher still walks the build files for `expectedBuild` on every discovery (0.3 s,
+  off the path to "connected" but it delays "update available"); `BuildFileCollector` cannot tell links from folders
+  (the listing has no such flag, and on Windows `fullPath` never resolved junctions, so the walk was not protected there
+  before either): a link loop under a walked root is walked 48 levels deep; `TerminalHosts.prepare` still copies the
+  host runtime on the first start after a build. The state copy's `migration.json` names folders of the real state,
+  and a start finishes marking them (`AgentWorkspaceMigration.finishMarking` removes files there): the scenario no
+  longer copies it. No suite was run after these changes.
+- **Opening a workspace, round three (2026-11-12, branch `speed3`).** `ws_open_real` (targets `eon-series,resume-2026`),
+  one run before the launcher and terminal changes (`speed3-before`, which already had the first change below: measure.ps1
+  builds the checkout it runs) and one after all of them (`speed3-after`). Milliseconds:
+
+  | Case | Before | After |
+  | --- | --- | --- |
+  | Start, window open (since the process began) | 297 | 240 |
+  | Start, first frame | 975 | 483 |
+  | Start, last workspace attached | 700 (round two), 438 | 309 |
+  | Start, last workspace connected (cold service) | 2090 (round two) | 1613 |
+  | Cold `eon-series`, connected | 20846 (see below) | 791 |
+  | Cold `resume-2026`, connected / its terminal shown | 818 / 898 | 809 / 848 |
+  | Warm `eon-series`, connected (two runs) | 126, 84 | 89, 79 |
+  | Warm `resume-2026`, connected | 102 | 105 |
+  | Launcher run for a start, endpoint found to its answer | 200 to 380 | 15 to 30 |
+  | Discovery launcher, build identity | 350 to 400 (walk) | 3 ("build output unchanged") |
+
+  What changed: (1) the window starts from suit's saved catalog (`machine.json`) instead of waiting for suit's first
+  `machine` reply, so it attaches its last workspace and starts the service about 0.1 to 0.4 s sooner (`machine-seeded`
+  in the timeline); the timeline now also marks `startup-main`, `window-open`, `app-built` and `first-frame`. (2) The
+  launcher that started a manager reports the build identity the manager recorded (`service-build.txt`), a process
+  computes it once, and a source checkout keeps it keyed by the build output (the compiler's `main.hl.build-id` and the
+  files beside `main.hl` and in `native/<package>`, `build-id.output` in the state home): the source walk runs only after a
+  build. Decision: "update available" now follows a build of the agent, not an unbuilt source edit. (3) The tree
+  (`files-visible`), source control (`scm-visible`) and each document read (`tab-file-read`) have marks, and a terminal's
+  snapshot pages after the first are asked for at once (`ws_open_real` reports `scm` and `documents`, and a `start` case).
+  (4) The terminal host runtime copy is made by the first host spawn, not at service start (hosts are off under an
+  isolated state home, so `ws_open_real` does not time this; a copy that fails now fails that terminal instead of turning
+  hosts off for the service).
+  Not explained: in the before run both first starts (the window's `parenting-2026` and `eon-series`, started together)
+  took about 20 s until their services were READY, while the managers' own build identity took 0.3 s; the after run's first
+  starts took 1.3 and 0.8 s. Both runs were the first start after a build of the agent. Not seen again; might be a
+  first-load scan of the new libraries or the two starts of `parenting-2026` (the second got `workspace_in_use`).
+  Left: the start's remaining 1.3 s is the service's own start (launcher, manager, service: three HashLink starts, the
+  launcher found the endpoint 1.08 s after it began); the process chain was kept (the launcher waits out a concurrent start
+  of the same workspace and reports failed starts); `files-visible` and `scm-visible` did not fire in this scenario (the
+  Workbench is the side bar shown, and these workspaces showed no repository); whether every restored tab is drawn in the
+  first frame was not checked.
 - **A click on a group row in the Workbench tree did not switch to the group.** Fixed (2026-11-02, `group-entry`): a
   single click or Enter on a group row enters the group, on the open workspace's row its root; the chevron expands.
   `m19_group_entry` failed before (the click only expanded) and passes. The note that Work shares the workspace

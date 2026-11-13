@@ -223,6 +223,23 @@ and the status.
 - **Workaround:** none needed; only the report is wrong.
 - **Status:** open. Format with `Math.fround` or as a `Float` instead.
 
+### `if (c) {} else f()` at the end of a switch branch or block parsed as a conditional over an empty object
+
+- **Symptom:** none a program can see. Since haxeon `a631f5b40` (`{}` as a value branch), a statement such as
+  `if (skip) {} else count(hits);` that is the last thing in a switch branch or in a block is parsed as the expression
+  `Conditional(skip, {}, count(hits))`. A Void is expected there, so it types as Void and runs the same branches, but
+  the then-branch builds an empty object and drops it. Where nothing is expected the same text does not type:
+  `var run = () -> if (skip) {} else count(hits);` gives `E1003: Conditional branches must have matching types`.
+- **Found:** 2026-11-12, review of the pushed stack (`Parser.parseExpressionBranch`).
+- **Cause:** those places try an expression first (`tryParseExpression`) and fall back to a statement when it fails.
+  Before `a631f5b40` the empty block failed as a value ("Expression block requires a result expression"), which is what
+  made the fallback happen.
+- **Workaround:** none needed.
+- **Status:** fixed in haxeon `04f9823e4` (branch `small-fixes`): the `if` that opens a tried expression refuses `{}`
+  as a branch, so the statement form is parsed again. `{}` is still an empty object in `c ? {} : value`, in
+  `var o:Dynamic = if (c) {} else {a: 1}` and in an arrow body. Test: `tests/programs/if-empty-block-branch.hx` (it
+  guards the shapes; it cannot tell the two parses apart).
+
 ## Building haxeon's own tools with haxeon (2026-11-11)
 
 Tried with the haxeon-built compiler (`hl bootstrap/compiler.hl --entry=<main> --root=src --root=stdlib
@@ -329,6 +346,12 @@ Standard Haxe APIs haxeon's standard library does not have yet. Each one forced 
   sys.FileSystem.stat", seen 2026-11-11). `FileSystem.metadata(path)` gives the size and a whole-second modification
   time. Workaround: `controller.LiveBuildFeed` tails an append-only file by its size and reads it whole when it grows,
   since it cannot seek.
+- **Paths of 260 characters or more are not found on Windows** (`FileSystem.exists` false, the other calls fail; seen
+  2026-11-12 with a Claude Code record under a deep folder). `hl.exe` has no long-path-aware manifest and the runtime
+  passes paths to the C runtime unchanged. The `\\?\C:\...` form with backslashes only works (checked with the same C
+  runtime call, `_wstat32`; forward slashes after the prefix do not). Workaround: `workspace.provider.LongPath.of` turns
+  a long drive path into that form before the call (Claude and Codex records). A fix in haxeon would add the manifest
+  entry, or the prefix, in the runtime's path conversion.
 - **No `sys.io.File.copy`.** Workaround: `File.saveBytes(to, File.getBytes(from))`, which reads the whole file into
   memory. Added in haxeon `6562434f6` (it copies through memory the same way).
 
@@ -342,3 +365,18 @@ These are stricter than stock Haxe. Each needs a decision, and a better message 
 - **After a call that always throws, only `return null;` or `return;` is accepted** as the following statement.
 - **A `Null<function>` field must be called through a typed local** (`var f = this.callback; if (f != null) f();`).
 - **Parsed JSON cast to a typedef is rejected.** Deliberate: structures are records by design.
+- **A `;` after a block inside a block is a parse error** ("E0002: Expected expression", seen 2026-11-12):
+  `for (i in 0...5) { try f() catch (_:Dynamic) {}; g(); }` is accepted by stock Haxe and rejected here at the `;`.
+  Workaround: put the statements on lines of their own, with no `;` after the `}`.
+- **A `Null<Int>` field does not initialise an `Int` local** ("E1002: Type mismatch for local "total"", seen
+  2026-11-12 in `RpcTerminalBackend`): `var total:Int = snapshot.total;` with `total:Null<Int>` in a typedef is
+  accepted by stock Haxe on HashLink. Workaround: `var total:Int = snapshot.total == null ? 0 : snapshot.total;`.
+  The message does not say that nullability is what differs.
+
+## Generated helper code names an enum abstract value without its type
+
+`haxeon/src/compiler/types/typing/EnumEqualityGenerator.hx:98` writes `originKind: Helper`. When a program that also
+compiles the haxeon compiler (the editor does) declares another enum abstract with a value named `Helper` (`suit.SuitKind`
+did), the build fails with E1005 "Ambiguous enum abstract value "Helper"". An abstract in another package should not make
+an unqualified value inside the compiler's own package ambiguous. Workaround in exosuit: the suit kind is `HelperProcess`.
+Fix in haxeon: qualify the value (`FunctionOriginKind.Helper`), or prefer the abstract of the expected type.
