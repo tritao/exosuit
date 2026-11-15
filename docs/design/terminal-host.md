@@ -699,7 +699,7 @@ Exit criterion: the survival test passes on Windows and Linux, under the guard, 
 
 - Split `TerminalRuntime` (5.10); `InProcessTerminal` keeps today's code; `HostedTerminal` uses the client.
 - Install the host binary per build hash (5.11); spawn handshake (5.6); adoption at start (5.9); `dispose()` detaches.
-- `TerminalRecord.host`/`stream`; `TerminalInfo.stream` (field 17).
+- `TerminalRecord.host`/`stream`; `TerminalInfo.stream` (field 17) (planned, not built; id 17 is `paced` since 2026-11-13, so these take the next free ids).
 - Update policy and status counts (5.10).
 - Tests: extend `scripts/test-workspace-terminals.py` and `tests/workspace-attachment` (`AttachmentTestMain.hx`
   update modes, lines 175-253): start a service, open a terminal running a counter, request update `now`, assert
@@ -767,7 +767,7 @@ time) in a `finally`, and the driver checks that no `exosuit-term-host` from its
 | Item | Change | Compatibility |
 |---|---|---|
 | `TerminalRecord` (`WorkspaceTerminalProtocol.hx:113-127`) | optional `host` (id 13), `stream` (id 14) | new optional ids; verify that the MessagePack decoder of the oldest supported service ignores unknown ids (RPC-VECTORS rules) before shipping |
-| `TerminalInfo` (`:27-45`) | optional `stream` (id 17), `hosted` (id 18) | optional |
+| `TerminalInfo` (`:27-45`) | optional `stream` (id 17), `hosted` (id 18) (planned, not built; id 17 is `paced` since 2026-11-13, so these take the next free ids) | optional |
 | `WorkspaceServiceStatus` | optional `hostedTerminals` | optional |
 | Record states | unchanged set | an old service's `validRecord` accepts only the existing states (`WorkspaceTerminalManager.hx:110-121`); a new state would make it throw at startup (line 85) |
 | SQLite | none; history table unchanged | |

@@ -44,6 +44,10 @@ class TerminalRpcTestMain {
       TerminalHostTests.steal(runtime, args[3]);
       processes.shutdown(); runtime.dispose(); return;
     }
+    if (mode == "flow") {
+      TerminalFlowTests.run(root);
+      processes.shutdown(); runtime.dispose(); return;
+    }
     if (mode == "contracts") {
       TerminalCapabilitiesTests.run();
       TerminalSnapshotTests.run();

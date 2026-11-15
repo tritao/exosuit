@@ -90,7 +90,9 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   final controllers:Map<String, RpcConnection> = [];
   /** Who holds each lease: the client process behind the connection, when it said so. */
   final controllerKeys:Map<String, String> = [];
-  final watchers:Array<{connection:RpcConnection, id:String, stamp:String}> = [];
+  final watchers:Array<{connection:RpcConnection, id:String, stamp:String, paced:Bool, notified:Bool, notifiedAt:Float}> = [];
+  /** A paced view that has not pulled this long after a CHANGED is told again (the notification may have been lost). */
+  static inline final PACED_RENOTIFY_SECONDS = 5.0;
   final snapshotPages = new TerminalSnapshotPages();
   final historyLimit:Int;
   var count:Int = 0;
@@ -715,12 +717,16 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       var openingTheme:Null<TerminalTheme> = r.theme;
       if (openingTheme != null && controller(r.id) == connection)
         applyTheme(t, openingTheme);
+      var paced = r.watch == true && r.paced == true;
       if (r.watch == true) {
         var watch = Lambda.find(watchers, function(w) return w.connection == connection && w.id == r.id);
-        if (watch == null) watchers.push({connection:connection, id:r.id, stamp:changeStamp(t, connection)});
-        else watch.stamp = changeStamp(t, connection);
+        if (watch == null) watchers.push({connection:connection, id:r.id, stamp:changeStamp(t, connection), paced:paced, notified:false, notifiedAt:0.0});
+        else { watch.stamp = changeStamp(t, connection); watch.paced = paced; watch.notified = false; }
       }
-      c.respond(info(t, connection));
+      var opened = info(t, connection);
+      // Only a watching view that asked is paced; the answer tells it the service keeps its side.
+      if (paced) opened.paced = true;
+      c.respond(opened);
     }
     );
     connection.register(WorkspaceTerminalProtocol.OUTPUT, function(r, c) {
@@ -758,6 +764,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       if (t == null && unloaded.exists(r.id) && catalog.exists(r.id)) { c.fail(error("replay_gap")); return; }
       if (t == null) { c.fail(error("unknown_terminal")); return; }
       t.used = Sys.time();
+      acknowledge(connection, r.id);
       if (r.cursor < t.replay.startCursor) { c.fail(error("replay_gap")); return; }
       if (r.cursor < 0 || r.cursor > t.replay.endCursor) { c.fail(error("invalid_offset")); return; }
       var batch = t.replay.read(r.cursor);
@@ -780,6 +787,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       t.used = Sys.time();
+      acknowledge(connection, r.id);
       var token:Int = r.token == null ? -1 : r.token;
       if (token > 0) {
         var page = snapshotPages.next(connection, t.id, token, r.offset == null ? 0 : r.offset, Sys.time());
@@ -996,6 +1004,11 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       + (controller(t.id) == connection) + ":" + (controller(t.id) != null) + ":"
       + (record == null ? "" : Std.string(record.revision)) + ":" + t.historyError;
   }
+  /** A REPLAY or SNAPSHOT from a paced view answers its last CHANGED. */
+  function acknowledge(connection:RpcConnection, id:String):Void {
+    for (watch in watchers)
+      if (watch.connection == connection && watch.id == id) watch.notified = false;
+  }
   function notifyChanges():Void {
     for (watch in watchers.copy()) {
       var connection = watch.connection;
@@ -1005,7 +1018,12 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       if (t == null && unloaded.exists(watch.id)) continue;
       var stamp = t == null ? "missing" : changeStamp(t, connection);
       if (stamp == watch.stamp) continue;
+      // One unanswered CHANGED per view. The change stays pending (the stamp is not taken) and goes out once the
+      // view pulls, or after the safety net if it never does.
+      if (watch.paced && watch.notified && Sys.time() - watch.notifiedAt < PACED_RENOTIFY_SECONDS) continue;
       watch.stamp = stamp;
+      watch.notified = true;
+      watch.notifiedAt = Sys.time();
       connection.notify(WorkspaceTerminalProtocol.CHANGED,
         {workspace:workspace, instance:instance, id:watch.id}, WorkspaceTerminalProtocol.encodeChange);
       if (t == null) watchers.remove(watch);

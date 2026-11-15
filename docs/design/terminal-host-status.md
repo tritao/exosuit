@@ -131,6 +131,17 @@ opened again instead of given up; a view keeps at most 512 KiB of snapshot pages
 overflow); and the history table holds 16 MiB (it still had the 4 MiB CHECK of 1000-line scrollback, so every save of a
 long history failed and was retried every two seconds, growing the service by about 20 MB a second).
 
+Flow control to views (branch `phone-flow`): output already goes service to view by pull (REPLAY, SNAPSHOT); what the
+service pushes is the CHANGED notification, which used to go out every daemon tick that output arrived, whether or not
+the view had pulled. A view that stopped reading (a stalled editor, a slow phone behind the relay, whose channel queue
+holds 32 messages or 1 MiB) collected them without bound. Now a view that sends `paced` on OPEN (answered by `paced` in
+the info) gets at most one unanswered CHANGED per terminal: its next REPLAY or SNAPSHOT acknowledges it, the change that
+arrived meanwhile is sent after that pull, and a 5 s safety net on the service sends again if no pull comes. A view that
+falls behind the journal gets `replay_gap` and takes a snapshot. On the client, replay batches and snapshot pages draw
+on a per-connection budget of 384 KiB of reply bytes in flight (`TerminalReplyBudget`), so many views on one connection
+stay under the 1 MiB receive buffer; a view that finds it used up asks again on its next poll. Old clients and old
+services never mention `paced` and behave as before.
+
 Measured after the fix (`EXOSUIT_TERMINAL_MEMORY=1`, private bytes, service = launcher + daemon): empty service
 315.6 + 35.8 MiB; four full terminals 320.8 + 2593.2 MiB with hosts of 181 MiB each; right after two ended
 323.0 + 3122.1 MiB; once the ended two were let go 328.0 + 266.0 MiB with hosts of 192 MiB. A view attaches a full

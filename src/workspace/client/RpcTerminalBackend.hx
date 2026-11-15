@@ -195,6 +195,7 @@ class RpcTerminalBackend implements TerminalBackend {
     // The next poll sees a new connection and an unknown service generation: it resets the view and opens the terminal again.
     connection = null;
     attachEpoch++;
+    resumePages = null;
     instance = "retry";
     writing = false;
     pending = false;
@@ -436,6 +437,7 @@ class RpcTerminalBackend implements TerminalBackend {
       workspace: "workspace", instance: instance, id: terminalId,
       claim: false, takeover: false
     }, 1000, function(_) {}, function(_) {});
+    resumePages = null;
     connection = null;
     output.resize(0);
     writes.resize(0);
@@ -487,6 +489,7 @@ class RpcTerminalBackend implements TerminalBackend {
       restartError = null;
     }
     if (c != null && attached) flushInput(c);
+    if (resumePages != null) { var resume = resumePages; resumePages = null; resume(); }
     if (c != null && !pending) {
       if (instance.length > 0 && instance != client.serviceGeneration()) {
         // A new owner can provide persisted history, but must never receive
@@ -513,7 +516,7 @@ class RpcTerminalBackend implements TerminalBackend {
           create: create,
           columns: columns,
           rows: rows,
-          group: group, directory: directory, watch: true, theme: theme, agentProvider: agentProvider,
+          group: group, directory: directory, watch: true, paced: true, theme: theme, agentProvider: agentProvider,
           clientKey: autoClaimControl ? clientKey() : null
         }, 2000, function(info) {
           // The daemon owns the resource even if its view closed before the reply.
@@ -598,8 +601,15 @@ class RpcTerminalBackend implements TerminalBackend {
   // Keep polling for asynchronous shell echo after input, then resume idle backoff.
   function idleReadDelay():Float return eventDriven || Sys.time() < interactiveUntil ? 0 : 0.05;
 
+  /** What a REPLAY reply can take on the wire: 64 KiB of data and its framing. */
+  static inline final REPLAY_RESERVE = 65536 + 1024;
+  /** What a first snapshot page can take (a local page is 128 KiB) and its framing. */
+  static inline final SNAPSHOT_RESERVE = 128 * 1024 + 1024;
+
   function requestReplayBatch(c:RpcConnection):Void {
     var epoch = attachEpoch;
+    // Other views on this connection have replies in flight up to the budget: stay dirty and ask again shortly.
+    if (!TerminalReplyBudget.reserve(c, REPLAY_RESERVE)) { replayDirty = true; nextRead = Sys.time() + 0.05; return; }
     pending = true;
     replayDirty = false;
     var requested = replayCursor;
@@ -607,6 +617,7 @@ class RpcTerminalBackend implements TerminalBackend {
     c.call(WorkspaceTerminalProtocol.REPLAY, {
       workspace:"workspace", instance:instance, id:terminalId, cursor:requested
     }, 2000, function(value) {
+      TerminalReplyBudget.release(c, REPLAY_RESERVE);
       if (closed || !current(c, epoch)) return;
       pending = false;
       if (value.terminal == null || value.terminal.id != terminalId || value.events == null
@@ -648,6 +659,7 @@ class RpcTerminalBackend implements TerminalBackend {
       replayAfterResize = false;
       nextRead = Sys.time() + (value.events.length == 0 ? idleReadDelay() : 0);
     }, function(error) {
+      TerminalReplyBudget.release(c, REPLAY_RESERVE);
       if (closed || !current(c, epoch)) return;
       pending = false;
       replayDirty = true;
@@ -663,6 +675,8 @@ class RpcTerminalBackend implements TerminalBackend {
   function requestScreenSnapshot(c:RpcConnection):Void {
     var epoch = attachEpoch;
     if (closed || !current(c, epoch) || pending) return;
+    resumePages = null;
+    if (!TerminalReplyBudget.reserve(c, SNAPSHOT_RESERVE)) { nextRead = Sys.time() + 0.05; return; }
     pending = true;
     replayDirty = false;
     requestSnapshotPage(c, null, null, 0);
@@ -675,6 +689,7 @@ class RpcTerminalBackend implements TerminalBackend {
       workspace: "workspace", instance: instance, id: terminalId, token: token, offset: offset,
       history: head == null && historyWanted ? true : null
     }, 3000, function(value) {
+      if (head == null) TerminalReplyBudget.release(c, SNAPSHOT_RESERVE);
       if (closed || !current(c, epoch)) return;
       if (value.total == null) {
         // Older daemons send the whole snapshot in one reply.
@@ -707,7 +722,10 @@ class RpcTerminalBackend implements TerminalBackend {
       pending = false;
       ConnectTimeline.mark("terminal-shown", root, terminalId + " " + total + " bytes");
       applyScreenSnapshot(first, bytes);
-    }, function(error) snapshotFailed(c, epoch, error));
+    }, function(error) {
+      if (head == null) TerminalReplyBudget.release(c, SNAPSHOT_RESERVE);
+      snapshotFailed(c, epoch, error);
+    });
   }
 
   /**
@@ -732,14 +750,19 @@ class RpcTerminalBackend implements TerminalBackend {
     var total:Int = first.total == null ? 0 : first.total;
     var left = Math.ceil((total - from) / size), failed = false;
     var offset = from;
-    var ask:Void->Void = null;
+    var reserved = size + 1024;
+    var ask:Void->Bool = null;
+    // Each page takes `reserved` bytes of the connection's budget until it arrives. When the budget is used up the
+    // request waits for the next poll (`resumePages`) instead of being sent.
     ask = function() {
-      if (offset >= total || failed || closed || !current(c, epoch)) return;
+      if (offset >= total || failed || closed || !current(c, epoch)) return true;
+      if (!TerminalReplyBudget.reserve(c, reserved)) { resumePages = ask; return false; }
       var at = offset, length = total - at < size ? total - at : size;
       offset += length;
       c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
         workspace: "workspace", instance: instance, id: terminalId, token: first.token, offset: at, history: null
       }, 3000, function(value) {
+        TerminalReplyBudget.release(c, reserved);
         if (failed || closed || !current(c, epoch)) return;
         if (value.data == null || value.token != first.token || value.offset != at || value.total != total
             || value.data.length != length) {
@@ -755,14 +778,18 @@ class RpcTerminalBackend implements TerminalBackend {
         ConnectTimeline.mark("terminal-shown", root, terminalId + " " + total + " bytes");
         applyScreenSnapshot(first, bytes);
       }, function(error) {
+        TerminalReplyBudget.release(c, reserved);
         if (failed) return;
         failed = true;
         snapshotFailed(c, epoch, error);
       });
+      return true;
     };
     var parallel = size >= PARALLEL_BYTES ? 1 : Std.int(PARALLEL_BYTES / size);
-    for (_ in 0...(parallel > PARALLEL_PAGES ? PARALLEL_PAGES : parallel)) ask();
+    for (_ in 0...(parallel > PARALLEL_PAGES ? PARALLEL_PAGES : parallel)) if (!ask()) break;
   }
+  /** Set while a page request waits for the connection's reply budget: tried again on every poll. */
+  var resumePages:Null<Void->Bool>;
 
   function snapshotFailed(c:RpcConnection, epoch:Int, error:Dynamic):Void {
       if (!current(c, epoch)) return;

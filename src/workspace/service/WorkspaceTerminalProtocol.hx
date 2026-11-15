@@ -26,6 +26,9 @@ import haxeon.wire.MessagePack;
 /** Names the client process behind this connection. A later attachment from the same process replaces the one
     it left behind as the terminal controller; any other client has to ask for control. */
 @:optional @:id(12) var clientKey:Null<String>;
+/** With `watch`: the view promises to pull (REPLAY or SNAPSHOT) after every CHANGED. The service then keeps at most
+    one CHANGED unanswered per terminal and view. Without it, every change is notified as before. */
+@:optional @:id(13) var paced:Null<Bool>;
 }
 @:wire typedef TerminalInfo = {@: id(1) var id: String;
 @:id(2) var cwd:String;
@@ -45,6 +48,8 @@ import haxeon.wire.MessagePack;
 @:optional @:id(14) var restartable:Null<Bool>;
 @:optional @:id(15) var historyAvailable:Null<Bool>;
 @:optional @:id(16) var agentProvider:Null<String>;
+/** The service honours `paced` for this view. Older services send nothing and notify every change. */
+@:optional @:id(17) var paced:Null<Bool>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;

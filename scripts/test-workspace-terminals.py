@@ -51,6 +51,8 @@ with tempfile.TemporaryDirectory(prefix='extty-',ignore_cleanup_errors=True) as 
     environment[variable]=os.pathsep.join(str(path) for path in libraries)+(os.pathsep+environment[variable] if environment.get(variable) else '')
     def endpoints(): return list(state.glob('exosuit/workspaces/*/endpoint.json'))
     run_tree([*RUNNER,'contracts',str(root),str(MANAGER)],environment)
+    # Flow control and history to views (TerminalFlowTests): a 10 s coloured flood among them.
+    run_tree([*RUNNER,'flow',str(root),str(MANAGER)],environment,timeout=150)
     with (fixture/'manager.log').open('w') as log:
         manager=spawn([*MANAGER_COMMAND,str(root),'--idle-seconds',IDLE],env=environment,stdout=log,stderr=subprocess.STDOUT)
         try:
