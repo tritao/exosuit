@@ -163,6 +163,37 @@ class TerminalAgentTests {
    revision:haxe.Int64.ofInt(1),workspaceRoot:root,agentProvider:"pi",agentStarted:started};
   require(Resume.resolve(pi,[])==file,"A Pi terminal did not take its session begun at 08:09:09 on 09-08: "+Resume.resolve(pi,[]));
  }
+ /**
+  * The scan reads a session file's first line once and keeps it per path; a line that does not parse yet is read again.
+  * A record's first line never changes once written, so the only way to observe the cache is to change it in place:
+  * a scan that still answers with the old id did not read the file again.
+  */
+ static function headCacheContract(root:String):Void {
+  var started=Resume.seconds(2026,9,8,8,9,5), time="2026-09-08T08:09:09.000Z";
+  var day=root+"/codex-home/sessions/2026/09/08";
+  mkdirs(day);
+  function terminal(id:String,cwd:String):TerminalRecord
+   return {id:id,name:"Codex",group:"work",cwd:cwd,instance:"i",state:"running",exitCode:0,available:true,
+    revision:haxe.Int64.ofInt(1),workspaceRoot:root,agentProvider:"codex",agentStarted:started};
+  // Read once: the same path with a different first line still gives the id first read.
+  var kept=sys.FileSystem.fullPath(root)+"/cli-codex-kept";
+  sys.FileSystem.createDirectory(kept);
+  var first="0199a5e1-7f42-7c3d-9b1a-cccccccccccc", second="0199a5e1-7f42-7c3d-9b1a-dddddddddddd";
+  var path=day+"/rollout-2026-09-08T08-09-09-"+first+".jsonl";
+  sys.io.File.saveContent(path,codexMetaLine(first,kept,time)+"\n{}\n");
+  require(Resume.resolve(terminal("codex-kept",kept),[])==first,"A Codex terminal did not take the conversation of its file");
+  sys.io.File.saveContent(path,codexMetaLine(second,kept,time)+"\n{}\n");
+  require(Resume.resolve(terminal("codex-kept",kept),[])==first,"A session file's first line was read again");
+  // A first line still being written does not parse and is not kept: once complete, the file is found.
+  var partial=sys.FileSystem.fullPath(root)+"/cli-codex-partial";
+  sys.FileSystem.createDirectory(partial);
+  var third="0199a5e1-7f42-7c3d-9b1a-eeeeeeeeeeee", line=codexMetaLine(third,partial,time);
+  path=day+"/rollout-2026-09-08T08-09-09-"+third+".jsonl";
+  sys.io.File.saveContent(path,line.substr(0,line.length-20));
+  require(Resume.resolve(terminal("codex-partial",partial),[])==null,"A half-written first line was taken");
+  sys.io.File.saveContent(path,line+"\n");
+  require(Resume.resolve(terminal("codex-partial",partial),[])==third,"A first line read half-written was kept and the complete one not read");
+ }
  static function require(value:Bool,message:String):Void { if (!value) throw message; }
  /** Every missing folder of `path`, outermost first. */
  static function mkdirs(path:String):Void {
@@ -191,6 +222,7 @@ class TerminalAgentTests {
   Sys.putEnv("CLAUDE_CONFIG_DIR",root+"/claude-config");Sys.putEnv("CODEX_HOME",root+"/codex-home");Sys.putEnv("PI_CODING_AGENT_DIR",root+"/pi-agent");
   try {
    timeFieldsContract(root);
+   headCacheContract(root);
    for (provider in ["codex","claude","pi"]) providerContract(root,provider);
    legacyContract(root);
    identityContract(root);

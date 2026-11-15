@@ -44,7 +44,10 @@ typedef AgentTerminalLaunch = {
 class AgentTerminalResume {
  static inline final CODEX_SCAN_DAYS:Int = 7;
  static inline final CODEX_MAX_FILES:Int = 2048;
+ /** The longest first line looked at (`session_meta` carries the session instructions, which can be large; the Pi `session` header). */
  static inline final CODEX_HEAD_BYTES:Int = 4 * 1024 * 1024;
+ /** Larger records are not opened (they are read whole). */
+ static inline final CODEX_MAX_BYTES:Int = 64 * 1024 * 1024;
 
  /**
   * `restart` is false for the terminal's first start. `taken` holds the conversation ids kept elsewhere: by other
@@ -149,13 +152,16 @@ class AgentTerminalResume {
    folder = LongPath.of(folder);
    if (!FileSystem.exists(folder) || !FileSystem.isDirectory(folder)) return found;
    var files = 0;
+   var piName = ~/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/;
    for (name in FileSystem.readDirectory(folder)) {
     if (!StringTools.endsWith(name, ".jsonl") || ++files > CODEX_MAX_FILES) continue;
     var path = Path.join([folder, name]);
     if (taken.indexOf(path) >= 0 || !piArgument(path)) continue;
+    // The name carries the UTC start time (`2026-10-29T02-45-46-642Z_<id>.jsonl`); a file named long before is not opened.
+    if (piName.match(name) && matchedTime(piName) < started - 15 * 3600) continue;
     var metadata = FileSystem.metadata(path);
     if (metadata == null || metadata.modified < started - 2) continue;
-    var header:Dynamic = try headerLine(path) catch (_:Dynamic) null;
+    var header:Dynamic = try firstRecord(path) catch (_:Dynamic) null;
     if (header == null || Reflect.field(header, "type") != "session") continue;
     var directory = Reflect.field(header, "cwd");
     if (!Std.isOfType(directory, String) || !samePath(directory, cwd)) continue;
@@ -168,15 +174,32 @@ class AgentTerminalResume {
   return found;
  }
 
- /** The first line of a record, parsed. */
- static function headerLine(path:String):Dynamic {
+ /**
+  * The first line of a file, parsed, kept per path: a record's first line never changes once written, so a file the
+  * scan has seen is not read again (haxeon's `sys.io.File` has no partial read, so each file is read whole, once).
+  * Files over `CODEX_MAX_BYTES` and lines over `CODEX_HEAD_BYTES` are not looked at; a line that does not parse yet
+  * (the file is being written) is not kept.
+  */
+ static function firstRecord(path:String):Dynamic {
+  var held = heads.get(path);
+  if (held != null) return held;
   var metadata = FileSystem.metadata(path);
-  if (metadata == null || metadata.size > CODEX_HEAD_BYTES * 16) return null;
+  if (metadata == null || metadata.size > CODEX_MAX_BYTES) return null;
   var bytes = sys.io.File.getBytes(path);
   var end = 0;
   while (end < bytes.length && end < CODEX_HEAD_BYTES && bytes.get(end) != 10) end++;
-  return haxe.Json.parse(bytes.getString(0, end));
+  var first:Dynamic = haxe.Json.parse(bytes.getString(0, end));
+  if (first == null) return null;
+  if (headCount >= CODEX_MAX_FILES) {
+   heads.clear();
+   headCount = 0;
+  }
+  heads.set(path, first);
+  headCount++;
+  return first;
  }
+ static final heads:Map<String, Dynamic> = [];
+ static var headCount:Int = 0;
 
  static function uuid(v:String):Bool return ~/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.match(v);
 
@@ -302,12 +325,7 @@ class AgentTerminalResume {
 
  /** The payload of the record's first line, `session_meta`. */
  static function codexMeta(path:String):Dynamic {
-  var metadata = FileSystem.metadata(path);
-  if (metadata == null || metadata.size > CODEX_HEAD_BYTES * 16) return null;
-  var bytes = sys.io.File.getBytes(path);
-  var end = 0;
-  while (end < bytes.length && end < CODEX_HEAD_BYTES && bytes.get(end) != 10) end++;
-  var first:Dynamic = haxe.Json.parse(bytes.getString(0, end));
+  var first:Dynamic = firstRecord(path);
   if (first == null || Reflect.field(first, "type") != "session_meta") return null;
   return Reflect.field(first, "payload");
  }

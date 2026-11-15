@@ -62,7 +62,7 @@ continues the conversation instead of beginning a new one (`AgentTerminalResume`
 - **Terminals saved before this** (the user's 5 lost Claude terminals) have nothing to go by: a restart opens the
   provider's own list of the folder's conversations (`claude --resume`, `codex resume`) so the user picks the old one.
   With several conversations in one folder only the user can tell which was the terminal's.
-- **Pi** terminals: unchanged (a new conversation; Pi's session layout was not available here to check).
+- **Pi** terminals resume like Codex's: the session file of the folder (`<PI_CODING_AGENT_DIR or ~/.pi/agent>/sessions/--<folder>--/*.jsonl`, first line the `session` header) is found while the terminal runs, and a restart passes `--session <file>`, else opens `pi --resume`.
 - The tree says "resumable" for a lost or exited Claude/Codex terminal and its pane's button says Resume. Provider
   files are only read. Paths of 260 characters or more are read in their `\\?\` form (`LongPath`; haxeon bug list).
 
@@ -100,7 +100,7 @@ editor restart and a quick workspace switch, where keeping the process means no 
   process is a child with three pipes speaking JSON lines. Reusing the host means a second host kind that owns the
   pipes and relays frames, plus buffering of provider output while no service is attached and answering permission
   requests that arrive meanwhile. Estimate: 2 to 3 days with tests.
-- Pi: the whole conversation after a restart (Pi's session file is not read); Pi terminals do not resume.
+- Pi: the whole conversation of a chat session after a restart (Pi's session file is not read; the chat resumes with `--session <file>` and shows the short preview). Pi terminals resume (`AgentTerminalResume.hx`).
 - A Claude terminal where the user ran `/clear` began a new conversation inside Claude; Resume returns to the one before.
 - A long reply restored from Claude's record is served whole only while it is among the 128 newest cached texts of the
   service; older ones show their first 4096 characters.
