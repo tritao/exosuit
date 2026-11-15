@@ -34,7 +34,7 @@ restarts. Empty means the old default.
 If remote access was already enabled with another relay, press "Use a different relay" in the panel first. Devices
 paired through the old relay stop working and must pair again.
 
-The phone needs no setting. The pairing invitation carries the relay address, so scan or paste a new invitation.
+The phone needs no setting. The pairing invitation carries the relay address, so paste or share a new invitation.
 The phone trusts the public certificate of `workers.dev` through Android's own roots. The desktop uses WinHTTP with
 the Windows store. No local CA is needed.
 

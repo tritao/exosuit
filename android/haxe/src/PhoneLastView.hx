@@ -29,6 +29,7 @@ class PhoneLastView {
 	var startedAt = -1.0;
 	var saved = "";
 	var terminalShown = false;
+	var holdUntilOpen = false;
 
 	public function new(filesRoot:String, remote:PhoneViewSource, app:ExosuitApp, clock:Void->Float) {
 		this.path = filesRoot + "/last-view.json";
@@ -62,6 +63,16 @@ class PhoneLastView {
 	}
 
 	function give_up():Void pending = null;
+
+	/**
+		An invitation link arrived (`AndroidExosuitFactory.prefillPairing`): the person came to pair, so a restore still
+		waiting is given up for this start and the Remote panel stays on screen. Nothing is written until a workspace is open
+		again, so the saved view is kept for the next start instead of being cleared by this one.
+	**/
+	public function yieldToPairing():Void {
+		pending = null;
+		holdUntilOpen = true;
+	}
 
 	/** The pane of an open workspace terminal, wherever it is shown: an editor tab, or the terminal panel when the Workbench
 	    was not the sidebar's page as it opened. */
@@ -109,6 +120,10 @@ class PhoneLastView {
 
 	function save():Void {
 		var open = remote.openView();
+		if (holdUntilOpen) {
+			if (open == null) return;
+			holdUntilOpen = false;
+		}
 		var text = "";
 		if (open != null) {
 			var kind = "", id = "", controlling = false;

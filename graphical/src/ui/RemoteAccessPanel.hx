@@ -136,7 +136,7 @@ class RemoteAccessPanel implements View {
 	function createInvitation():Void {
 		invitation = null;
 		invitationError = null;
-		client.createPairing(180, function(value, error) {
+		client.createPairing(300, function(value, error) {
 			invitation = value;
 			invitationError = error;
 			requestFrame();
@@ -361,7 +361,7 @@ class RemoteAccessPanel implements View {
 			var create = new Button(view.busy() ? "Working…" : "Create pairing invitation", null, function() {
 				machineInvitation = null;
 				invitationError = null;
-				view.invite(180, function(value, error) { machineInvitation = value; invitationError = error; requestFrame(); });
+				view.invite(300, function(value, error) { machineInvitation = value; invitationError = error; requestFrame(); });
 			}, "remote-access-create");
 			create.variant = ButtonVariant.Primary;
 			create.enabled = !view.busy() && status.connected;

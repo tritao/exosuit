@@ -65,6 +65,10 @@ class UiBridge {
 					// 2: the link was turned down (the UI says why). It came from a test rig's intent, so the host logs it and
 					// carries on; 0 would put the app on its fatal error screen.
 					return remote.beginPairing(text(command, "url")) ? 1 : 2;
+				case "prefill":
+					// A shared or opened invitation: fill in the pairing field and show the Remote panel. Never starts pairing (any
+					// app can send this); 2 when the text is no pairing link.
+					return AndroidExosuitFactory.prefillPairing(text(command, "url")) ? 1 : 2;
 				case "close":
 					if (host != null) host.close();
 					host = null;

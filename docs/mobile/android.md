@@ -149,6 +149,8 @@ The Android files are in `android/haxe/src/`:
   ends the pairing ("The machine that answered is not the one that made this invitation"), a match shows "The machine's
   key matches the invitation." An invitation from an older desktop has no fingerprint; the phone still pairs and shows
   "This invitation carries no machine key (it comes from an older desktop), so comparing the code is the only check."
+  The desktop asks for invitations valid 300 s, the longest the relay (`MAX_PAIRING_TTL_SECONDS`) and
+  `WorkspacePairingManager` allow.
   `PhoneRemote` runs the Noise pairing, shows the 6-digit code, and after approval and the user's
   confirmation stores the credentials and connects. Pairing grants only `machine.directory`. Pairing a machine does not
   disturb the machines already connected; pairing the same machine again replaces the older pairing.
@@ -167,6 +169,14 @@ The Android files are in `android/haxe/src/`:
   reason), under each its granted workspaces (running or idle, with the session count), under each the groups and
   sessions from its catalog, and Forget. A machine granted nothing says "Waiting for the owner to grant workspaces."
   Tapping a workspace opens it (idle ones start). Below the list: pair another machine (URL, then the code to compare).
+  A Paste button beside the URL field reads the Android clipboard (the field has no paste menu on the phone).
+- Invitation links. Sharing text to Exosuit from any app (`ACTION_SEND`, `text/plain`) or opening an
+  `exosuit://pair?u=<urlencoded invitation>` link (`ACTION_VIEW`) puts the first `ws://` or `wss://` link of the text
+  into the pairing field and shows the Remote panel. It never starts pairing, since any app can send these: the person
+  presses Pair. Text that holds no pairing link is ignored and logged (`exosuit-prefill`). The Activity sends the
+  `prefill` command (`UiBridge`, `AndroidExosuitFactory.prefillPairing`); across a process restart the link travels in
+  the `prefill_url` extra. On a cold start the link wins over reopening the last view: the panel stays on screen, and
+  the saved last view is kept (not rewritten) until a workspace is opened again.
 - Credentials live in an AES-GCM blob (`credentials.bin`) under a key in the Android Keystore
   (`CredentialVault.kt`). The vault is confined to the main thread; Haxe hands save requests to the host through
   `HostBridge` and `takeRequest()`, and every byte array is wiped after use. The Haxe side receives the decrypted

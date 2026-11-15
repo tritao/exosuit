@@ -16,6 +16,36 @@ import workspace.service.WorkspaceTerminalProtocol;
 class AndroidExosuitFactory {
 	/** The phone's remote attachment, once the app exists; the Activity's test-rig commands (pair, open) go to it. */
 	public static var remote(default, null):Null<PhoneRemote>;
+	static var phonePanel:Null<PhonePanel>;
+	static var lastView:Null<PhoneLastView>;
+	/** The workspace that was open (or opening) when an invitation link arrived: its Workbench attaching does not cover the Remote panel. */
+	static var prefillHold:Null<String> = null;
+	static var prefillHolding = false;
+
+	/**
+		A shared or opened invitation (the Activity's `prefill` command): puts the link into the pairing field and shows the
+		Remote panel. It does not pair; the person presses Pair. False when the text is no pairing link.
+	**/
+	public static function prefillPairing(url:String):Bool {
+		var panel = phonePanel, current = app;
+		if (panel == null || current == null) return false;
+		var text = StringTools.trim(url);
+		if (PhoneInvitation.parse(text) == null) {
+			Sys.println("exosuit-prefill: the text is no pairing link and was ignored");
+			return false;
+		}
+		panel.prefill(text);
+		// The person came to pair: the last view a cold start would reopen does not cover the panel (PhoneLastView.yieldToPairing),
+		// nor does the Workbench of a workspace that was already open or opening. Opening a workspace afterwards shows it as usual.
+		var view = lastView;
+		if (view != null) view.yieldToPairing();
+		var open = remote == null ? null : remote.openView();
+		prefillHold = open == null ? null : open.workspace;
+		prefillHolding = open != null;
+		current.showSidebarMode("remote-access");
+		return true;
+	}
+
 	/** The app, for the live-patch hooks (UiBridge.liveRelease, liveRebuild). */
 	public static var app(default, null):Null<ExosuitApp>;
 
@@ -61,10 +91,12 @@ class AndroidExosuitFactory {
 		if (settings.isDefault("terminal/fonts/font_size")) settings.set("terminal/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(11));
 		remote = phone;
 		var panel = new PhonePanel(phone, redraw);
+		phonePanel = panel;
 		created.registerSidebarDestination("remote-access", IconName.Radar, function() return panel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote", 30, true));
 		var filesAttached = false, workbenchAttached = false;
 		var lastView = new PhoneLastView(root, phone, created, function() return NativeKit.nk_time_seconds() * 1000);
+		AndroidExosuitFactory.lastView = lastView;
 		var applicationPoll = context.onPoll;
 		// Debug builds with files/automation.on (see ExosuitActivity): the labelled elements and the app's state for the test scripts.
 		var automationDirectory = devtools.AutomationProbe.directoryFromEnvironment();
@@ -91,7 +123,10 @@ class AndroidExosuitFactory {
 			if (workbenchAvailable && !workbenchAttached) {
 				workbenchAttached = true;
 				created.attachWorkbench(phone.workbenchService());
-				created.showSidebarMode("workbench");
+				var open = phone.openView();
+				var held = prefillHolding && (open == null ? null : open.workspace) == prefillHold;
+				prefillHolding = false;
+				if (!held) created.showSidebarMode("workbench");
 			} else if (!workbenchAvailable && workbenchAttached) {
 				workbenchAttached = false;
 				created.detachWorkbench(phone.workbenchService());

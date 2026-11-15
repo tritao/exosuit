@@ -10,6 +10,7 @@ import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
 import haxeon.ui.widgets.controls.ButtonVariant;
 import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.TextField;
@@ -34,6 +35,12 @@ class PhonePanel implements View {
 	public function new(remote:PhoneRemote, requestFrame:Void->Void) {
 		this.remote = remote;
 		this.requestFrame = requestFrame;
+	}
+
+	/** Puts a link into the pairing field (a shared invitation); the person still presses Pair. */
+	public function prefill(url:String):Void {
+		pairingUrl = url;
+		requestFrame();
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -63,10 +70,21 @@ class PhonePanel implements View {
 			});
 			address.label = "One-time pairing URL";
 			address.placeholder = "wss://…/v1/machines/…/pair/…?secret=…";
-			address.style.width = LayoutAxis.stretch();
+			address.style.width = LayoutAxis.grow();
 			address.ellipsizeWhenUnfocused = true;
 			rows.push(new KeyedView("url-label", new Text(remote.machines.length == 0 ? "Pair this phone with a machine" : "Pair another machine", null, tokens.textSecondary)));
-			rows.push(new KeyedView("url", address));
+			// The field has no paste menu on the phone; this reads the Android clipboard the way the terminal's Paste key does.
+			var paste = new Button("Paste", null, function() {
+				try context.clipboard.readText(function(text) {
+					var trimmed = StringTools.trim(text == null ? "" : text);
+					if (trimmed.length > 0) pairingUrl = trimmed;
+					requestFrame();
+				}) catch (_:Dynamic) {}
+			}, "phone-pairing-paste");
+			var addressRowStyle = new LayoutStyle();
+			addressRowStyle.width = LayoutAxis.stretch();
+			addressRowStyle.childGap = 8;
+			rows.push(new KeyedView("url", new Row("phone-pairing-url-row", [new KeyedView("field", address), new KeyedView("paste", paste)], addressRowStyle)));
 			var pair = new Button("Pair", null, function() {
 				if (remote.beginPairing(pairingUrl)) pairingUrl = "";
 				requestFrame();

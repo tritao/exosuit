@@ -17,6 +17,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Share" of text from any app; only fills in the pairing field, never pairs (ExosuitActivity.prefillText). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- exosuit://pair?u=<urlencoded invitation> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="exosuit" android:host="pair" />
+            </intent-filter>
         </activity>
         <!-- Relaunches ExosuitActivity in a fresh process when Android recreated it in a live one (ExosuitActivity.restartProcess). -->
         <activity

@@ -239,12 +239,36 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
      * Confirming the pairing code is never an intent: the rig taps "The code matches" like a person, so no other app
      * can skip the code comparison. */
     private fun queueIntentCommands(source: Intent?) {
+        queuePrefill(source)
         if (source == null || !automated()) return
         source.getStringExtra("pairing_url")?.let { pendingCommands.addLast(JSONObject().put("type", "pair").put("url", it)) }
         // `--es clipboard_text <text>` puts text on the Android clipboard (there is no adb shell command for it), for paste checks.
         source.getStringExtra("clipboard_text")?.let {
             (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("test", it))
         }
+    }
+
+    /**
+     * "Share" of text to Exosuit (ACTION_SEND) or an `exosuit://pair?u=<urlencoded invitation>` link (ACTION_VIEW) carries a
+     * pairing invitation. Any app can send either, so this is no gated rig command and never starts pairing: the module only
+     * puts the link into the pairing field and shows the Remote panel, and the person presses Pair.
+     */
+    private fun queuePrefill(source: Intent?) {
+        val text = prefillText(source) ?: return
+        pendingCommands.addLast(JSONObject().put("type", "prefill").put("url", text))
+    }
+
+    /** The invitation URL an intent carries (the first ws:// or wss:// in shared text), or null when it carries none. */
+    private fun prefillText(source: Intent?): String? {
+        if (source == null) return null
+        val raw = when (source.action) {
+            Intent.ACTION_SEND -> source.getStringExtra(Intent.EXTRA_TEXT)
+            Intent.ACTION_VIEW -> source.data?.takeIf { it.scheme == "exosuit" && it.host == "pair" }?.getQueryParameter("u")
+            else -> source.getStringExtra(PREFILL_EXTRA)
+        } ?: return null
+        val link = Regex("""wss?://\S+""").find(raw)?.value
+        if (link == null) Log.w(TAG, "exosuit-prefill: the shared text holds no pairing link and was ignored")
+        return link
     }
 
     private fun command(value: JSONObject) {
@@ -347,6 +371,12 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
             for (key in RIG_EXTRAS) intent?.getStringExtra(key)?.let { commands.putString(key, it) }
             if (!commands.isEmpty) restart.putExtra(RestartActivity.EXTRA_LAUNCH, commands)
         }
+        // A shared invitation (prefillText) is no rig command and needs no gate: it only fills in the field.
+        prefillText(intent)?.let { link ->
+            val launch = restart.getBundleExtra(RestartActivity.EXTRA_LAUNCH) ?: Bundle()
+            launch.putString(PREFILL_EXTRA, link)
+            restart.putExtra(RestartActivity.EXTRA_LAUNCH, launch)
+        }
         startActivity(restart)
         android.os.Process.killProcess(android.os.Process.myPid())
     }
@@ -377,6 +407,8 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         const val COMMAND_REFUSED = 2
         /** Test-rig intent extras (queueIntentCommands) that a process restart carries to the new instance. */
         val RIG_EXTRAS = listOf("pairing_url", "clipboard_text")
+        /** The extra that carries a shared invitation across a process restart (the restarted launch has no SEND or VIEW action). */
+        const val PREFILL_EXTRA = "prefill_url"
         /** The process's runtime is bound to an Activity instance's views (one per process; see restartProcess). */
         @Volatile var runtimeBound = false
     }
