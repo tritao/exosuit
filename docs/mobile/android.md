@@ -112,6 +112,8 @@ app. The first round of a session (cold worker) is a reload and takes about 70 s
 
 Not covered: native code, Kotlin, Gradle or native-package changes. `dev.ps1` notices them (`native.stamp`, written by
 `build.ps1`) and runs the full build and install instead (`-NoFallback` makes that an error). Release builds.
+That full build is for the ABI of the device it installs to (`ro.product.cpu.abi`: x86_64 or arm64-v8a), not always
+x86_64.
 
 ## Native libraries come from upstream
 
@@ -230,6 +232,9 @@ approving), shows the machine granted nothing, grants Alpha, then Beta (the pair
 opens each by tapping its row in the Remote list (there is no intent for it), works the Claude Code terminal (below), restarts
 the app (it reconnects from the Keystore), and revokes Beta. Screenshots `1-pairing-code.png` to `14-new-claude.png`
 are in the output directory; look at them. Every tap is by label from the phone's automation snapshot (no pixel positions).
+`-PairBy paste` gets the invitation to the phone the way a person does: it goes on the Android clipboard, the script
+taps the Remote panel's Paste button, checks that this did not start pairing, and taps Pair. `-Keep` leaves the host
+and the emulator running at the end for checks that follow.
 Pairing works in either order: the phone shows "Code confirmed. Waiting for the machine's owner to approve." and keeps
 the connection until the owner approves (checked with a 45 s gap), and an approval that arrives first waits for the
 confirmation. `machine-acceptance.ps1 -PairOrder confirm-first|approve-first` and, for the local rig,
@@ -334,5 +339,6 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
 
 - Back closes the terminal view first, so `resume-back` ends at the Workbench, not the terminal.
 - A cold start (`resume-kill`) reconnects the machine from the stored pairing in about 2.5 s; the workspace is not reopened by itself.
+- Before a relaunch that must reconnect, `machine-acceptance.ps1` puts the `adb reverse` rule to the relay back if it is gone (`Assert-RelayTunnel`; it prints a `RIG:` line when it had to). An emulator transport reset drops the rule and a cold-started app then stays offline; that looked like an app bug once (2026-11-13).
 - Network loss is simulated by wifi and data off, removing the `adb reverse` rule and `adb reconnect` (the relay is reached through the reverse tunnel, so toggling wifi alone changes nothing).
 - Desktop restart is suit stopping and starting on the host's home. The relay keeps a device's socket when the machine behind it restarts and tells the device nothing; the old Noise session is dead. `DeviceMachine` now ends the connection when its directory read times out (at most 15 s refresh + 8 s timeout), and the client dials again.

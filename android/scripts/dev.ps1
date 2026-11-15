@@ -87,7 +87,10 @@ $compilePath = (@((Split-Path (Get-Command pwsh).Source), (Join-Path $HaxeonRoot
 function Install-Full {
     if ($NoFallback) { throw 'The non-Haxe sources changed (or no APK is installed); run build.ps1 and install, or drop -NoFallback' }
     Write-Host 'full build (native or host sources changed)...'
-    & (Join-Path $PSScriptRoot 'build.ps1') -Abi x86_64
+    # The device decides the ABI: an x86_64-only APK does not install on an arm64 phone.
+    $abi = ((Adb @('shell', 'getprop', 'ro.product.cpu.abi')) | Out-String).Trim()
+    if ($abi -notin 'x86_64', 'arm64-v8a') { throw "Unsupported device ABI '$abi' on $Serial" }
+    & (Join-Path $PSScriptRoot 'build.ps1') -Abi $abi
     if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
     Adb @('install', '-r', $apk) | Out-Host
     Adb @('shell', 'run-as', $package, 'rm', '-rf', 'files/dev') | Out-Null

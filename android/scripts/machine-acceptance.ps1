@@ -53,7 +53,13 @@ param(
     # Resume steps instead of the whole acceptance run (see "Resume steps" below): pair once, open Alpha's Claude terminal, run these.
     [ValidateSet('resume-home', 'resume-back', 'resume-screen', 'resume-kill', 'resume-network', 'resume-desktop', 'resume-all')][string[]]$Step = @(),
     # Use the host and emulator that are already running in -OutDir (host/ready.json) and the stored pairing: no start, install or pairing.
-    [switch]$Reuse
+    [switch]$Reuse,
+    # How the invitation reaches the phone: the test-rig extra starts pairing at once, or (paste) it goes on the Android clipboard,
+    # the Remote panel's Paste button fills the URL field (which must not start pairing) and a tap on Pair starts it.
+    [ValidateSet('extra', 'paste')][string]$PairBy = 'extra',
+    # Leave the host, the emulator and the automation marker up at the end, for checks run after this script in the same process.
+    # Stop them yourself: `mobile-machine-host.py stop --out <OutDir>\host`, `adb -s emulator-<Port> emu kill`.
+    [switch]$Keep
 )
 . (Join-Path $PSScriptRoot 'env.ps1')
 . (Join-Path $PSScriptRoot 'emulator-lib.ps1')
@@ -85,6 +91,16 @@ function Host-Command([string[]]$arguments) {
     $code = $LASTEXITCODE
     Add-Content (Join-Path $hostDir 'commands.log') ("{0:HH:mm:ss} {1} -> exit {2}`n{3}" -f (Get-Date), ($arguments -join ' '), $code, $output)
     if ($code -ne 0) { throw "host command '$($arguments -join ' ')' failed (exit $code): $output" }
+}
+# The phone reaches the host's relay only through `adb reverse`. When the rule is gone (a transport reset of the emulator
+# drops it while every adb command keeps working), a cold-started app dials into nothing: it logs "offline []" once and no
+# request reaches the relay (worker.log). Seen once at step 5. Put the rule back before a relaunch that must reconnect, and say so.
+function Assert-RelayTunnel {
+    $port = $info.relayPort
+    $rules = (& $script:Adb -s $script:Serial reverse --list) -join "`n"
+    if ($rules -match "tcp:$port\s+tcp:$port") { return }
+    Write-Host "RIG: the adb reverse to the relay (tcp:$port) was gone; restoring it. Rules were: '$rules'"
+    & $script:Adb -s $script:Serial reverse "tcp:$port" "tcp:$port" | Out-Null
 }
 function Start-App([string[]]$extras) {
     & $script:Adb -s $script:Serial shell am start -n $activity @extras | Out-Null
@@ -229,6 +245,7 @@ function Step-Kill {
     & $script:Adb -s $script:Serial shell am force-stop $script:PhonePackage | Out-Null
     Reset-PhoneSnapshot
     & $script:Adb -s $script:Serial logcat -c
+    Assert-RelayTunnel
     $from = Get-Date
     Start-App @()
     # The workspace is not open after a cold start: the machine and its workspaces come back, then the terminal is opened again.
@@ -344,7 +361,18 @@ try {
 
     if (-not $Reuse) {
         # 1. Pair from the invitation; compare the phone's code with the machine's pending one, then confirm and approve.
-        Start-App @('--es', 'pairing_url', "'$($info.invitationUrl)'")
+        if ($PairBy -eq 'paste') {
+            Start-App @('--es', 'clipboard_text', "'$($info.invitationUrl)'")
+            $null = Wait-PhoneElement '^Remote$' 90 -role 1
+            Start-Sleep -Seconds 2
+            if (-not (Find-PhoneElements '^Paste$').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }
+            Tap-PhoneElement '^Paste$' -after 3
+            Shot (Join-Path $OutDir '0-pasted.png')
+            if ((Logcat) -match 'exosuit-pairing: code' -or (Get-PhoneSnapshot).state.phone.pairing) { throw 'Paste started pairing; only Pair may' }
+            Tap-PhoneElement '^Pair$' -after 0
+        } else {
+            Start-App @('--es', 'pairing_url', "'$($info.invitationUrl)'")
+        }
         $phoneCode = (Wait-Log 'exosuit-pairing: code [0-9 ]+' 90) -replace '\D', ''
         # The invitation carries the machine key's fingerprint (#mk=); the phone checked it after the handshake.
         if (-not ((Logcat) -match 'exosuit-pairing: machine key matches the invitation')) { throw 'The phone did not find the invitation''s machine key' }
@@ -484,8 +512,14 @@ esume"
     # 5. Kill the app and start it again with no extras: it reconnects from the Keystore-stored pairing.
     & $script:Adb -s $script:Serial shell am force-stop com.exosuit.mobile | Out-Null
     & $script:Adb -s $script:Serial logcat -c
+    Assert-RelayTunnel
     Start-App @()
-    Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:1,Beta:\w+:2\]' 90 | Out-Null
+    try { Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:1,Beta:\w+:2\]' 90 | Out-Null }
+    catch {
+        Write-Host "adb reverse rules at the timeout: '$((& $script:Adb -s $script:Serial reverse --list) -join '; ')'"
+        Shot (Join-Path $OutDir '7-NOT-RECONNECTED.png')
+        throw
+    }
     Start-Sleep -Seconds 3
     Shot (Join-Path $OutDir '7-reconnected.png')
     if ((Logcat) -match 'exosuit-pairing: code') { throw 'The restarted app asked to pair again' }
@@ -499,8 +533,11 @@ esume"
 } finally {
     try { Logcat | Set-Content (Join-Path $OutDir 'logcat.txt') } catch {}
     # The AVD's data outlives this run: do not leave the debug app open to test-rig intents.
-    if ($automationEnabled) { Disable-PhoneAutomation }
-    if ($emulator) { Stop-Emulator $emulator }
-    if (-not $Reuse) { & $python $hostScript stop --out $hostDir 2>&1 | Out-Host }
-    if ($hostProcess -and -not $hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }
+    if ($Keep) { Write-Host "kept running: the host in $hostDir and the emulator $script:Serial" }
+    else {
+        if ($automationEnabled) { Disable-PhoneAutomation }
+        if ($emulator) { Stop-Emulator $emulator }
+        if (-not $Reuse) { & $python $hostScript stop --out $hostDir 2>&1 | Out-Host }
+        if ($hostProcess -and -not $hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }
+    }
 }
