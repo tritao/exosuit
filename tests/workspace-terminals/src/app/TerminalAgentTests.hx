@@ -133,6 +133,36 @@ class TerminalAgentTests {
   plan=Resume.plan(codex,true,[]);
   require(plan.arguments.join(" ")=="resume" && plan.session==null,"An unresolved Codex terminal guessed at restart: "+plan.arguments.join(" "));
  }
+ /** A record line as Codex writes it first: `session_meta` with the conversation id, folder and UTC start. */
+ static function codexMetaLine(id:String,cwd:String,time:String):String
+  return haxe.Json.stringify({timestamp:time,type:"session_meta",payload:{id:id,cwd:cwd,originator:"codex-tui",timestamp:time}});
+ /**
+  * Codex and Pi records begun at 2026-09-08 08:09:09 (month, day, hour, minute and second 08 or 09), found through the
+  * real files by `resolve` for a terminal started 4 s before. The files are written now, so their mtimes pass the
+  * `modified >= started - 2` test; the times in the names and records decide.
+  */
+ static function timeFieldsContract(root:String):Void {
+  var started=Resume.seconds(2026,9,8,8,9,5), time="2026-09-08T08:09:09.000Z";
+  var codexFolder=sys.FileSystem.fullPath(root)+"/cli-codex-0809";
+  sys.FileSystem.createDirectory(codexFolder);
+  var day=root+"/codex-home/sessions/2026/09/08";
+  mkdirs(day);
+  var id="0199a5e1-7f42-7c3d-9b1a-080908090809";
+  sys.io.File.saveContent(day+"/rollout-2026-09-08T08-09-09-"+id+".jsonl",codexMetaLine(id,codexFolder,time)+"\n{}\n");
+  var codex:TerminalRecord={id:"codex-0809",name:"Codex",group:"work",cwd:codexFolder,instance:"i",state:"running",exitCode:0,available:true,
+   revision:haxe.Int64.ofInt(1),workspaceRoot:root,agentProvider:"codex",agentStarted:started};
+  require(Resume.resolve(codex,[])==id,"A Codex terminal did not take its conversation begun at 08:09:09 on 09-08");
+  var piFolder=sys.FileSystem.fullPath(root)+"/cli-pi-0809";
+  sys.FileSystem.createDirectory(piFolder);
+  var sessions=Resume.piSessionFolder(piFolder);
+  mkdirs(sessions);
+  var piId="88888888-8888-4888-a888-888888888888";
+  var file=haxe.io.Path.join([sessions,"2026-09-08T08-09-09-000Z_"+piId+".jsonl"]);
+  sys.io.File.saveContent(file,haxe.Json.stringify({type:"session",version:3,id:piId,timestamp:time,cwd:piFolder})+"\n");
+  var pi:TerminalRecord={id:"pi-0809",name:"Pi",group:"work",cwd:piFolder,instance:"i",state:"running",exitCode:0,available:true,
+   revision:haxe.Int64.ofInt(1),workspaceRoot:root,agentProvider:"pi",agentStarted:started};
+  require(Resume.resolve(pi,[])==file,"A Pi terminal did not take its session begun at 08:09:09 on 09-08: "+Resume.resolve(pi,[]));
+ }
  static function require(value:Bool,message:String):Void { if (!value) throw message; }
  /** Every missing folder of `path`, outermost first. */
  static function mkdirs(path:String):Void {
@@ -155,9 +185,12 @@ class TerminalAgentTests {
   restored.store.set("workbench/agents/session_mode",haxeon.ui.properties.PropertyValue.Enum("integrated"));
   var project=restored.forProject(root+"/project-agent-mode.json");
   require(project.current.agentSessionMode=="integrated" && !project.registry.exists("workbench/agents/session_mode"),"Agent mode was not a single global default");
+  // Std.parseInt reads "09" as octal (0): a provider record begun in such a minute was not taken.
+  require(Resume.utc("2026-09-08T08:09:09.000Z")==Resume.seconds(2026,9,8,8,9,9),"A provider record's time was misread");
   var oldClaude=Sys.getEnv("CLAUDE_CONFIG_DIR"), oldCodex=Sys.getEnv("CODEX_HOME"), oldPi=Sys.getEnv("PI_CODING_AGENT_DIR");
   Sys.putEnv("CLAUDE_CONFIG_DIR",root+"/claude-config");Sys.putEnv("CODEX_HOME",root+"/codex-home");Sys.putEnv("PI_CODING_AGENT_DIR",root+"/pi-agent");
   try {
+   timeFieldsContract(root);
    for (provider in ["codex","claude","pi"]) providerContract(root,provider);
    legacyContract(root);
    identityContract(root);

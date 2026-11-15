@@ -240,6 +240,19 @@ and the status.
   `var o:Dynamic = if (c) {} else {a: 1}` and in an arrow body. Test: `tests/programs/if-empty-block-branch.hx` (it
   guards the shapes; it cannot tell the two parses apart).
 
+### `Std.parseInt("09")` is 0: a leading zero reads as octal
+
+- **Symptom:** a Codex or Pi terminal did not record its conversation whenever the record's time had 08 or 09 in a
+  field; `workspace-terminals` failed with "A running codex terminal did not keep its conversation" about one run in
+  three. `Std.parseInt("09")` returns 0 and `Std.parseInt("010")` returns 8; stock Haxe on HashLink returns 9 and 10.
+- **Found:** 2026-11-14 (`AgentTerminalResume.utc` read `03:09:23` as `03:00:23`).
+- **Cause:** the runtime's `__std_parse_int` (`native/runtime/strings.c`) is `strtol(text, NULL, 0)`, base 0, which
+  takes a leading `0` as octal; the wasm `stdParseInt` in `stdlib/Std.hx` copies that on purpose. HashLink's own
+  `hl_parse_int` reads decimal unless the text starts with `0x`.
+- **Workaround:** strip leading zeros before `Std.parseInt` (`AgentTerminalResume.matchedTime`). Other exosuit callers
+  that parse zero-padded fields are still exposed.
+- **Status:** open. Fix in haxeon: base 10 unless a `0x` prefix, in both the native and the wasm version.
+
 ## Building haxeon's own tools with haxeon (2026-11-11)
 
 Tried with the haxeon-built compiler (`hl bootstrap/compiler.hl --entry=<main> --root=src --root=stdlib

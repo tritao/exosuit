@@ -224,8 +224,7 @@ class AgentTerminalResume {
      if (!name.match(file)) continue;
      var id = name.matched(7);
      if (taken.indexOf(id) >= 0) continue;
-     var nominal = seconds(Std.parseInt(name.matched(1)), Std.parseInt(name.matched(2)), Std.parseInt(name.matched(3)),
-      Std.parseInt(name.matched(4)), Std.parseInt(name.matched(5)), Std.parseInt(name.matched(6)));
+     var nominal = matchedTime(name);
      if (nominal < started - 15 * 3600) continue;
      var path = LongPath.of(Path.join([folder, file]));
      // A record not written since the terminal started was not begun since: not opened.
@@ -280,11 +279,23 @@ class AgentTerminalResume {
  }
 
  /** `2026-10-29T02:45:46.642Z` as seconds since 1970; null for anything else. */
- static function utc(text:String):Null<Int> {
+ public static function utc(text:String):Null<Int> {
   var r = ~/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z$/;
   if (!r.match(text)) return null;
-  return seconds(Std.parseInt(r.matched(1)), Std.parseInt(r.matched(2)), Std.parseInt(r.matched(3)), Std.parseInt(r.matched(4)),
-   Std.parseInt(r.matched(5)), Std.parseInt(r.matched(6)));
+  return matchedTime(r);
+ }
+
+ /**
+  * Seconds since 1970 of the UTC calendar time in groups 1 to 6 of `r` (year, month, day, hour, minute, second, each
+  * plain digits). Read as decimal: haxeon's `Std.parseInt` takes a leading 0 as octal, so "08" and "09" read as 0.
+  */
+ public static function matchedTime(r:EReg):Int
+  return seconds(decimal(r.matched(1)), decimal(r.matched(2)), decimal(r.matched(3)), decimal(r.matched(4)), decimal(r.matched(5)),
+   decimal(r.matched(6)));
+
+ static function decimal(digits:String):Int {
+  while (digits.length > 1 && StringTools.startsWith(digits, "0")) digits = digits.substr(1);
+  return Std.parseInt(digits);
  }
 
  public static function pad(v:Int):String return v < 10 ? "0" + v : Std.string(v);

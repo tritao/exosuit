@@ -122,8 +122,7 @@ class ClaudeTranscript {
  static function utc(text:String):Null<Int> {
   var r = ~/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z$/;
   if (!r.match(text)) return null;
-  return workspace.runtime.AgentTerminalResume.seconds(Std.parseInt(r.matched(1)), Std.parseInt(r.matched(2)),
-   Std.parseInt(r.matched(3)), Std.parseInt(r.matched(4)), Std.parseInt(r.matched(5)), Std.parseInt(r.matched(6)));
+  return workspace.runtime.AgentTerminalResume.matchedTime(r);
  }
 
  static function str(v:Dynamic, key:String):String {
