@@ -93,6 +93,8 @@ private class WorkspaceFileBinding {
 	static inline final MAX_SEARCH_ENTRIES_PER_PAGE = 64;
 	static inline final SEARCH_IDLE_MS = 30000.0;
 	static inline final SEARCH_CHUNK_BYTES = 262144;
+	/** Stops a search page growing past what one relay message carries (65487 bytes); a page may overshoot by one match. */
+	static inline final SEARCH_PAGE_BYTES = 40000;
 	static inline final SEARCH_PREVIEW_MAX_CHARS = 512;
 	static inline final SEARCH_PREVIEW_CONTEXT_CHARS = 96;
 
@@ -227,7 +229,8 @@ private class WorkspaceFileBinding {
 			var size = entry.get_size();
 			var initialBytes:Null<Bytes> = null;
 			if (request.initialBytesLimit != null && request.initialBytesLimit > 0 &&
-				Int64.compare(size, Int64.ofInt(request.initialBytesLimit)) <= 0) {
+				Int64.compare(size, Int64.ofInt(request.initialBytesLimit)) <= 0
+				&& Int64.compare(size, Int64.ofInt(WorkspaceFileProtocol.MAX_REPLY_BYTES)) <= 0) {
 				var length = Int64.toInt(size);
 				var bytes = length == 0 ? Bytes.alloc(0) : file.read(Int64.ofInt(0), length);
 				initialBytes = bytes;
@@ -282,8 +285,10 @@ private class WorkspaceFileBinding {
 				return;
 			}
 			var remaining = Int64.sub(state.size, request.offset);
-			var length = Int64.compare(remaining, Int64.ofInt(request.length)) < 0
-				? Int64.toInt(remaining) : request.length;
+			// A reply must fit one relay message, so a larger ask gets a shorter chunk; the reader continues from its length.
+			var asked = request.length < WorkspaceFileProtocol.MAX_REPLY_BYTES ? request.length : WorkspaceFileProtocol.MAX_REPLY_BYTES;
+			var length = Int64.compare(remaining, Int64.ofInt(asked)) < 0
+				? Int64.toInt(remaining) : asked;
 			var bytes = length == 0 ? Bytes.alloc(0) : state.file.read(request.offset, length);
 			var after = state.file.info();
 			if (WorkspaceFileService.fileRevision(service.workspace, state.root, after) != state.revision
@@ -440,11 +445,14 @@ private class WorkspaceFileBinding {
 	}
 
 	function runSearchPage(state:FileSearchState, limit:Int):Array<FileSearchMatch> {
-		var matches:Array<FileSearchMatch> = [], processed = 0, startedAt = service.clock();
-		while (matches.length < limit && processed < MAX_SEARCH_ENTRIES_PER_PAGE
+		var matches:Array<FileSearchMatch> = [], processed = 0, startedAt = service.clock(), pageBytes = 0;
+		while (matches.length < limit && processed < MAX_SEARCH_ENTRIES_PER_PAGE && pageBytes < SEARCH_PAGE_BYTES
 			&& service.clock() - startedAt < 25.0 && !searchComplete(state)) {
 			if (state.pendingMatchIndex < state.pendingMatches.length) {
-				matches.push(state.pendingMatches[state.pendingMatchIndex++]);
+				// A page must fit one relay message; the rest of the matches come with the next page.
+				var next = state.pendingMatches[state.pendingMatchIndex++];
+				pageBytes += 64 + next.path.length * 3 + next.revision.length + Bytes.ofString(next.preview).length;
+				matches.push(next);
 				continue;
 			}
 			state.pendingMatches = [];

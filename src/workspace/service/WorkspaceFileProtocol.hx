@@ -181,6 +181,13 @@ typedef FileUnwatchResult = WorkspaceUnwatchResult;
 
 /** Permanent ids for root-scoped workspace file metadata operations. */
 class WorkspaceFileProtocol {
+	/**
+		The most file bytes one read reply (a chunk, or the bytes bundled with open) carries. A reply travels as one
+		message, and on a relay stream a message is at most MachineStreamFrame.MAX_PAYLOAD (65487) bytes: this leaves room
+		for the envelope. The service returns a shorter chunk than asked when the ask is larger; readers go on from
+		the length they got.
+	**/
+	public static inline final MAX_REPLY_BYTES = 49152;
 	public static inline final READ = "workspace.files.read";
 	public static final ROOTS = new RpcMethod<WorkspaceQuery, FileRootsResult>(140,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):WorkspaceQuery return MessagePack.decode(bytes),

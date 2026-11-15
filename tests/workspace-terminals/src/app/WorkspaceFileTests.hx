@@ -20,7 +20,167 @@ import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 
+/** The server's side of a memory pair that remembers the largest message it sent: the encoded RPC replies as they go on the wire. */
+private class WireRecorder implements haxeon.rpc.MessageTransport {
+	final inner:MemoryTransport;
+	public var largest:Int = 0;
+
+	public function new(inner:MemoryTransport)
+		this.inner = inner;
+
+	public function isOpen():Bool
+		return inner.isOpen();
+
+	public function send(message:Bytes):Bool {
+		if (message.length > largest)
+			largest = message.length;
+		return inner.send(message);
+	}
+
+	public function receive():Null<Bytes>
+		return inner.receive();
+
+	public function close():Void
+		inner.close();
+}
+
 class WorkspaceFileTests {
+	/** The most bytes one message on a relay stream carries. */
+	static final RELAY_MESSAGE_BYTES = workspace.service.MachineDirectoryProtocol.MachineStreamFrame.MAX_PAYLOAD;
+
+	static function text(length:Int):Bytes {
+		var bytes = Bytes.alloc(length);
+		for (i in 0...length) bytes.set(i, i % 80 == 79 ? 10 : 97 + (i * 7) % 26);
+		return bytes;
+	}
+
+	/**
+		Every read reply and search page fits one relay message (65487 bytes): a large chunk ask gets a shorter chunk,
+		open bundles bytes only for a file that fits, the reader goes on from the length it got, and a page of long
+		previews ends early with the rest on the next page.
+	**/
+	static function relayLimits(parent:String):Void {
+		var folder = parent + "/relay-read", searchFolder = parent + "/relay-search";
+		FileSystem.createDirectory(folder);
+		FileSystem.createDirectory(searchFolder);
+		var big = text(300 * 1024), middle = text(100 * 1024), small = text(10 * 1024);
+		File.saveBytes(folder + "/big.txt", big);
+		File.saveBytes(folder + "/middle.txt", middle);
+		File.saveBytes(folder + "/small.txt", small);
+		// 40 files of 10 lines; each line matches once and its 512-character preview is mostly 3-byte characters.
+		var line = new StringBuf();
+		for (_ in 0...600) line.add("€");
+		for (f in 0...40) {
+			var content = new StringBuf();
+			for (l in 0...10) content.add("needle " + line.toString() + "\n");
+			File.saveContent(searchFolder + "/long-" + f + ".txt", content.toString());
+		}
+		var clock = function() return 1000.0;
+		var service = new WorkspaceFileService("workspace", [folder, searchFolder], clock);
+		var pair = MemoryTransport.pair();
+		var wire = new WireRecorder(pair.server);
+		var client = new RpcConnection(pair.client, clock);
+		var server = new RpcConnection(wire, clock);
+		var files = new WorkspaceFileClient(client);
+		var revoke = service.bind(server, [WorkspaceFileProtocol.READ]);
+		var root = WorkspaceFileService.ROOT_ID;
+
+		function open(path:String):FileReadOpenResult {
+			var opened:Null<FileReadOpenResult> = null;
+			wire.largest = 0;
+			files.openRead("workspace", root, path, null, function(value) opened = value, function(error) throw error.code, 1000,
+				WorkspaceFileService.READ_CHUNK_BYTES);
+			poll(client, server);
+			if (opened == null) throw "Open of " + path + " failed";
+			require(wire.largest < RELAY_MESSAGE_BYTES, "The open reply of " + path + " was " + wire.largest + " bytes");
+			return opened;
+		}
+		// 100 KB is under the largest initial byte limit a reader may ask for, but over what one reply carries.
+		require(open("middle.txt").initialBytes == null, "Open bundled a file larger than one reply");
+		var smallOpen = open("small.txt");
+		require(smallOpen.initialBytes != null && smallOpen.initialBytes.compare(small) == 0, "Open did not bundle a 10 KB file");
+		var bigOpen = open("big.txt");
+		require(bigOpen.initialBytes == null, "Open bundled a 300 KB file");
+		var chunk:Null<FileReadChunkResult> = null;
+		wire.largest = 0;
+		files.readChunk("workspace", bigOpen.handle, Int64.ofInt(0), WorkspaceFileService.READ_CHUNK_BYTES, function(value) chunk = value,
+			function(error) throw "A 256 KiB chunk ask failed: " + error.code, 1000);
+		poll(client, server);
+		require(chunk != null && chunk.bytes.length == WorkspaceFileProtocol.MAX_REPLY_BYTES && !chunk.eof
+			&& chunk.bytes.compare(big.sub(0, WorkspaceFileProtocol.MAX_REPLY_BYTES)) == 0,
+			"A 256 KiB ask did not get one reply's worth of the file's bytes: " + (chunk == null ? -1 : chunk.bytes.length));
+		require(wire.largest < RELAY_MESSAGE_BYTES, "A chunk reply was " + wire.largest + " bytes");
+		files.closeRead("workspace", bigOpen.handle, function(_) {}, function(error) throw error.code, 1000);
+		poll(client, server);
+
+		// The editor's reader, against the real service: the whole file, every reply within one relay message.
+		function readAll(files:WorkspaceFileClient, client:RpcConnection, server:RpcConnection):ui.WorkspaceFileReadResult {
+			var result:Null<ui.WorkspaceFileReadResult> = null;
+			ui.WorkspaceFileReader.read(files, "workspace", root, "big.txt", null, function(value) result = value);
+			var rounds = 0;
+			while (result == null && rounds++ < 1000) poll(client, server);
+			if (result == null) throw "The file reader did not finish";
+			return result;
+		}
+		wire.largest = 0;
+		var read = readAll(files, client, server);
+		require(read.error == null && read.sizeBytes == big.length && Bytes.ofString(read.contents).compare(big) == 0,
+			"The reader did not return the 300 KB file's bytes: " + read.error);
+		require(wire.largest < RELAY_MESSAGE_BYTES, "A reply to the reader was " + wire.largest + " bytes");
+
+		// A service that sends shorter chunks than asked (an older or busier one): the reader goes on from each length.
+		var shortPair = MemoryTransport.pair();
+		var shortClient = new RpcConnection(shortPair.client, clock), shortServer = new RpcConnection(shortPair.server, clock);
+		var asks = 0;
+		shortServer.register(WorkspaceFileProtocol.READ_OPEN, function(request, context) context.respond({workspace: request.workspace,
+			root: request.root, path: request.path, handle: "short", revision: "r1", size: Int64.ofInt(big.length), initialBytes: null}));
+		shortServer.register(WorkspaceFileProtocol.READ_CHUNK, function(request, context) {
+			var offset = Int64.toInt(request.offset);
+			var length = 1000 + 37 * asks++;
+			if (length > request.length) length = request.length;
+			context.respond({handle: "short", revision: "r1", offset: request.offset, bytes: big.sub(offset, length),
+				eof: offset + length == big.length});
+		});
+		shortServer.register(WorkspaceFileProtocol.READ_CLOSE, function(_, context) context.respond({closed: true}));
+		read = readAll(new WorkspaceFileClient(shortClient), shortClient, shortServer);
+		require(read.error == null && Bytes.ofString(read.contents).compare(big) == 0 && asks > 100,
+			"The reader did not read on from short chunks: " + read.error);
+		shortClient.close();
+		shortServer.close();
+
+		// Content search: pages of long non-ASCII previews; each page within one relay message, every match once.
+		var handle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", root + "-1", "content", "needle", true, function(value) handle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (handle == null) throw "The long-preview search did not start";
+		var search = handle, seen = new Map<String, Int>(), total = 0, pages = 0, complete = false;
+		while (!complete) {
+			require(pages++ < 100, "The long-preview search did not end");
+			var page:Null<FileSearchPageResult> = null;
+			wire.largest = 0;
+			files.searchPage("workspace", search.root, search.searchId, 100, function(value) page = value, function(error) throw error.code, 1000);
+			poll(client, server);
+			if (page == null) throw "A long-preview search page was missing";
+			require(wire.largest < RELAY_MESSAGE_BYTES, "Search page " + pages + " was " + wire.largest + " bytes");
+			for (match in page.matches) {
+				var key = match.path + ":" + match.line;
+				seen.set(key, seen.exists(key) ? seen.get(key) + 1 : 1);
+				total++;
+			}
+			complete = page.complete;
+		}
+		var distinct = 0;
+		for (count in seen) {
+			require(count == 1, "A search match came twice");
+			distinct++;
+		}
+		require(total == 400 && distinct == 400 && pages > 2, "The long-preview search returned " + distinct + " of 400 matches in " + pages + " pages");
+		revoke();
+		client.close();
+		server.close();
+		service.dispose();
+	}
+
 	static function require(value:Bool, message:String):Void {
 		if (!value)
 			throw message;
@@ -698,6 +858,7 @@ class WorkspaceFileTests {
 		detachFirst(parent);
 		folderRules(parent);
 		failedChange(parent);
+		relayLimits(parent);
 		Sys.println("PASS: workspace file/search grants, stable paging, UTF-8 locations, search limits/cancellation, expiry and revocation");
 	}
 }

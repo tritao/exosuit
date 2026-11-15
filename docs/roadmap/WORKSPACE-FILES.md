@@ -25,12 +25,15 @@ root listing through the basic Linux watch path described below.
 F2 adds root-scoped regular-file handles and typed `readOpen`, `readChunk` and
 `readClose` RPCs. A handle pins the opened identity; each chunk checks the
 identity, size, mtime and ctime-derived revision before and after reading.
-Chunks are capped at 256 KiB, with eight handles per connection and a 30-second
-idle expiry. A detected change retires the handle and returns
-`revision_changed`. This streams bytes without copying an entire file into a
-server snapshot. It is a revision-checked live read, not an atomic filesystem
-snapshot; timestamp precision and concurrent external writes remain platform
-limits. Revocation and connection cleanup close owned handles.
+Chunks are capped at `WorkspaceFileProtocol.MAX_REPLY_BYTES` (48 KiB) so that a
+reply fits one relay message (65487 bytes); the service returns a shorter chunk
+than asked and the reader continues from the length it got. There are eight
+handles per connection and a 30-second idle expiry. A detected change retires
+the handle and returns `revision_changed`. This streams bytes without copying
+an entire file into a server snapshot. It is a revision-checked live read, not
+an atomic filesystem snapshot; timestamp precision and concurrent external
+writes remain platform limits. Revocation and connection cleanup close owned
+handles.
 The shared `WorkspaceFileClient` maps these typed calls over any RPC
 connection; local attachment exposes it only when the file-read grant exists.
 The Linux desktop explorer now uses this client for root discovery and paged

@@ -5,13 +5,14 @@ import haxe.io.Bytes;
 import workspace.TextFileContent;
 import haxe.io.BytesBuffer;
 import workspace.client.WorkspaceFileClient;
+import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceFileProtocol.FileReadChunkResult;
 import workspace.service.WorkspaceFileProtocol.FileReadOpenResult;
 
 /** Bounded, revision-checked read that never materializes data until EOF. */
 class WorkspaceFileReader {
 	public static inline final MAX_PREVIEW_BYTES = 16777216;
-	static inline final CHUNK_BYTES = 262144;
+	static inline final CHUNK_BYTES = WorkspaceFileProtocol.MAX_REPLY_BYTES;
 
 	public static function previewSize(size:Int64):Null<Int> {
 		if (size == null || Int64.compare(size, Int64.ofInt(0)) < 0
@@ -93,7 +94,7 @@ class WorkspaceFileReader {
 					? Int64.toInt(remaining) : CHUNK_BYTES;
 				client.readChunk(workspace, handle, offset, count, function(chunk:FileReadChunkResult) {
 					if (chunk == null || chunk.handle != handle || chunk.revision != revision || chunk.offset == null
-						|| Int64.compare(chunk.offset, offset) != 0 || chunk.bytes == null || chunk.bytes.length != count) {
+						|| Int64.compare(chunk.offset, offset) != 0 || chunk.bytes == null || chunk.bytes.length < 1 || chunk.bytes.length > count) {
 						fail("File changed or returned an invalid read chunk");
 						return;
 					}

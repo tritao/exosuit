@@ -523,7 +523,8 @@ the loopback switch) instead of the OS credential store.
   expiry and grant checks. AgentMain currently configures one root; non-Linux
   secure backends and remaining F1 acceptance are still open.
 - [x] Build the first F2 Linux read foundation: root-bound regular-file handles,
-  256 KiB positional byte chunks, revision checks around each read and a shared
+  256 KiB positional byte chunks (48 KiB since 2026-11-13, so a reply fits one
+  relay message), revision checks around each read and a shared
   typed `WorkspaceFileClient` for negotiated RPC connections. Tests cover raw
   bytes, expected revisions, same-size mutation detection, connection ownership,
   range limits and idle expiry. This is a live read with best-effort metadata

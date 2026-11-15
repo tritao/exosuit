@@ -885,7 +885,8 @@ Haxe wrapper exposes managed byte chunks. The agent now serves typed
 `readOpen`, `readChunk` and `readClose`: an open can require the revision seen
 in `stat`, each chunk checks the pinned file's identity and metadata before and
 after reading, and a detected change retires the handle with `revision_changed`.
-Chunks are at most 256 KiB; each connection may hold eight read handles, which
+Chunks are at most 256 KiB (48 KiB since 2026-11-13, so a reply fits one relay
+message); each connection may hold eight read handles, which
 expire after 30 seconds or close on revocation/disconnect. This avoids eager
 whole-file copies, but it does not claim an atomic snapshot under all external
 write races or filesystem timestamp resolutions.
