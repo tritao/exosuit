@@ -81,6 +81,9 @@ class PhoneWorkspace {
 		});
 	}
 
+	/** The network came back or changed: reconnect now (see RpcClient.retryNow). */
+	public function retryNow(redial:Bool):Void client.retryNow(redial);
+
 	public function isConnected():Bool
 		return root != null && connection != null && client.current() == connection;
 

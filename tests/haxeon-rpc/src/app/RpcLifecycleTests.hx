@@ -40,6 +40,83 @@ class RpcLifecycleTests {
 		}
 	}
 
+	/**
+		retryNow, for a host that learned the network changed: a client waiting out a grown backoff dials at the next poll
+		and its backoff starts again at the base; without redial a connected client is left alone, with redial it is dropped
+		(its calls fail) and dials again; a closed client stays closed.
+	**/
+	static function retryNow(options:RpcPeerOptions):Void {
+		var now = 0.0;
+		var clock = function() return now;
+		var connector = new Connector();
+		var ready:Array<RpcConnection> = [];
+		var client = new RpcClient(connector, clock, function() return 1.0, options, function(connection, _, _) ready.push(connection), 10, 40, 30);
+		var wake = function():Float {
+			var at = client.nextWakeAt();
+			if (at == null) throw "retryNow fixture: no wake time";
+			return at;
+		};
+		var offline = function(index:Int) connector.callbacks[index](Failed({code: "offline", message: "offline", ambiguous: false}, true));
+		// Three failed dials grow the backoff to its cap (10, 20, 40).
+		for (index in 0...3) {
+			client.poll();
+			require(connector.callbacks.length == index + 1, "retryNow fixture: no dial");
+			offline(index);
+			if (index < 2)
+				now = wake();
+		}
+		require(client.state == Disconnected && client.nextWakeAt() == now + 40, "retryNow fixture: backoff did not grow");
+		now += 5;
+		client.poll();
+		require(connector.callbacks.length == 3, "A client dialed during its backoff");
+		client.retryNow();
+		client.poll();
+		require(connector.callbacks.length == 4 && client.state == Connecting, "retryNow did not dial at the next poll");
+		offline(3);
+		require(client.nextWakeAt() == now + 10, "retryNow did not reset the backoff: next wait " + (wake() - now));
+
+		// Connected: retryNow() leaves the connection alone; retryNow(true) drops it and the next poll dials again.
+		now = wake();
+		client.poll();
+		var pair = MemoryTransport.pair(4096, 16);
+		connector.callbacks[4](Opened(pair.client));
+		var server = RpcHandshake.server(pair.server, clock, new RpcPeerOptions("server/2", ["read"], [], 50, 1024, 4, 4096));
+		pump(client, server);
+		require(client.state == Connected && ready.length == 1, "retryNow fixture: no connection");
+		var connection = ready[0];
+		var service = server.connection;
+		if (service == null)
+			throw "missing server connection";
+		var method = new RpcMethod<String, String>(100, Bytes.ofString, function(bytes:Bytes) return bytes.toString(), Bytes.ofString,
+			function(bytes:Bytes) return bytes.toString());
+		service.register(method, function(_, _) {});
+		var failed:Null<RpcError> = null;
+		connection.call(method, "pending", 1000, function(_) throw "A dropped call completed", function(error) failed = error);
+		service.poll();
+		client.retryNow(false);
+		client.poll();
+		require(client.state == Connected && client.current() == connection && connection.isOpen() && connector.callbacks.length == 5
+			&& failed == null, "retryNow without redial touched a healthy connection");
+		client.retryNow(true);
+		require(failed != null && !connection.isOpen() && client.current() == null && client.state == Disconnected,
+			"retryNow(true) kept the connection or its call");
+		client.poll();
+		require(connector.callbacks.length == 6 && client.state == Connecting, "retryNow(true) did not dial at the next poll");
+		var next = MemoryTransport.pair(4096, 16);
+		connector.callbacks[5](Opened(next.client));
+		pump(client, RpcHandshake.server(next.server, clock, new RpcPeerOptions("server/2", ["read"], [], 50, 1024, 4, 4096)));
+		require(client.state == Connected && ready.length == 2 && client.current() == ready[1] && ready[1] != connection,
+			"retryNow(true) did not reconnect");
+
+		// Closed: nothing.
+		client.close();
+		client.retryNow(true);
+		client.retryNow();
+		now += 1000;
+		client.poll();
+		require(client.state == Closed && connector.callbacks.length == 6, "retryNow reopened a closed client");
+	}
+
 	public static function run():Void {
 		var now = 0.0;
 		var clock = function() return now;
@@ -233,6 +310,7 @@ class RpcLifecycleTests {
 		negotiating.poll();
 		require(negotiating.failure != null && negotiating.failure.code == "capability_widening" && negotiating.connection == null,
 			"forged Welcome widened policy");
+		retryNow(options);
 
 		Sys.println("PASS: RPC handshake, capability ceiling, reconnect, jitter, attempt cancellation and stale-generation fencing");
 	}

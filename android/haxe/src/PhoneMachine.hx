@@ -55,6 +55,9 @@ class PhoneMachine {
 		pool.poll();
 	}
 
+	/** The network came back or changed: dial the machine now. The workspace streams ride its channel and reconnect through OPEN. */
+	public function retryNow(redial:Bool):Void machine.retryNow(redial);
+
 	public function online():Bool return machine.connected();
 
 	/** Why this pairing is dead for good (revoked, identity changed), as a sentence; null while it works or is only offline. */

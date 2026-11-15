@@ -177,6 +177,14 @@ The Android files are in `android/haxe/src/`:
   `prefill` command (`UiBridge`, `AndroidExosuitFactory.prefillPairing`); across a process restart the link travels in
   the `prefill_url` extra. On a cold start the link wins over reopening the last view: the panel stays on screen, and
   the saved last view is kept (not rewritten) until a workspace is opened again.
+- Reconnecting. The Activity watches the default network (`ConnectivityManager.registerDefaultNetworkCallback`,
+  permission `ACCESS_NETWORK_STATE`). When it changes (callbacks coalesced for 500 ms; the one Android delivers at
+  registration when there is a network is ignored; an app started offline takes its first one as the network coming
+  back) it sends the `network` command with `changed: true`, and `PhoneRemote.networkChanged` drops and redials every
+  machine and the open workspace, since their sockets belong to the old network. It redials at most once per 2 s; a
+  change within that time is treated as `changed: false`. When the app returns to the foreground after more than 5 s the
+  Activity sends `changed: false`: only connections waiting out a backoff dial at once, and healthy ones are left alone
+  (`DeviceMachine.retryNow`, `RpcClient.retryNow` in haxeon).
 - Credentials live in an AES-GCM blob (`credentials.bin`) under a key in the Android Keystore
   (`CredentialVault.kt`). The vault is confined to the main thread; Haxe hands save requests to the host through
   `HostBridge` and `takeRequest()`, and every byte array is wiped after use. The Haxe side receives the decrypted

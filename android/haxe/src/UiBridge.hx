@@ -65,6 +65,12 @@ class UiBridge {
 					// 2: the link was turned down (the UI says why). It came from a test rig's intent, so the host logs it and
 					// carries on; 0 would put the app on its fatal error screen.
 					return remote.beginPairing(text(command, "url")) ? 1 : 2;
+				case "network":
+					// The device network changed ("changed": true) or the app came back to the foreground. Dial now; see PhoneRemote.networkChanged.
+					var remote = AndroidExosuitFactory.remote;
+					if (remote == null) return 0;
+					remote.networkChanged(flag(command, "changed"));
+					return 1;
 				case "prefill":
 					// A shared or opened invitation: fill in the pairing field and show the Remote panel. Never starts pairing (any
 					// app can send this); 2 when the text is no pairing link.

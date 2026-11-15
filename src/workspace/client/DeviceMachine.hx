@@ -144,6 +144,12 @@ class DeviceMachine {
 			function(connection, _, _) established(connection));
 	}
 
+	/** The network came back or changed: dial now instead of waiting out the backoff (see RpcClient.retryNow). */
+	public function retryNow(redial:Bool):Void {
+		if (!disposed)
+			client.retryNow(redial);
+	}
+
 	public function connected():Bool
 		return machineConnection != null && client.current() == machineConnection;
 

@@ -3,7 +3,10 @@ package com.exosuit.mobile
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.Choreographer
 import android.window.OnBackInvokedCallback
@@ -66,6 +69,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
             runtimeBound = true
             host = NativeKitHost(content)
             observeInsets()
+            watchNetwork()
             // Back (gesture, button or key) goes to ExosuitApp first; the Activity finishes only at the top level.
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback)
             content.addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
@@ -74,6 +78,39 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         } catch (error: Throwable) {
             fail(error)
         }
+    }
+
+    private var firstNetworkSeen = false
+    private var pausedAt = 0L
+    private val networkSignal = Runnable { sendNetwork(true) }
+
+    /**
+     * A switch from Wi-Fi to mobile data (or back) leaves the relay sockets dead on the old network, and the app would notice only
+     * when calls time out. The default network changing tells the module to close and dial again now (`network` command). Callbacks
+     * arrive in bursts, so they are coalesced. Android delivers the current default network at registration, which is no
+     * change, but only when there is one: an app started offline gets no such callback, and its first one is the network
+     * coming back. So whether one callback is to be ignored is decided at registration.
+     */
+    private fun watchNetwork() {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        firstNetworkSeen = manager.activeNetwork == null
+        runCatching {
+            manager.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    if (!firstNetworkSeen) { firstNetworkSeen = true; return }
+                    Log.i(TAG, "exosuit-network: default network available ($network)")
+                    root.removeCallbacks(networkSignal)
+                    root.postDelayed(networkSignal, 500)
+                }
+            })
+        }.onFailure { Log.w(TAG, "exosuit-network: cannot watch the network", it) }
+    }
+
+    /** Tells the module to retry now: `changed` closes and dials live connections again, otherwise only waiting ones retry. */
+    private fun sendNetwork(changed: Boolean) {
+        if (!started) return
+        Log.i(TAG, "exosuit-network: sending the network command (changed=$changed)")
+        try { command(JSONObject().put("type", "network").put("changed", changed)) } catch (error: Throwable) { fail(error) }
     }
 
     private val backCallback = OnBackInvokedCallback {
@@ -314,6 +351,10 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
         host?.active()
         active = loaded
         if (active) Choreographer.getInstance().postFrameCallback(this)
+        // Back from a pause of more than a few seconds: the phone may have slept or moved. A healthy connection is left alone;
+        // one that is waiting out a backoff retries at once.
+        if (pausedAt != 0L && SystemClock.elapsedRealtime() - pausedAt > RESUME_RETRY_MILLIS) sendNetwork(false)
+        pausedAt = 0L
     }
 
     override fun doFrame(frameTimeNanos: Long) {
@@ -331,6 +372,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     }
 
     override fun onPause() {
+        pausedAt = SystemClock.elapsedRealtime()
         active = false
         Choreographer.getInstance().removeFrameCallback(this)
         host?.inactive()
@@ -343,6 +385,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     }
 
     override fun onDestroy() {
+        root.removeCallbacks(networkSignal)
         active = false
         Choreographer.getInstance().removeFrameCallback(this)
         if (!isChangingConfigurations) {
@@ -401,6 +444,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
 
     private companion object {
         const val TAG = "Exosuit"
+        const val RESUME_RETRY_MILLIS = 5000L
         const val REQUEST_SAVE_CREDENTIALS = 1
         const val REQUEST_CREDENTIALS_UNREADABLE = 2
         /** UiBridge's answer to a command it understood and turned down for its content (0 is a failure of the module). */

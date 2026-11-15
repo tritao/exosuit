@@ -91,6 +91,7 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 	var shownKey = "";
 	final lastReport:Map<String, String> = [];
 	var disposed = false;
+	var lastRedial:Float = -1e12;
 
 	public function new(events:EventPump, clock:Void->Float, credentials:PhoneCredentials, changed:Void->Void) {
 		this.events = events;
@@ -132,6 +133,24 @@ class PhoneRemote implements WorkspaceAttachment implements WorkspaceRpcEndpoint
 	}
 
 	// Pairing
+
+	/**
+		The host saw the network change (`changed`) or the app return to the foreground after a while (not `changed`): every
+		machine and the open workspace that is waiting out a backoff dials now. On a real change the live connections are
+		dropped and dialed again, since their sockets belong to the old network; a healthy connection is otherwise left alone.
+		Callbacks arrive in bursts, so a redial within 2 s of the last one is ignored.
+	**/
+	public function networkChanged(changed:Bool):Void {
+		if (disposed) return;
+		var now = clock();
+		if (changed) {
+			if (now - lastRedial < 2000) changed = false;
+			else lastRedial = now;
+		}
+		for (machine in machines) machine.retryNow(changed);
+		if (open != null) open.retryNow(changed);
+		touch();
+	}
 
 	public function beginPairing(url:String):Bool {
 		if (disposed) return false;
