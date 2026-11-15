@@ -161,7 +161,8 @@ class WorkspaceGroupTests {
 			data: TestShell.workingDirectory("GROUP_CWD:")
 		}, 1000, function(_) {}, function(e) throw e.message);
 		pump();
-		var output = "", deadline = clock() + 3000;
+		// PowerShell on a loaded Windows machine takes more than 3 s to print its first line.
+		var output = "", deadline = clock() + 15000;
 		while (output.indexOf("GROUP_CWD:" + child) < 0 && clock() < deadline) {
 			Sys.sleep(0.005);
 			pump();
@@ -173,7 +174,7 @@ class WorkspaceGroupTests {
 			}, 1000, function(v) output = v.data.toString(), function(e) throw e.message);
 			pump();
 		}
-		require(output.indexOf("GROUP_CWD:" + child) >= 0, "Actual shell did not launch in inherited directory");
+		require(output.indexOf("GROUP_CWD:" + child) >= 0, "Actual shell did not launch in inherited directory:\n" + output);
 		change("nested", "Renamed", "other", null, 1, "update");
 		change("work", "Work renamed", null, child, 1, "update");
 		change("nested", "Stale", "work", null, 1, "update", "stale_revision");

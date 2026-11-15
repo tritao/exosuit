@@ -21,10 +21,14 @@ HAXEON_ROOT=Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon'))).resolve()
 OUTPUT=PROJECT.parent/'build/host'
 RUNNER=[str(HAXEON_ROOT/'.tools/hashlink'/('hl.exe' if os.name=='nt' else 'hl')),str(OUTPUT/'main.hl')]
 if run_cli(ROOT,['build','--project',str(PROJECT),*MODE])!=0: sys.exit('build failed')
-# A client takes about two seconds to start (it loads the test program, then runs --discover), so a shorter idle
-# lets the manager exit before the client connects, and the client then starts a 60 s manager of its own. That start is
-# what takes the time on Windows; elsewhere 2 s is enough.
-IDLE='6' if os.name=='nt' else '2'
+# The service idles out IDLE seconds after it is ready unless a client connects, and nothing can connect before the
+# manager publishes its endpoint, which waits for the build identity: a fresh state folder (each run has one) walks
+# the sources for it, several seconds on a loaded Windows machine. A client takes about two seconds to start (it loads
+# the test program, then runs --discover) and more under load. A manager that idles out in either gap fails the run, or
+# the client starts a 60 s manager of its own. Elsewhere 2 s is enough.
+IDLE='12' if os.name=='nt' else '2'
+# The longest an idle shutdown may take once nothing keeps the service.
+IDLE_EXIT=int(IDLE)+12
 def kill_tree(process):
     """Stop a child and everything it started: a timeout must not leave a manager, a shell or a PTY behind."""
     if process.poll() is not None: return
@@ -65,10 +69,11 @@ with tempfile.TemporaryDirectory(prefix='extty-',ignore_cleanup_errors=True) as 
             for mode in ['catalog','create','attach']:
                 run_tree([*RUNNER,mode,str(root),str(MANAGER)],environment)
                 if mode=='create':
-                    time.sleep(5)
+                    # Longer than the idle limit, so only the running shell can have kept the service.
+                    time.sleep(max(5,int(IDLE)+1))
                     assert manager.poll() is None,'Active terminal did not keep daemon alive'+chr(10)+(fixture/'manager.log').read_text()[-5000:]
                     assert json.loads(endpoints()[0].read_text())['generation']==descriptor['generation']
-            assert manager.wait(timeout=12)==0,'Exited terminal prevented idle shutdown'
+            assert manager.wait(timeout=IDLE_EXIT)==0,'Exited terminal prevented idle shutdown'
             assert not endpoints()
             print('PASS: PTY survives complete client-process exit; active runtime retains daemon; shell exit restores idle shutdown',flush=True)
             manager=spawn([*MANAGER_COMMAND,str(root),'--idle-seconds',IDLE],env=environment,stdout=log,stderr=subprocess.STDOUT)
@@ -89,9 +94,11 @@ with tempfile.TemporaryDirectory(prefix='extty-',ignore_cleanup_errors=True) as 
                 assert manager.poll() is None and time.monotonic()<deadline
                 time.sleep(.05)
             run_tree([*RUNNER,'history-restore',str(root),str(MANAGER)],environment)
-            assert manager.wait(timeout=12)==0
+            assert manager.wait(timeout=IDLE_EXIT)==0
         except Exception:
             print((fixture/'manager.log').read_text()[-6000:],file=sys.stderr)
+            # Why each service generation ended ("service stopped: ..., reason: ...").
+            for service_log in state.glob('exosuit/workspaces/*/manager.log'): print(service_log,service_log.read_text()[-6000:],file=sys.stderr)
             raise
         finally:
             kill_tree(manager)
