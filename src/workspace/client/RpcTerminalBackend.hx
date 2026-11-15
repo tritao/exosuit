@@ -68,6 +68,15 @@ class RpcTerminalBackend implements TerminalBackend {
   // The next snapshot also brings the lines above the screen: set whenever this view's own scrollback cannot be
   // trusted (it just attached, or output was lost to a replay gap).
   var historyWanted:Bool = false;
+  /**
+    For a host on a slow link that reconnects often (the phone over the relay): a snapshot brings at most this many
+    bytes of the most recent history instead of all of it (up to 16 MiB), and a re-attach to the same service
+    generation continues by replay from this view's cursor instead of taking a snapshot again; a trimmed journal
+    (replay_gap) still takes one. Null (the desktop): every attach takes the whole history. Set before the first poll.
+  **/
+  public var recentHistoryBytes:Null<Int> = null;
+  // This view shows the service's content up to replayCursor of the current generation (a snapshot was applied).
+  var holdsContent:Bool = false;
   // A new service generation owns the terminal: what this view shows is replaced when that service's history and screen
   // arrive, in one step, and stays on screen until then.
   var resetPending:Bool = false;
@@ -499,6 +508,7 @@ class RpcTerminalBackend implements TerminalBackend {
         viewColumns = 0; viewRows = 0; streamColumns = 0; streamRows = 0;
         output = [];
         resetPending = true;
+        holdsContent = false;
         snapshotOnly = false; snapshotPending = true; replayAfterResize = false;
         replayDirty = true; nextRead = 0;
       }
@@ -536,9 +546,15 @@ class RpcTerminalBackend implements TerminalBackend {
           attached = true;
           eventDriven = info.notifications == true && releaseEvents != null;
           create = false;
-          // Every attach starts from the service's history and current screen; replay continues from its cursor.
-          snapshotPending = true;
-          historyWanted = true;
+          // An attach starts from the service's history and current screen; replay continues from its cursor. A view
+          // with recentHistoryBytes that already shows this generation's content just replays on (a gap brings a snapshot).
+          if (recentHistoryBytes == null || !holdsContent || snapshotOnly) {
+            snapshotPending = true;
+            historyWanted = true;
+          } else {
+            replayDirty = true;
+            nextRead = 0;
+          }
           if (!observe(info)) return;
           // Lifecycle follows the applied snapshot, including when attaching after exit.
         }, function(e) {
@@ -550,7 +566,11 @@ class RpcTerminalBackend implements TerminalBackend {
         );
       } else if (snapshotPending) {
         if (Sys.time() >= snapshotRetryAt) requestScreenSnapshot(c);
-      } else if ((resizePending || themePending && controller && terminalState == "running") && !replayAfterResize) {
+      } else if ((resizePending || themePending && controller && terminalState == "running") && synchronized && !replayAfterResize) {
+        // Not before the view has caught up: until then the pane shows a notice strip ("Connecting…", "Loading terminal
+        // history…") that takes rows off the grid it asks for. A view that re-attaches by replay would otherwise shrink
+        // the program's terminal to that transient grid and back, and a full-screen program that misses the short blip
+        // (it then never redraws) keeps the rows the shrink cut off blank.
         resizePending = false;
         themePending = false;
         pending = true;
@@ -687,7 +707,8 @@ class RpcTerminalBackend implements TerminalBackend {
     var token = head == null ? 0 : head.token;
     c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
       workspace: "workspace", instance: instance, id: terminalId, token: token, offset: offset,
-      history: head == null && historyWanted ? true : null
+      history: head == null && historyWanted ? true : null,
+      historyLimit: head == null && historyWanted ? recentHistoryBytes : null
     }, 3000, function(value) {
       if (head == null) TerminalReplyBudget.release(c, SNAPSHOT_RESERVE);
       if (closed || !current(c, epoch)) return;
@@ -831,6 +852,7 @@ class RpcTerminalBackend implements TerminalBackend {
     else if (value.cursor < replayCursor) { fail("Invalid terminal snapshot cursor"); return; }
     if (!observe(value.terminal)) return;
     if (value.cursor != null) replayCursor = value.cursor;
+    holdsContent = value.cursor != null;
     snapshotPending = false;
     snapshotExpiries = 0;
     snapshotRetryAt = 0;

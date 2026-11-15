@@ -69,6 +69,9 @@ import haxeon.wire.MessagePack;
 @:optional @:id(5) var offset:Null<Int>;
 /** With `token` 0: also send the rendered history (the lines above the screen), ahead of the screen in the same pages. */
 @:optional @:id(6) var history:Null<Bool>;
+/** With `history`: send only its most recent rows, at most this many bytes, cut at a row start. Without it, or from an
+    older service, the whole history (up to 16 MiB) comes. */
+@:optional @:id(7) var historyLimit:Null<Int>;
 }
 /** `data` is the page at `offset` of a `total`-byte snapshot; older daemons send no `total` and the whole snapshot. */
 @:wire typedef TerminalScreenSnapshot = {@: id(1) var terminal:TerminalInfo;

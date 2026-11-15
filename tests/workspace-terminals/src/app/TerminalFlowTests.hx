@@ -181,6 +181,41 @@ class TerminalFlowTests {
   static inline function windows():Bool return Sys.systemName() == "Windows";
   static function int(value:Int64):Int return Int64.toInt(value);
 
+  /** Every line of an emulator, scrollback first, each with the text and style of its cells. */
+  static function lines(e:Emulator):Array<String> {
+    var out:Array<String> = [];
+    var position = e.scrollback(-1).total;
+    while (position > 0) {
+      e.scrollback(position); e.snapshot();
+      for (row in 0...(position < e.rows() ? position : e.rows())) out.push(describe(e, row));
+      position -= e.rows();
+    }
+    e.scrollback(0); e.snapshot();
+    for (row in 0...e.rows()) out.push(describe(e, row));
+    return out;
+  }
+  static function describe(e:Emulator, row:Int):String {
+    var text = new StringBuf();
+    for (cell in e.rowCells(row)) { text.add(cell.text); text.add("\x01"); text.add(Std.string(cell.style)); text.add("\x02"); }
+    return text.toString();
+  }
+  static function plain(line:String):String {
+    var text = new StringBuf();
+    for (cell in line.split("\x02")) { var at = cell.indexOf("\x01"); if (at >= 0) text.add(at == 0 ? " " : cell.substr(0, at)); }
+    return text.toString();
+  }
+  /** The text of a view's scrollback and screen. */
+  static function viewText(session:TerminalSession):String {
+    var e = session.emulator, out:Array<String> = [];
+    var position = e.scrollback(-1).total;
+    while (position > 0) {
+      e.scrollback(position); e.snapshot();
+      for (row in 0...(position < e.rows() ? position : e.rows())) out.push(e.rowText(row));
+      position -= e.rows();
+    }
+    e.scrollback(0);
+    return out.join("\n") + "\n" + screenText(session);
+  }
   static function screenText(session:TerminalSession):String {
     var e = session.emulator;
     e.snapshot();
@@ -189,6 +224,8 @@ class TerminalFlowTests {
 
   public static function run(root:String):Void {
     paced(root);
+    recentHistory(root);
+    reattach(root);
   }
 
   /** 10 s of 190 coloured cells per line, numbered, then FLOOD_DONE. */
@@ -256,6 +293,158 @@ class TerminalFlowTests {
     Sys.println("PASS: under " + Std.int(int(end) / 1048576) + " MiB of coloured output a paced view got 1 CHANGED per pull (re-sent after "
       + Math.round(resent * 10) / 10 + " s), an unpaced view " + (plainChanges.length - plainBefore)
       + "; a view attached during the flood stayed attached and shows its end");
+    rig.dispose();
+  }
+
+  /** 20000 numbered lines of red and green text, then HIST_DONE. */
+  static function numbered():Bytes {
+    return TestShell.line(windows()
+      ? "$e=[char]27; $p=\" $e[31m\"+('r'*20)+\"$e[32m\"+('g'*20)+\"$e[0m end\"; $s=[Text.StringBuilder]::new(); for($i=1;$i -le 20000;$i++){[void]$s.Append('HIST_').Append($i.ToString('00000')).Append($p).Append(\"`r`n\")}; [Console]::Out.Write($s.ToString()); 'HIST_'+'DONE'"
+      : "awk 'BEGIN{for(i=1;i<=20000;i++)printf \"HIST_%05d \\033[31mrrrrrrrrrrrrrrrrrrrr\\033[32mgggggggggggggggggggg\\033[0m end\\n\",i}'; printf 'HIST_%s\\n' DONE");
+  }
+  static function applied(shot:{data:Bytes, history:Int, columns:Int, rows:Int}):Emulator {
+    // As TerminalSession applies a snapshot with history: the service's grid, the history, then the screen.
+    var e = Emulator.open(shot.columns, shot.rows, 10000, "xterm-256color", false);
+    e.feedRange(shot.data, 0, shot.history);
+    e.takeReplies();
+    e.restoreScreenSnapshot(shot.data.sub(shot.history, shot.data.length - shot.history));
+    return e;
+  }
+
+  /** 2: SNAPSHOT with historyLimit sends the most recent rows only, cut at a row start; Emulator.recentHistory's cut. */
+  static function recentHistory(root:String):Void {
+    var rig = new Rig(root, "flow-history", WorkspaceTerminalManager.REPLAY_BYTES);
+    var link = rig.link();
+    rig.open(link, "history", true, false, false);
+    rig.input(link, "history", 1, numbered());
+    rig.waitForScreen(link, "history", "HIST_DONE");
+    rig.pump(0.3);
+    var whole = rig.snapshot(link, "history", true, null);
+    var recent = rig.snapshot(link, "history", true, 65536);
+    var prefix = Bytes.ofString("\x1b[3J\x1bc\x1b[?7l");
+    require(whole.history > 256 * 1024, "The rendered history is only " + whole.history + " bytes");
+    require(recent.history > 0 && recent.history <= 65536 && recent.data.length < whole.data.length / 4,
+      "A 64 KiB history limit sent " + recent.history + " bytes of history (" + recent.data.length + " in all, " + whole.data.length + " without it)");
+    require(recent.data.sub(0, prefix.length).compare(prefix) == 0 && recent.data.get(prefix.length) == 0x1b,
+      "The recent history does not start with the export's reset and a row");
+    var all = applied(whole), last = applied(recent);
+    var allLines = lines(all), lastLines = lines(last);
+    // The recent rows are the end of the whole history, cell for cell (text and colour), and the screens are the same.
+    require(lastLines.length < allLines.length / 4, "The recent history holds " + lastLines.length + " of " + allLines.length + " lines");
+    var suffix = allLines.slice(allLines.length - lastLines.length);
+    for (i in 0...lastLines.length) require(lastLines[i] == suffix[i],
+      "Line " + i + " of the recent history differs: [" + plain(lastLines[i]) + "] / [" + plain(suffix[i]) + "]");
+    var ac = all.cursor(), lc = last.cursor();
+    require(ac.row == lc.row && ac.column == lc.column, "The cursor differs after a limited history");
+    var expected = "HIST_00000 " + [for (_ in 0...20) "r"].join("") + [for (_ in 0...20) "g"].join("") + " end";
+    var top = StringTools.trim(plain(lastLines[0]));
+    require(StringTools.startsWith(top, "HIST_") && top.length == expected.length && top.substr(10) == expected.substr(10),
+      "The oldest recent row is torn: [" + top + "]");
+    var text = [for (line in lastLines) plain(line)].join("\n");
+    require(text.indexOf("HIST_20000 rrrr") >= 0 && text.indexOf("HIST_19900 rrrr") >= 0, "The last numbered lines are missing");
+    all.close(); last.close();
+
+    // Emulator.recentHistory on a real export: the cut follows CR LF and starts a row with ESC; the rest is the export's tail.
+    var source = Emulator.open(80, 24, 1000, "xterm-256color", false);
+    for (i in 0...300) source.feedString("\x1b[3" + (i % 7 + 1) + "mrow " + i + " coloured\x1b[0m plain\r\n");
+    var exported = source.historySnapshot();
+    var cut = Emulator.recentHistory(exported, 4096);
+    require(cut != null && cut.length <= 4096 && cut.length > 2048 && cut.sub(0, prefix.length).compare(prefix) == 0,
+      "recentHistory did not keep the recent rows of a real export");
+    var kept:Bytes = cut;
+    var at = exported.length - (kept.length - prefix.length);
+    require(kept.get(prefix.length) == 0x1b && exported.get(at - 2) == 13 && exported.get(at - 1) == 10
+      && kept.sub(prefix.length, kept.length - prefix.length).compare(exported.sub(at, exported.length - at)) == 0,
+      "recentHistory did not cut at a row start");
+    source.close();
+    Sys.println("PASS: a 64 KiB history limit sent " + recent.history + " of " + whole.history
+      + " history bytes, cut at a row start; the view gets the last " + lastLines.length + " lines intact and the same screen");
+    rig.dispose();
+  }
+
+  /** 3: a phone view re-attaches by replay (no SNAPSHOT), keeps its content, and sends no transient size; a gap brings a bounded snapshot. */
+  static function reattach(root:String):Void {
+    var rig = new Rig(root, "flow-reattach", 65536);
+    var phoneEndpoint = new FlowEndpoint(root, "flow-reattach"), deskEndpoint = new FlowEndpoint(root, "flow-reattach");
+    var phoneLink = rig.link(), deskLink = rig.link();
+    phoneEndpoint.connection = phoneLink.client;
+    deskEndpoint.connection = deskLink.client;
+    var phoneBackend = new RpcTerminalBackend(function() return phoneEndpoint, "reattach", root, true);
+    phoneBackend.recentHistoryBytes = 256 * 1024;
+    var phone = new TerminalSession(phoneBackend, Emulator.open(80, 24, 10000, "xterm-256color", false), false);
+    rig.sessions.push(phone);
+    rig.until(function() return phoneBackend.isSynchronized() && phoneBackend.canControl(), "The phone view did not open its terminal");
+    var deskBackend = new RpcTerminalBackend(function() return deskEndpoint, "reattach", root, false);
+    var desk = new TerminalSession(deskBackend, Emulator.open(80, 24, 10000, "xterm-256color", false), false);
+    rig.sessions.push(desk);
+    phone.write(TestShell.counted("OLD_", 30));
+    rig.until(function() return viewText(phone).indexOf("OLD_029") >= 0 && viewText(desk).indexOf("OLD_029") >= 0,
+      "The views did not show the first lines");
+    require(phoneLink.counter.historyLimits.length == 1 && phoneLink.counter.historyLimits[0] == 256 * 1024,
+      "The phone view's first snapshot did not ask for 256 KiB of history: " + phoneLink.counter.historyLimits);
+
+    // Both views lose their connections; meanwhile another client makes the shell print more.
+    var away = function(command:Bytes, marker:String):Void {
+      phoneEndpoint.connection = null; deskEndpoint.connection = null;
+      rig.drop(phoneLink); rig.drop(deskLink);
+      rig.pump(0.1);
+      var other = rig.link();
+      rig.open(other, "reattach", false, false, false);
+      rig.input(other, "reattach", 1, command);
+      rig.waitForScreen(other, "reattach", marker);
+      rig.drop(other);
+    };
+    away(TestShell.counted("NEW_", 20), "NEW_019");
+    phoneLink = rig.link(); deskLink = rig.link();
+    // The pane shows "Connecting…" while it re-attaches, a row less: the view asks for that grid before it caught up.
+    phone.resize(80, 23);
+    phoneEndpoint.connection = phoneLink.client;
+    deskEndpoint.connection = deskLink.client;
+    var resizedEarly = -1;
+    rig.until(function() {
+      if (!phoneBackend.isSynchronized()) return false;
+      resizedEarly = phoneLink.counter.count(WorkspaceTerminalProtocol.RESIZE.id);
+      // Caught up: the notice strip goes and the pane has its rows back.
+      phone.resize(80, 24);
+      return true;
+    }, "The phone view did not re-attach");
+    require(resizedEarly == 0, "The phone view resized the terminal before it caught up (" + resizedEarly + " RESIZE)");
+    rig.until(function() return deskBackend.isSynchronized(), "The desktop view did not re-attach");
+    rig.until(function() return viewText(phone).indexOf("NEW_019") >= 0 && viewText(desk).indexOf("NEW_019") >= 0,
+      "The views did not show what was printed while they were away");
+    rig.pump(0.5);
+    require(phoneLink.counter.count(WorkspaceTerminalProtocol.SNAPSHOT.id) == 0,
+      "The phone view took a snapshot to re-attach instead of replaying");
+    require(phoneLink.counter.count(WorkspaceTerminalProtocol.REPLAY.id) > 0, "The phone view did not replay");
+    require(viewText(phone).indexOf("OLD_000") >= 0, "The phone view lost its old content");
+    require(deskLink.counter.count(WorkspaceTerminalProtocol.SNAPSHOT.id) > 0, "The desktop view re-attached without a snapshot");
+    require(viewText(desk).indexOf("OLD_000") >= 0, "The desktop view lost the old lines");
+    require(phoneLink.counter.count(WorkspaceTerminalProtocol.RESIZE.id) == 0, "The phone view sent a transient size after re-attaching");
+    var probe = rig.link();
+    var info = rig.open(probe, "reattach", false, false, false);
+    require(info.rows == 24 && phone.emulator.rows() == 24, "The terminal has " + info.rows + " rows after the re-attach, not 24");
+    rig.drop(probe);
+
+    // 3b: more output than the journal holds while away: the phone view takes a snapshot bounded to its limit.
+    away(TestShell.line(windows() ? "[Console]::Out.Write('x' * 150000); 'GAP_'+'DONE'"
+      : "head -c 150000 /dev/zero | tr '\\000' x; printf 'GAP_%s\\n' DONE"), "GAP_DONE");
+    phoneLink = rig.link(); deskLink = rig.link();
+    phoneEndpoint.connection = phoneLink.client;
+    deskEndpoint.connection = deskLink.client;
+    rig.until(function() return phoneBackend.isSynchronized() && screenText(phone).indexOf("GAP_DONE") >= 0,
+      "The phone view did not recover from a trimmed journal");
+    require(phoneLink.counter.historyLimits.length == 1 && phoneLink.counter.historyLimits[0] == 256 * 1024,
+      "The phone view's snapshot after a gap was not bounded: " + phoneLink.counter.historyLimits);
+    probe = rig.link();
+    var service = rig.snapshot(probe, "reattach", false, null);
+    var screen = Emulator.open(service.columns, service.rows, 8, "xterm-256color", false);
+    screen.restoreScreenSnapshot(service.data);
+    screen.snapshot(); phone.emulator.snapshot();
+    for (row in 0...screen.rows()) require(screen.rowText(row) == phone.emulator.rowText(row),
+      "Row " + row + " of the phone view differs from the service's after a gap");
+    screen.close();
+    Sys.println("PASS: a phone view re-attaches by replay without a snapshot, keeps its content and never sends the "
+      + "transient size; the desktop takes a snapshot; a trimmed journal brings a 256 KiB-bounded snapshot");
     rig.dispose();
   }
 }

@@ -183,6 +183,28 @@ class Emulator {
         return copied.buffer;
     }
 
+    /**
+        The most recent rows of a `historySnapshot`, at most `limit` bytes, still safe to replay: the export's reset
+        prefix, then the rows from the first row start that fits, then its suffix (cursor and modes). Every exported
+        row follows "\r\n" and begins with a complete SGR reset, so a cut there never splits UTF-8 or an escape.
+        The whole history when it fits or is not in that format; null when not even the last row fits.
+    **/
+    public static function recentHistory(history:Bytes, limit:Int):Null<Bytes> {
+        var prefix = Bytes.ofString("\033[3J\033c\033[?7l");
+        if (history.length <= limit || history.length < prefix.length
+            || history.sub(0, prefix.length).compare(prefix) != 0) return history;
+        var from = history.length - (limit - prefix.length);
+        if (from < prefix.length + 2) from = prefix.length + 2;
+        for (at in from...history.length) {
+            if (history.get(at - 2) != 13 || history.get(at - 1) != 10 || history.get(at) != 27) continue;
+            var recent = Bytes.alloc(prefix.length + history.length - at);
+            recent.blit(0, prefix, 0, prefix.length);
+            recent.blit(prefix.length, history, at, history.length - at);
+            return recent;
+        }
+        return null;
+    }
+
     /** Compact active-screen state for bounded remote terminal recovery. */
     public function screenSnapshot():Bytes {
         snapshot();

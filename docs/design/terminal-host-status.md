@@ -41,7 +41,7 @@ Added 2026-11-12 on branch `host-harden`:
   Restoring a screen snapshot no longer clears the emulator's scrollback, which is what had left an adopting service
   (and every view) with one screen. Retained: 1000 lines above the screen (`TerminalHostProtocol.SCROLLBACK_ROWS`; the
   host's, the service's and the view's emulators each keep that many), at most 4 MiB rendered. This holds for every
-  attach, hosted or not.
+  attach, hosted or not, except the phone's, which asks for the recent part only (see "History on the phone" below).
 - A view that sees a new service generation keeps what it shows until the new service's history and screen arrive,
   replaces it in one step and stays scrolled up by the same number of lines.
 - Reconnect in place: a service whose connection to a live host closes opens it again (20 seconds, at most five times
@@ -141,6 +141,21 @@ falls behind the journal gets `replay_gap` and takes a snapshot. On the client, 
 on a per-connection budget of 384 KiB of reply bytes in flight (`TerminalReplyBudget`), so many views on one connection
 stay under the 1 MiB receive buffer; a view that finds it used up asks again on its next poll. Old clients and old
 services never mention `paced` and behave as before.
+
+History on the phone (branch `phone-flow`): every attach and every reconnect took a paged snapshot with the whole
+rendered history (up to 16 MiB) ahead of the screen, and showed nothing until its last page was read; a reconnect threw
+away what the view held and fetched it all again. The phone reconnects on every return to the app and every network
+change, over the relay in 32 KiB pages. Now a view can set `historyLimit` with `history` on its first SNAPSHOT
+request: the service sends only the most recent rows up to that many bytes (`Emulator.recentHistory`, cut at a row
+start behind the export's reset prefix; each row begins with a full SGR reset, so no escape or character is split).
+Such a view (`RpcTerminalBackend.recentHistoryBytes`, which the phone sets to 256 KiB, a few thousand rows) that
+re-attaches to the same service generation while it shows that terminal's content continues by REPLAY from its cursor
+and takes no snapshot; if the journal no longer reaches its cursor, `replay_gap` brings a bounded snapshot. The desktop
+sets nothing and takes the whole history on every attach, as before; old services ignore the field.
+A view sends its resize and theme only once it has caught up (`synchronized`: a snapshot applied or a replay that
+reached the end), because while it re-attaches the pane's notice strip ("Connecting…") takes a row off the grid.
+Without that, a re-attach by replay shrank the program's terminal by one row and back, and a full-screen program
+(Claude Code) kept its bottom row blank.
 
 Measured after the fix (`EXOSUIT_TERMINAL_MEMORY=1`, private bytes, service = launcher + daemon): empty service
 315.6 + 35.8 MiB; four full terminals 320.8 + 2593.2 MiB with hosts of 181 MiB each; right after two ended

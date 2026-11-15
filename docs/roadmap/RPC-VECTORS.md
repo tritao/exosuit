@@ -114,6 +114,18 @@ connection's terminal watch; disconnect also removes it. Panes share one router
 per connection and only the final pane unwatches a shared terminal. Older daemons
 ignore the new OPEN field and retain the polling/snapshot fallback.
 
+Terminal OPEN adds optional field 13, `paced`: a watching view promises to pull
+(REPLAY or SNAPSHOT) after every notification 139, and the daemon then keeps at
+most one unanswered notification per terminal and view, sending it again after 5
+seconds without a pull. A daemon that honours it answers with optional
+TerminalInfo field 17, `paced: true`. The snapshot query (method 119) adds
+optional field 7, `historyLimit`, used with field 6, `history`: the daemon sends
+only the most recent rows of the rendered history, at most that many bytes, cut
+at a row start. Older daemons skip both fields, notify every change and send the
+whole history; older clients never set them. Both request vectors in
+`tests/haxeon-rpc` grow by one trailing nil field. `TerminalFlowTests.hx` covers
+pacing under a flood, the limited history and re-attaching by replay.
+
 `TerminalReplayTests.hx` and `TerminalServiceTests.hx` cover replay ordering,
 geometry-only events, coalescing, reconnect, read-only viewers, malformed batches,
 exit ordering, bounded retention, snapshot recovery and legacy daemons.

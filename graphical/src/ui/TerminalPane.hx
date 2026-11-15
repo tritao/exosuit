@@ -145,6 +145,8 @@ class TerminalPane implements AgentTerminalPanel {
 		if (remoteBackend == null) throw "Agent CLIs require a workspace-owned terminal";
 		remoteBackend.configureAgent(provider);
 	}
+	/** For a host on a slow link: see RpcTerminalBackend.recentHistoryBytes. Call right after opening. */
+	public function recentHistoryOnly(bytes:Int):Void if (remoteBackend != null) remoteBackend.recentHistoryBytes = bytes;
 	public function controlStatus():Null<String> return remoteBackend == null ? null : remoteBackend.controlStatus();
 	/** A workspace terminal whose view holds the control lease. */
 	public function controlling():Bool return remoteBackend != null && remoteBackend.isController();

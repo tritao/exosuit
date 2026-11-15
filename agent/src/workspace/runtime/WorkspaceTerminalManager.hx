@@ -803,14 +803,18 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         var historyBytes = 0;
         if (token == 0 && r.history == true) {
           try {
-            var history = t.emulator.historySnapshot();
+            var whole = t.emulator.historySnapshot();
+            // A view on a slow link asks for the recent rows only (TerminalSnapshotQuery.historyLimit).
+            var limit:Int = r.historyLimit == null ? 0 : r.historyLimit;
+            var history = limit > 0 ? Emulator.recentHistory(whole, limit) : whole;
+            if (history == null) history = Bytes.alloc(0);
             var joined = Bytes.alloc(history.length + data.length);
             joined.blit(0, history, 0, history.length);
             joined.blit(history.length, data, 0, data.length);
             historyBytes = history.length;
             data = joined;
             // The export now, and the joined copy once the view has read its pages.
-            exported(2 * history.length);
+            exported(whole.length + history.length);
           } catch (failure:Dynamic) {
             ServiceLog.note('terminal ${t.id}: the history could not be exported for a view (${Std.string(failure)}); it gets the screen alone');
           }

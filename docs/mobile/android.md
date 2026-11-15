@@ -240,6 +240,10 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
   `--es clipboard_text <text>` sets the clipboard (needs `files/automation.on`).
 - **Scrolling.** A finger drag scrolls the scrollback (a mouse-reporting program gets wheel events instead). Touch
   pointer ids are negative, which an earlier `>= 0` check missed. A tap focuses the pane and shows the keyboard.
+- **History.** Opening a terminal brings the screen and the most recent 256 KiB of its history (a few thousand rows),
+  not the whole history (up to 16 MiB) the desktop takes; a re-attach to the same service (return to the app, network
+  change) continues by replay and fetches no snapshot. Older history is not on the phone (see
+  `docs/design/terminal-host-status.md`, "History on the phone").
 - **Who sets the size (decision).** The controller does, as on the desktop. The phone claims control by itself when
   nobody controls the terminal, and then resizes the PTY to its own grid. When another client (the desktop) controls,
   the phone is an observer: the pane shows "Read only · another client controls..." with a "Take control" button and

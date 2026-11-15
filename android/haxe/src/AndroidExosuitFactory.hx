@@ -47,6 +47,9 @@ class AndroidExosuitFactory {
 			var panel = ui.TerminalPane.openRemote(function() return phone, id, cwd, restored, requestFrame, palette, group, directory, null, true);
 			cast(panel, ui.TerminalPane).touchKeys = true;
 			cast(panel, ui.TerminalPane).substituteGlyphs = true;
+			// Over the relay a whole history (up to 16 MiB) took long on every open and every return to the app: the phone
+			// asks for the recent 256 KiB (a few thousand rows; more with plain text) and re-attaches by replay.
+			cast(panel, ui.TerminalPane).recentHistoryOnly(256 * 1024);
 			return panel;
 		};
 		var created = new ExosuitApp(context.fonts, ExosuitPalette.theme(false), context, null, new HostCapabilities([HostCapability.Filesystem]), null,
