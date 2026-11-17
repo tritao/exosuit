@@ -447,6 +447,7 @@ class WorkspaceScmService {
 		return workspace.service.WorkspaceScmSnapshotCodec.encode(value);
 	}
 
+	@:allow(workspace.runtime.WorkspaceScmBinding)
 	static function branchRecord(value:ScmBranch):WorkspaceScmProtocol.WorkspaceScmBranch
 		return {reference: value.reference, name: value.name, remote: value.remote, current: value.current};
 
