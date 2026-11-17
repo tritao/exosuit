@@ -1148,6 +1148,11 @@ class ExosuitApp implements DesktopUiApplication {
 		// The trees' models apply what their loads and decorations changed here, outside the build, which may not write them.
 		if (explorerModel != null) explorerModel.prepareBuild();
 		if (contextFiles != null) contextFiles.prepareBuild();
+		// The same for the Workbench rows and drafts, a Settings tab whose store was reloaded, and a language popup whose
+		// document stopped being the active one: each writes state or requests a frame, which the build may not.
+		if (workbenchPanel != null) workbenchPanel.prepareBuild();
+		settingsTab.syncStore();
+		host.dismissStaleLanguagePopup();
 		// Plain state the root build shows, which it cannot track: a change makes this frame a full build.
 		if (rootChanges.changed(host, hostContext, application.settings.current.minimapEnabled, application.settings.store.revision,
 			responsiveRightHidden))
