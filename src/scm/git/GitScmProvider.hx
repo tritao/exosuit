@@ -78,16 +78,9 @@ class GitScmProvider implements ScmProvider {
 
 	static function defaultHooksPath():String {
 		var path = ConfigurationPaths.stateRoot() + "/scm/empty-hooks";
-		createParents(path);
+		try FileSystem.createDirectory(path) catch (_:Dynamic) {}
 		if (!FileSystem.isDirectory(path)) throw "Could not create the empty Git hooks directory";
 		return normalize(path);
-	}
-
-	static function createParents(path:String):Void {
-		if (FileSystem.exists(path)) return;
-		var separator = path.lastIndexOf("/");
-		if (separator > 2) createParents(path.substring(0, separator));
-		FileSystem.createDirectory(path);
 	}
 }
 

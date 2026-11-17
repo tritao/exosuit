@@ -335,8 +335,7 @@ class WorkspaceSession {
 		if (separator <= 0) return true;
 		var parent = path.substring(0, separator);
 		if (FileSystem.exists(parent)) return FileSystem.isDirectory(parent);
-		if (!ensureParent(parent)) return false;
-		FileSystem.createDirectory(parent);
+		try FileSystem.createDirectory(parent) catch (_:Dynamic) return false;
 		return FileSystem.exists(parent) && FileSystem.isDirectory(parent);
 	}
 }

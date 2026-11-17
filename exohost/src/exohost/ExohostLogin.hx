@@ -210,7 +210,7 @@ class ExohostLogin {
 			launcher = FileSystem.fullPath(Sys.programPath());
 		if (!ExohostPaths.prepare())
 			throw "exohost's home is not a private directory of this user";
-		createDirectories(Path.directory(scriptPath()));
+		FileSystem.createDirectory(Path.directory(scriptPath()));
 		AtomicFile.write(scriptPath(), script(launcher));
 	}
 
@@ -218,18 +218,11 @@ class ExohostLogin {
 		try if (FileSystem.exists(scriptPath())) FileSystem.deleteFile(scriptPath()) catch (_:Dynamic) {}
 
 	static function writeDesktopEntry():Void {
-		createDirectories(Path.directory(desktopPath()));
+		FileSystem.createDirectory(Path.directory(desktopPath()));
 		AtomicFile.write(desktopPath(), [
 			"[Desktop Entry]", "Type=Application", "Name=Exosuit exohost", "Comment=Exosuit background processes and remote access",
 			"Exec=/bin/sh \"" + scriptPath() + "\"", "X-GNOME-Autostart-enabled=true", ""
 		].join("\n"));
-	}
-
-	static function createDirectories(directory:String):Void {
-		if (directory.length == 0 || FileSystem.exists(directory))
-			return;
-		createDirectories(Path.directory(directory));
-		FileSystem.createDirectory(directory);
 	}
 
 	static function script(launcher:String):String {

@@ -45,13 +45,6 @@ class TerminalHostRuntime {
 	static function isDirectory(path:String):Bool
 		return FileSystem.exists(path) && FileSystem.isDirectory(path);
 
-	public static function ensureDirectory(path:String):Void {
-		if (isDirectory(path)) return;
-		var parent = Path.directory(path);
-		if (parent != null && parent.length > 0 && parent != path) ensureDirectory(parent);
-		if (!isDirectory(path)) FileSystem.createDirectory(path);
-	}
-
 	/** A copy this young may belong to a service of another build that has not started its first host yet. */
 	static inline final YOUNG_COPY_SECONDS = 600.0;
 	/** A staging folder this old was left by a service that died while copying. */
@@ -221,7 +214,7 @@ class TerminalHostRuntime {
 		if (copy && !FileSystem.exists(Path.join([target, "complete"]))) {
 			var staging = target + ".tmp-" + Sys.getPid();
 			try {
-				for (folder in folders) ensureDirectory(folder == "" ? staging : Path.join([staging, folder]));
+				for (folder in folders) FileSystem.createDirectory(folder == "" ? staging : Path.join([staging, folder]));
 				for (file in files) File.copy(file.from, Path.join([staging, file.to]));
 				File.saveContent(Path.join([staging, "complete"]), lines.join("\n") + "\n");
 				FileSystem.rename(staging, target);
@@ -397,7 +390,8 @@ class TerminalHosts {
 	**/
 	public function spawn(terminal:String, profile:TerminalProfile, columns:Int, rows:Int, ?name:String, ?prelude:Bytes):HostedPtyBackend {
 		var directory = folder(terminal);
-		TerminalHostRuntime.ensureDirectory(Path.directory(directory));
+		// prepareDirectory below reports a parent that could not be created.
+		try FileSystem.createDirectory(Path.directory(directory)) catch (_:Dynamic) {}
 		// Private to this user, as the service's state folder is: `spec.bin` holds the program's whole
 		// environment and the pipe's token, and on Windows a file takes its folder's access list.
 		if (!app.AgentNative.prepareDirectory(directory)) throw "The terminal host folder is not private to this user: " + directory;
