@@ -14,9 +14,11 @@ import workspace.service.WorkspaceAgentProtocol.AgentModel;
 class ExosuitSettingsPanel extends SettingsPanel {
 	final models:Void->Array<AgentModel>;
 	final modelState:Void->SettingsModelPickerState;
-	var modelOptionsKey:String = "";
+	/** Written by currentInspector, which runs inside the build. */
+	@:unobservable var modelOptionsKey:String = "";
 	final pathEditor:SettingsPathEditor;
 	final listEditors:Array<haxeon.ui.properties.StructuredPropertyEditor> = [];
+	@:unobservable var unsubscribeFontPath:Null<Void->Void>;
 
 	public function new(store:SettingsStore, models:Void->Array<AgentModel>, onChanged:Void->Void, ?dialogs:platform.HostFileDialogs, ?modelState:Void->SettingsModelPickerState) {
 		super("exosuit-settings", store, onChanged);
@@ -39,6 +41,16 @@ class ExosuitSettingsPanel extends SettingsPanel {
 		for (path in ["editor/fonts/font_fallback_paths", "files/explorer/excluded_names", "languages/haxeon/command"])
 			installEditor(path, path == "editor/fonts/font_fallback_paths" ? "exosuit.font-list" : haxeon.ui.properties.ListPropertyEditor.TYPE);
 		installEditor("editor/fonts/font_path", SettingsPathEditor.TYPE);
+		// A saved font path replaces whatever was typed over the previous one.
+		unsubscribeFontPath = store.onChanged("editor/fonts/font_path", function(_) pathEditor.previewPath.update(null));
+	}
+
+	override public function dispose():Void {
+		super.dispose();
+		if (unsubscribeFontPath != null) {
+			unsubscribeFontPath();
+			unsubscribeFontPath = null;
+		}
 	}
 
 	override public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
@@ -46,7 +58,7 @@ class ExosuitSettingsPanel extends SettingsPanel {
 		if (selectedCategory == "editor/fonts") {
 			var style = new haxeon.ui.LayoutStyle();
 			style.width = haxeon.ui.LayoutAxis.grow(); style.height = haxeon.ui.LayoutAxis.fit();
-			var path = pathEditor.previewPath;
+			var path = pathEditor.previewPath.value;
 			node.add(new haxeon.ui.widgets.layout.Column("settings-preview", [
 				new haxeon.ui.widgets.KeyedView("label", new haxeon.ui.widgets.text.Text("Font preview · " + catalog.store.getInt("editor/fonts/font_size") + " px")),
 				new haxeon.ui.widgets.KeyedView("sample", new SettingsFontPreview(path == null ? catalog.store.getString("editor/fonts/font_path") : path,
@@ -98,7 +110,7 @@ class ExosuitSettingsPanel extends SettingsPanel {
 			default: "Invalid setting value";
 		};
 		catalog.setDescriptor(path, new PropertyDescriptor(path, definition.label, PropertyType.Custom(typeId),
-			function(_) return decode(store.get(path)), function(_, value) switch value {
+			function() return decode(store.get(path)), function(_, value) switch value {
 				case Custom(_, data):
 					var error = store.set(path, PropertyValue.Text(typeId == SettingsPathEditor.TYPE ? cast data : haxe.Json.stringify(data)));
 					if (error != null) throw error;
@@ -130,7 +142,7 @@ class ExosuitSettingsPanel extends SettingsPanel {
 		config.defaultValue = PropertyValue.Custom(SettingsModelEditor.TYPE, "model-default");
 		config.options = options;
 		var modelSetting = new PropertyDescriptor("workbench/codex/default_model", "Default Model", PropertyType.Custom(SettingsModelEditor.TYPE),
-			function(_) {
+			function() {
 				var id = store.getString("workbench/codex/default_model");
 				return PropertyValue.Custom(SettingsModelEditor.TYPE, id == "" ? "model-default" : "model:" + id);
 			},
