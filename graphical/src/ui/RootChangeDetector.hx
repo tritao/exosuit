@@ -11,9 +11,10 @@ import haxeon.ui.host.UiHostContext;
 
 	A document view's scroll offset, queued reveal and search marks are read only by its editor pane, which is built in a
 	scope of its own: a change to them bumps the view's `presentation` signal, which runs that scope again, instead of the
-	whole root. While a popup or menu that reads them is open (the language popup, the command view, a context menu), they
-	mark the root stale as well, as before. The caret, the selection and the text stay root values: the status bar shows
-	them.
+	whole root. Its caret, selection and text are read by that pane and by the status bar, also built in a scope of its
+	own: a change to them bumps the view's `editing` signal, which runs those scopes again. While a popup or menu that reads
+	them is open (the language popup and hover info, the command view, a context menu), both kinds mark the root stale as
+	well, as before. The unsaved and preview marks stay root values: the tab title shows them.
 **/
 class RootChangeDetector {
 	var first = true;
@@ -77,9 +78,10 @@ class RootChangeDetector {
 }
 
 /**
-	The values of one document view: what the root build shows (identity, tab title, unsaved and preview marks, caret,
-	selection, text) and what only its pane shows (scroll, reveal, search marks), which the pane's scope reads through
-	the view's `presentation` signal.
+	The values of one document view: what the root build shows (identity, tab title, unsaved and preview marks), what its
+	pane and the status bar show (caret, selection, text), which their scopes read through the view's `editing` signal,
+	and what only its pane shows (scroll, reveal, search marks), which the pane's scope reads through the view's
+	`presentation` signal.
 **/
 private class SeenView {
 	var id = -1;
@@ -104,14 +106,14 @@ private class SeenView {
 
 	/**
 		Records the view's values. Bumps the view's `presentation` signal when the scroll, the reveal or the search marks
-		changed. True when the root must build: a root value changed, the view at this place is another one, or
-		`overlayOpen` and a pane value changed.
+		changed, and its `editing` signal when the caret, the selection or the text changed. True when the root must build: a
+		root value changed, the view at this place is another one, or `overlayOpen` and one of the others changed.
 	**/
 	public function update(view:UiDocumentView, overlayOpen:Bool):Bool {
 		var selection = view.selection, document = view.document;
 		var nextDeleted = document.externalState == editor.ExternalState.Deleted;
-		var differs = view.id != id || view.preview != preview || document.dirty != dirty || document.path != path || nextDeleted != deleted
-			|| document.buffer.stateId != state
+		var differs = view.id != id || view.preview != preview || document.dirty != dirty || document.path != path || nextDeleted != deleted;
+		var edited = document.buffer.stateId != state
 			|| selection.anchor.line != anchorLine || selection.anchor.column != anchorColumn
 			|| selection.cursor.line != cursorLine || selection.cursor.column != cursorColumn;
 		var shown = view.cursorRevealRevision != reveal || view.scrollController.offsetX != offsetX
@@ -133,23 +135,24 @@ private class SeenView {
 		if (selection.rangeCount() > 1) {
 			var all = selection.allRanges();
 			var count = (all.length - 1) * 4;
-			if (ranges.length != count) { differs = true; ranges.resize(count); }
+			if (ranges.length != count) { edited = true; ranges.resize(count); }
 			for (index in 1...all.length) {
 				var range = all[index], at = (index - 1) * 4;
 				if (ranges[at] != range.anchor.line || ranges[at + 1] != range.anchor.column
-					|| ranges[at + 2] != range.cursor.line || ranges[at + 3] != range.cursor.column) differs = true;
+					|| ranges[at + 2] != range.cursor.line || ranges[at + 3] != range.cursor.column) edited = true;
 				ranges[at] = range.anchor.line;
 				ranges[at + 1] = range.anchor.column;
 				ranges[at + 2] = range.cursor.line;
 				ranges[at + 3] = range.cursor.column;
 			}
 		} else if (ranges.length > 0) {
-			differs = true;
+			edited = true;
 			ranges.resize(0);
 		}
-		// Written before the build, outside tracking, on the UI thread: the scope that reads it runs again in this frame. A
-		// root build runs it anyway.
+		// Written before the build, outside tracking, on the UI thread: the scopes that read them run again in this frame. A
+		// root build runs them anyway.
 		if (shown) view.invalidate();
-		return differs || overlayOpen && shown;
+		if (edited) view.editing.value = view.editing.value + 1;
+		return differs || overlayOpen && (shown || edited);
 	}
 }
