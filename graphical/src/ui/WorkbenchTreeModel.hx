@@ -108,7 +108,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 			roots.push(WorkbenchRowKey.status("loading"));
 		if (view.error != null)
 			roots.push(WorkbenchRowKey.status("error"));
-		if (view.manages) roots.push(WorkbenchRowKey.NEW_WORKSPACE);
+		if (view.manages) { roots.push(WorkbenchRowKey.NEW_WORKSPACE); roots.push(WorkbenchRowKey.FOLDER_WORKSPACE); }
 		if (state == null) return;
 		var expanded = expandedRows;
 		for (entry in state.workspaces) {
@@ -352,6 +352,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 		var view = machine;
 		if (view == null) return new Text("");
 		if (key == WorkbenchRowKey.NEW_WORKSPACE) return WorkbenchMachineLabel.newWorkspace();
+		if (key == WorkbenchRowKey.FOLDER_WORKSPACE) return WorkbenchMachineLabel.fromFolder();
 		var id = WorkbenchRowKey.workspaceId(key);
 		if (id != null) {
 			var entry = workspaces.get(id);

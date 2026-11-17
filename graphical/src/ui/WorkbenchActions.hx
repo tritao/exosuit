@@ -194,6 +194,22 @@ class WorkbenchActions {
 		}));
 	}
 
+	/**
+		Asks for a folder and opens a workspace on it, named after the folder. A workspace that already has that folder
+		as its only one is opened instead of a second made.
+	**/
+	public function createFromFolder():Void {
+		var known = suit;
+		if (known == null || known.busy()) return;
+		chooseFolder("Add Workspace from Folder", null, function(folder) {
+			var existing = known.workspaceHolding(folder);
+			if (existing != null && existing.folders.length == 1 && workspace.PathKey.same(existing.folders[0], folder)) { open(existing); return; }
+			known.create(null, [folder], function(created, failure) {
+				if (!report(failure) && created != null) open(created);
+			});
+		});
+	}
+
 	public function rename(entry:MachineWorkspace):Void {
 		var known = suit;
 		if (known == null || known.busy()) return;

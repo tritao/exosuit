@@ -7,7 +7,7 @@ import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 	strings; this is the one place that writes and reads that spelling. Every workspace's groups, sessions and terminals
 	are spelled alike: `g:`, `a:` or `t:`, the workspace id, `|` and the item's id (the workspace id is empty in a window
 	without this machine's workspaces, the phone's or the browser's, which shows one workspace). Above them, the machine's
-	rows use `w:` plus a workspace id, `s:` (a status line) and `n:` (New Workspace…); `parse` returns null for them, so
+	rows use `w:` plus a workspace id, `s:` (a status line) and `n:` (New Workspace…, Add Workspace from Folder…); `parse` returns null for them, so
 	group, session and terminal code ignores them.
 **/
 class WorkbenchRowKey {
@@ -23,8 +23,9 @@ class WorkbenchRowKey {
 	public static function terminal(workspace:String, id:String):String return "t:" + workspace + "|" + id;
 	public static function agent(workspace:String, id:String):String return "a:" + workspace + "|" + id;
 
-	/** The last of the machine's rows. */
+	/** The last of the machine's rows: New Workspace…, then Add Workspace from Folder…. */
 	public static inline final NEW_WORKSPACE = "n:new-workspace";
+	public static inline final FOLDER_WORKSPACE = "n:folder-workspace";
 	public static function machineWorkspace(id:String):String return "w:" + id;
 	public static function status(kind:String):String return "s:" + kind;
 

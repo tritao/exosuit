@@ -169,8 +169,10 @@ class WorkbenchPanel implements View {
 		// Enter, Space or a double click do what a click does.
 		tree.onActivate = function(key, _) return openRow(key);
 		tree.onItemActivatedWithEvent = function(key, event) {
-			// A click already ran New Workspace… on its first press.
-			if (key == WorkbenchRowKey.NEW_WORKSPACE && event.kind != haxeon.ui.core.UiEventKind.Click) createWorkspace();
+			// A click already ran New Workspace… (or Add Workspace from Folder…) on its first press.
+			if (event.kind == haxeon.ui.core.UiEventKind.Click) return;
+			if (key == WorkbenchRowKey.NEW_WORKSPACE) createWorkspace();
+			else if (key == WorkbenchRowKey.FOLDER_WORKSPACE) createWorkspaceFromFolder();
 		};
 		model.groupEditor = function(key) return draft != null && key == WorkbenchRowKey.group(draftWorkspace, draft.id) ? inlineEditor : null;
 		model.agentEditor = function(key) return agentDraft != null && key == WorkbenchRowKey.agent(agentDraftWorkspace, agentDraft.id) ? agentEditor : null;
@@ -180,6 +182,7 @@ class WorkbenchPanel implements View {
 			if (agentDraft != null || draft != null) return;
 			pendingEnterKey = null; // a later click is the user's choice; openRow below makes a new wish for its own row
 			if (key == WorkbenchRowKey.NEW_WORKSPACE && count == 1) { createWorkspace(); return; }
+			if (key == WorkbenchRowKey.FOLDER_WORKSPACE && count == 1) { createWorkspaceFromFolder(); return; }
 			openRow(key);
 		};
 	}
@@ -305,6 +308,11 @@ class WorkbenchPanel implements View {
 		if (act != null) act.create();
 	}
 
+	function createWorkspaceFromFolder():Void {
+		var act = actions;
+		if (act != null) act.createFromFolder();
+	}
+
 	/**
 		Every row's menu (Workbench design Q1), the same in every workspace: a workspace's (its note's too) whether it is
 		open, running or idle; a group's, session's or terminal's; New Workspace….
@@ -321,10 +329,13 @@ class WorkbenchPanel implements View {
 		else snapshotMenu(row, key, event);
 	}
 
-	/** New Workspace…, from the machine's status rows and its own row. */
+	/** New Workspace… and Add Workspace from Folder…, from the machine's status rows and their own rows. */
 	function machineMenu(event:UiEvent):Void {
 		var act = actions;
-		if (act != null && act.manages()) showMenu([new MenuItem("machine-new-workspace", "New Workspace…", act.create, !act.busy())], event, function() return true);
+		if (act != null && act.manages()) showMenu([
+			new MenuItem("machine-new-workspace", "New Workspace…", act.create, !act.busy()),
+			new MenuItem("machine-folder-workspace", "Add Workspace from Folder…", act.createFromFolder, !act.busy())
+		], event, function() return true);
 	}
 
 	/** A workspace row's menu, the same for every workspace: create in it, then its own actions and New Workspace…. */
@@ -341,6 +352,7 @@ class WorkbenchPanel implements View {
 		items.push(new MenuItem("machine-workspace-new-window", "Open in New Window", function() act.openInNewWindow(target, null), true, null, true));
 		items.push(new MenuItem("machine-workspace-remove", "Remove from This Machine", function() act.remove(target), idle, null, true));
 		items.push(new MenuItem("machine-new-workspace", "New Workspace…", act.create, idle, null, true));
+		items.push(new MenuItem("machine-folder-workspace", "Add Workspace from Folder…", act.createFromFolder, idle));
 		showMenu(items, event, function() return act.workspaceById(target.id) != null);
 	}
 
@@ -1122,14 +1134,15 @@ class WorkbenchPanel implements View {
 	}
 
 	/**
-		A workspace just made from New Workspace… takes the selection from that row, so the keyboard and the header
+		A workspace just made from New Workspace… or Add Workspace from Folder… takes the selection from that row, so the keyboard and the header
 		buttons act on the new workspace. Expanding stays the user's (the chevron): opening a workspace does not.
 	**/
 	function followOpenWorkspace():Void {
 		var open = model.openRow;
 		if (open == observedOpenRow) return;
 		observedOpenRow = open;
-		if (open != null && tree.selectedKey == WorkbenchRowKey.NEW_WORKSPACE) selectAfterEnter(open);
+		var selected = tree.selectedKey;
+		if (open != null && (selected == WorkbenchRowKey.NEW_WORKSPACE || selected == WorkbenchRowKey.FOLDER_WORKSPACE)) selectAfterEnter(open);
 	}
 
 	public function headerActions(availableWidth:Float = 260):View return new WorkbenchHeaderActions(this, availableWidth);

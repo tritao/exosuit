@@ -72,6 +72,9 @@ class WorkbenchMachineLabel implements View {
 	public static function newWorkspace():WorkbenchMachineLabel
 		return new WorkbenchMachineLabel(IconName.Plus, "New Workspace…", null, "New Workspace…", false, false);
 
+	public static function fromFolder():WorkbenchMachineLabel
+		return new WorkbenchMachineLabel(IconName.FolderOpen, "Add Workspace from Folder…", null, "Add Workspace from Folder…", false, false);
+
 	public static function status(message:String, warning:Bool = false):WorkbenchMachineLabel
 		return new WorkbenchMachineLabel(warning ? IconName.AlertTriangle : null, message, null, message, true, warning);
 

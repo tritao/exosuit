@@ -129,7 +129,7 @@ class WorkbenchTreeTestMain {
 	static function ordering():Void {
 		var model = new WorkbenchTreeModel();
 		model.update(view(machineWorkspaces, "resume"), ["resume" => lists(catalog("C:/work/resume"), agents("C:/work/resume"))]);
-		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "the workspaces are not the roots: " + roots(model));
+		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace,n:folder-workspace", "the workspaces are not the roots: " + roots(model));
 		require(children(model, "w:resume").join(",") == "g:resume|work,g:resume|apps", "open workspace's groups: " + children(model, "w:resume"));
 		require(children(model, "g:resume|work").join(",") == "g:resume|drafts,t:resume|t1,a:resume|a1", "group contents: " + children(model, "g:resume|work"));
 		// A workspace with nothing to show yet says it is loading while its row is expanded.
@@ -183,7 +183,7 @@ class WorkbenchTreeTestMain {
 		var sources:Map<String, WorkbenchRowSource> = ["exo" => copy(mirror), "resume" => resume];
 		var model = new WorkbenchTreeModel();
 		model.update(shown, sources);
-		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "other workspaces' rows changed the roots: " + roots(model));
+		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace,n:folder-workspace", "other workspaces' rows changed the roots: " + roots(model));
 		var top = children(model, "w:exo");
 		require(top.join(",") == "g:exo|docs,g:exo|build,a:exo|s2", "another workspace's top level: " + top);
 		var build = children(model, "g:exo|build");
@@ -319,13 +319,13 @@ class WorkbenchTreeTestMain {
 	static function emptyAndLoading():Void {
 		var model = new WorkbenchTreeModel();
 		model.update(view([], null), []);
-		require(roots(model).join(",") == "s:empty,n:new-workspace", "empty machine: " + roots(model));
+		require(roots(model).join(",") == "s:empty,n:new-workspace,n:folder-workspace", "empty machine: " + roots(model));
 		model.update(view(null, null), []);
-		require(roots(model).join(",") == "s:loading,n:new-workspace", "loading: " + roots(model));
+		require(roots(model).join(",") == "s:loading,n:new-workspace,n:folder-workspace", "loading: " + roots(model));
 		model.update(view(null, null, "suit is not running"), []);
-		require(roots(model).join(",") == "s:error,n:new-workspace", "suit error: " + roots(model));
+		require(roots(model).join(",") == "s:error,n:new-workspace,n:folder-workspace", "suit error: " + roots(model));
 		model.update(view(machineWorkspaces, "resume", "suit did not answer"), []);
-		require(roots(model).join(",") == "w:exo,w:resume,w:eon,s:error,n:new-workspace",
+		require(roots(model).join(",") == "w:exo,w:resume,w:eon,s:error,n:new-workspace,n:folder-workspace",
 			"a refresh error hid the known workspaces");
 		// A folderless workspace, open on its scratch folder, nests its groups like any other.
 		model.update(view(machineWorkspaces, "eon"), ["eon" => lists(catalog("C:/Users/me/Exosuit/eon-series"))]);
@@ -382,7 +382,7 @@ class WorkbenchTreeTestMain {
 		var none:TerminalCatalog = {instance: "i", next: null, workspaceRoot: "C:/src/exosuit", groups: [], terminals: []};
 		model.update(view(machineWorkspaces, "exo"), ["exo" => lists(none)]);
 		require(children(model, "w:exo").join(",") == "s:none|exo", "an empty workspace: " + children(model, "w:exo"));
-		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "rows leaked to the roots");
+		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace,n:folder-workspace", "rows leaked to the roots");
 	}
 
 	/** Through a real TreeView: the open workspace is expanded with its groups; the others are collapsed but expandable. */
@@ -413,7 +413,7 @@ class WorkbenchTreeTestMain {
 			return found;
 		}
 		submit();
-		require(visible().join(",") == "w:exo,w:resume,g:resume|work,g:resume|drafts,t:resume|t1,a:resume|a1,g:resume|apps,w:eon,n:new-workspace",
+		require(visible().join(",") == "w:exo,w:resume,g:resume|work,g:resume|drafts,t:resume|t1,a:resume|a1,g:resume|apps,w:eon,n:new-workspace,n:folder-workspace",
 			"rendered order: " + visible());
 		require(tree.isExpanded("w:resume") && !tree.isExpanded("w:exo"), "the open workspace is not the expanded one");
 		var text = labels();
@@ -445,12 +445,12 @@ class WorkbenchTreeTestMain {
 		model.update(view(machineWorkspaces, "exo"), ["exo" => exo, "resume" => resume]);
 		tree.setExpanded("w:resume", false);
 		submit();
-		require(visible().join(",") == "w:exo,g:exo|work,g:exo|drafts,t:exo|t1,g:exo|apps,w:resume,w:eon,n:new-workspace", "after switching: " + visible());
+		require(visible().join(",") == "w:exo,g:exo|work,g:exo|drafts,t:exo|t1,g:exo|apps,w:resume,w:eon,n:new-workspace,n:folder-workspace", "after switching: " + visible());
 		// Collapsing the open workspace is the window's own choice and survives a refresh.
 		tree.setExpanded("w:exo", false);
 		model.update(view(machineWorkspaces, "exo"), ["exo" => exo, "resume" => resume]);
 		submit();
-		require(!tree.isExpanded("w:exo") && visible().join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "collapse did not stick");
+		require(!tree.isExpanded("w:exo") && visible().join(",") == "w:exo,w:resume,w:eon,n:new-workspace,n:folder-workspace", "collapse did not stick");
 		// Another window's focus marks its workspace and its group (M19 Phase 8); a window on a group marks the group and its workspace.
 		var withWindows = view(machineWorkspaces, "resume");
 		withWindows.windows = [{window: "w2", pid: 9, context: "m/eon/"}, {window: "w3", pid: 10, context: "m/resume/work"}];
