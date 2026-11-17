@@ -6,7 +6,6 @@ class AgentImageIntegrationTest {
  static function main():Void {
   AgentImageStagingTest.run();
   AgentServiceTest.run();
-  AgentSnapshotTest.run();
   AgentContentStorageTest.run();
   AgentResponseArchiveTest.run();
   AgentProviderTestMain.conversationTests();

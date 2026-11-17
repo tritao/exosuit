@@ -2,9 +2,9 @@
 
 ## Product contract
 
-Sessions are first-class IDE documents backed by the existing workspace agent service. Codex, Claude, Pi and the built-in agent use the same visual language, with controls driven by provider capabilities. Terminals, editor documents, workspace groups, remote workspaces and source control retain their existing ownership and behavior. Work is isolated on branch `ui-exploration`.
+Sessions are first-class IDE documents backed by the existing workspace agent service. Codex, Claude and Pi use the same visual language, with controls driven by provider capabilities. Terminals, editor documents, workspace groups, remote workspaces and source control retain their existing ownership and behavior.
 
-The desired experience combines the readable conversation and compact composer of T3 Code with the quiet hierarchy of Hermes Desktop. The code references and commits are recorded in [the reference research](chat-ui-reference-research.md). Exosuit remains an IDE: opening a file or reviewing changes uses its established editor and Source Control surfaces.
+The desired experience combines the readable conversation and compact composer of T3 Code with the quiet hierarchy of Hermes Desktop. Exosuit remains an IDE: opening a file or reviewing changes uses its established editor and Source Control surfaces.
 
 The visual direction includes crisp, defined borders, restrained corner rounding and subtle contact/ambient shadows. A palette change alone does not meet the quality bar. Use a recessed application frame, a defined workspace surface, quiet navigation controls and a composed, elevated input area; inspect real native pixels in both themes.
 
@@ -21,14 +21,12 @@ The visual direction includes crisp, defined borders, restrained corner rounding
 - For Codex, Claude and Pi, negotiate full assistant-message retrieval separately from bounded activity previews. Automatically load the latest completed truncated response, offer explicit loading for older responses, and reject changed or unavailable snapshots. Transfer at most 24 KiB per chunk and retain at most 256 KiB per message; label a larger response as partial. Copy the displayed full response when available and identify preview copies. Claude/Pi persist captured terminal assistant response bytes in a bounded optional SQLite extension. Saved response digests bind restored previews to the exact source version before regenerating content tokens; legacy, evicted or mismatched sources remain unavailable.
 - Pi successful edit events can expose an actual provider-reported unified patch while retaining the original tool input and output; do not treat display-oriented numbered diffs as patches. Claude tool completions retain their reported arguments and truncation state.
 - Group pending requests after the conversation. Pi renders exact native selection options and confirmation labels. Complete bounded Codex/Claude questions use native single/multiple choices, descriptions and custom answers; raw details stay behind disclosure, answers remain independent of the composer and server validation checks the retained request. Legacy requests retain their prompt-answer fallback. Secret fields require a protected-input client; Claude custom multiple answers cannot contain its native comma separator. Preserve reviewability, retry, queue/steer and recovery behavior.
-- Bound displayed pending requests to eight and an 8 KiB encoded page. Show the waiting count and reveal further requests as earlier ones resolve. Oversized requests retain their identity and an unreviewable fallback rather than implying that clipped data can be approved. New services separately negotiate immutable chunked snapshots for complete views larger than a relay frame.
+- Bound displayed pending requests to eight and an 8 KiB encoded page. Show the waiting count and reveal further requests as earlier ones resolve. Oversized requests retain their identity and an unreviewable fallback rather than implying that clipped data can be approved.
 - Keep the composer visible when space permits; scroll the whole document when the dock becomes too short. New output follows the transcript only while the reader is at its bottom. Retain the draft and model/effort choices through ordinary renders.
 
-## Remote snapshot contract
+## Views
 
-- Negotiate snapshot support in the agent catalog; retain the legacy ACTION path for older services. Execute actions once and acknowledge a successful response before loading the resulting view. A failed view fetch must never imply that the action should be repeated.
-- Preserve the actual activity, models, commands, pending inputs, requests and history cursor in one immutable encoded view. Transfer at most 24 KiB per chunk, validate scope/token/total/offset and fence connection, service-generation, selection and disposal changes before publishing it.
-- Bound an individual snapshot to 4 MiB, four stored snapshots and 8 MiB per connection, with 30-second idle and 120-second absolute expiry. Release storage on completion, disconnection and service disposal. Report explicit capacity/expiry/oversize errors without silently trimming view fields.
+- A view is one page of a session (eight items, texts cut to a few KiB, plus models, commands, pending inputs, requests and the history cursor) and comes back whole in the ACTION reply. Execute actions once and acknowledge a successful response before loading the resulting view. A failed view fetch must never imply that the action should be repeated. Fence connection, service-generation, selection and disposal changes before publishing a view.
 - Keep pending requests discoverable above the transcript. Review request scrolls to the request heading on explicit pointer or keyboard activation; it does not move a reader automatically.
 
 ## Incremental transcript history
@@ -39,7 +37,7 @@ The client reading window holds at most 256 activity items and 4 MiB of encoded 
 
 Codex attachment reads one native page of eight items. Older pages are fetched on demand, normalized into an eight-page refetchable cache, with full-message retrieval available while its source is retained. Public cursors preserve the legacy two-part decreasing numeric shape. Native tokens stay in a session/epoch-scoped table retaining the first continuation and newest 127 handles; expired intermediate handles fail explicitly, while forward traversal can continue. Restarting from the beginning reconstructs an expired path. Local Codex live entries are still unbounded; this cache policy does not establish bounded lifetime host memory.
 
-Claude, Pi and AgentKit retain bounded live/replayed activity. Known eviction is labeled; an older replay without that flag does not prove complete native history. Do not imply that unavailable history or expired full-message source has been recovered.
+Claude and Pi retain bounded live/replayed activity. Known eviction is labeled; an older replay without that flag does not prove complete native history. Do not imply that unavailable history or expired full-message source has been recovered.
 
 ## Composer and IDE navigation
 

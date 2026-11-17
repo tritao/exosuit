@@ -2,9 +2,17 @@ package workspace.provider;
 
 import workspace.service.WorkspaceAgentProtocol;
 
-/** Bounded normalized conversation. Cursors are invalidated when old items are evicted. */
-class PiConversation {
+/**
+ * A chat session's conversation as the service keeps it (Claude, Pi): bounded activity items, whole assistant texts in
+ * `AgentContentCache` and the archive, 8-item pages with cursors that an eviction invalidates, and a 6-item preview
+ * saved with the record.
+ */
+class AgentConversation {
+ /** Items kept per session; older ones are dropped and reported as omitted. */
+ public static inline final MAX_ENTRIES:Int = 512;
  static var nextCacheId:Int = 0;
+ /** The provider's name: the title of its replies, and part of their content keys. */
+ final speaker:String;
  final cacheId:Int;
  final archive:Null<AgentResponseArchive>;
  var restoring=true;
@@ -15,7 +23,7 @@ class PiConversation {
  var omitted:Bool = false;
  public function epoch():String return incarnation + "-" + revision;
  public function hasOmitted():Bool return omitted;
- function cacheKey(turn:String,id:String):String return "pi-"+cacheId+":"+turn.length+":"+turn+id;
+ function cacheKey(turn:String,id:String):String return speaker+"-"+cacheId+":"+turn.length+":"+turn+id;
  public function content(turn:String,id:String,token:String,offset:Int):Null<AgentContentChunk> {
   for (entry in entries) if (entry.turn == turn && entry.id == id && entry.kind == "agentMessage" && entry.contentToken == token) {
    var key=cacheKey(turn,id),chunk=AgentContentCache.chunk(key,token,offset);
@@ -25,22 +33,28 @@ class PiConversation {
   return null;
  }
  /**
-  * `saved` is the service's shortened preview of the newest items, or with `whole` the conversation read from Pi's
-  * own session file (`PiTranscript`): whole texts, of which older parts were left out when `partial`.
+  * `saved` is the service's shortened preview of the newest items, or with `whole` the conversation read from the
+  * provider's own record (`AgentTranscript`): whole texts, of which older parts were left out when `partial`.
   */
- public function new(?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive,whole:Bool=false,partial:Bool=false) {
-  cacheId=++nextCacheId;this.archive=archive;omitted=partial;
+ public function new(speaker:String,?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive,whole:Bool=false,partial:Bool=false) {
+  this.speaker=speaker;cacheId=++nextCacheId;this.archive=archive;omitted=partial;
   if (saved != null) for (entry in saved) {
    put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
-   if (whole) { entries[entries.length-1].images=entry.images; continue; }
-   var restored=entries[entries.length-1];restored.truncated=entry.truncated;restored.contentDigest=entry.contentDigest;
+   var restored:Null<AgentActivityItem>=null;
+   for (candidate in entries) if (candidate.id == entry.id && candidate.turn == entry.turn) restored=candidate;
+   if (restored == null) continue;
+   restored.images=entry.images;
+   if (whole) continue;
+   restored.truncated=entry.truncated;restored.contentDigest=entry.contentDigest;
    if(entry.truncated && archive!=null) restored.contentToken=archive.restore(cacheKey(entry.turn,entry.id),restored);
-   entries[entries.length-1].files=retainedFiles(entry,2048);
-   entries[entries.length-1].images=entry.images;
+   restored.files=retainedFiles(entry,2048);
   }
   restoring=false;
  }
- /** Preserve the original tool record; expose a real edit patch as its own activity. */
+ public function attachImages(turn:String,id:String,ids:Array<String>):Void {
+  for(entry in entries) if(entry.turn==turn && entry.id==id) entry.images=[for(imageId in ids) {id:imageId}];
+ }
+ /** Keeps Pi's tool record and shows a real edit patch it reported as an activity of its own. */
  public function toolPatch(id:String, turn:String, output:Dynamic):Void {
   var tool:Null<AgentActivityItem> = null;
   for (entry in entries) if (entry.id == id && entry.turn == turn) tool = entry;
@@ -77,31 +91,31 @@ class PiConversation {
   return result.length == 0 ? null : result;
  }
  public function put(id:String, turn:String, kind:String, title:String, text:String, detail:String, state:String, retainContent:Bool = true):Void {
-  if (id.length > 512 || turn.length > 128) throw "Pi activity identity exceeds bound";
+  if (id == null || id.length == 0 || id.length > 512 || turn.length > 128) return;
   var entry:Null<AgentActivityItem> = null;
   for (e in entries) if (e.id == id && e.turn == turn) entry = e;
   if (entry == null) {
-   entry = {id:id, turn:turn, kind:kind, title:title, text:"", detail:"", state:state, truncated:false};
+   // A tool keeps the name it was called with: its result names no tool.
+   entry = {id:id, turn:turn, kind:kind, title:title.substring(0,256), text:"", detail:"", state:state, truncated:false};
    entries.push(entry);
   }
-  entry.title=title.substring(0,256); entry.kind=kind;
   if(kind=="agentMessage" && (retainContent || state=="inProgress")) entry.contentDigest=null;
   if (kind == "agentMessage" && retainContent) entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),text);
-  entry.text = text.substring(0,4096); entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
+  entry.text = text.substring(0,4096);
+  // Tool results carry no input detail; keep the arguments received at tool_use.
+  entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
   entry.truncated = entry.truncated || title.length > 256 || text.length > 4096 || detail.length > 2048;
   if(!restoring && archive!=null) archive.capture(cacheKey(turn,id),entry);
-  if (entries.length > 128) { entries.shift(); revision++; omitted=true; }
+  if (entries.length > MAX_ENTRIES) { entries.shift(); revision++; omitted=true; }
  }
- public function attachImages(turn:String,id:String,ids:Array<String>):Void {
-  for(entry in entries) if(entry.turn==turn && entry.id==id)
-   entry.images=[for(imageId in ids) {id:imageId}];
- }
+ /** Appends streamed text to a reply (or, with `kind` "reasoning", to its reasoning). */
  public function delta(id:String, turn:String, text:String, kind:String = "agentMessage"):Void {
   var previous = "", existing:Null<AgentActivityItem> = null;
   for (entry in entries) if (entry.id == id && entry.turn == turn) { previous = entry.text; existing=entry; }
-  if (existing == null) { put(id,turn,kind,kind == "reasoning" ? "Reasoning" : "Pi",text,"","inProgress"); return; }
+  var title = kind == "reasoning" ? "Reasoning" : speaker;
+  if (existing == null) { put(id,turn,kind,title,text,"","inProgress"); return; }
   var token = kind == "agentMessage" && existing.contentToken != null ? AgentContentCache.append(cacheKey(turn,id),text) : null;
-  put(id,turn,kind,kind == "reasoning" ? "Reasoning" : "Pi",previous + text,"","inProgress",false);
+  put(id,turn,kind,title,previous + text,"","inProgress",false);
   if (kind == "agentMessage") existing.contentToken=token;
  }
  public function finish(turn:String, state:String):Void {

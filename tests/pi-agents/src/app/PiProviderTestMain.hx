@@ -16,7 +16,7 @@ class PiProviderTestMain {
   var python=Sys.getEnv("EXOSUIT_TEST_PYTHON");if(python==null || python=="") python="python3";
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
-  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
+  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),root);
   // Pi's session file is the whole conversation after a restart (the service keeps a short preview only).
   var transcriptPath=root+"/pi-transcript.jsonl", long=[for(_ in 0...600) "word"].join(" ");
   // Pi records written as raw JSON: a Haxe array of differently shaped objects would not type.
@@ -29,10 +29,10 @@ class PiProviderTestMain {
   require(kinds.join("|")=="userMessage:first question|agentMessage:word word word |tool:contents|userMessage:second question|agentMessage:done",
    "Pi's session file did not give the whole conversation: "+kinds.join("|"));
   require(transcript.items[1].text==long && transcript.items[2].title=="read" && transcript.items[2].detail.indexOf("a.txt")>0,"Pi's session file lost a whole reply or a tool call");
-  var whole=new workspace.provider.PiConversation(transcript.items,null,true,false);
+  var whole=new workspace.provider.AgentConversation("Pi",transcript.items,null,true,false);
   require([for(i in whole.snapshot()) i].length==5,"A Pi conversation read from its session file was not kept whole");
   var pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
-  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
+  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi]), store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   function pump():Void {server.poll();provider.poll();client.poll();Sys.sleep(0.002);}
@@ -130,7 +130,7 @@ class PiProviderTestMain {
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
-  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi]), store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
   require(processes.activeCount()==0,"Persisted Pi session was resumed automatically");
@@ -142,7 +142,7 @@ class PiProviderTestMain {
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
-  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi]), store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
   require(processes.activeCount()==0,"A stopped idle Pi session was started without a message");
@@ -186,10 +186,10 @@ class PiProviderTestMain {
    function(_) throw "Prompt delivered without permission hook",function(e) {require(e.code=="disconnected","Wrong missing-hook error");refused=true;});
   wait(function() return refused);
   // Replay evictions invalidate cursors, and persistence snapshots remain bounded.
-  var c=new workspace.provider.PiConversation();
+  var c=new workspace.provider.AgentConversation("Pi");
   for(i in 0...20) c.put(Std.string(i),"t","agentMessage","Pi","text","","completed");
   var cursor=c.next();
-  for(i in 20...160) c.put(Std.string(i),"t","agentMessage","Pi","text","","completed");
+  for(i in 20...(workspace.provider.AgentConversation.MAX_ENTRIES+40)) c.put(Std.string(i),"t","agentMessage","Pi","text","","completed");
   require(c.offset(cursor)==null && c.snapshot().length==6,"Replay bounds/cursors failed");
   c.put("long-title","t","tool",StringTools.lpad("","x",3000),"text","","completed");
   require(c.snapshot()[5].title.length==256 && c.snapshot()[5].truncated,"Tool title retention was unbounded");

@@ -27,12 +27,12 @@ class NativeSessionNamesTestMain {
     var python=Sys.getEnv("EXOSUIT_TEST_PYTHON");
     if (python==null || python=="") python="python3";
     var child=processes.start(python,[repo+"/tests/native-session-names/fake-codex-names.py",root],root);
-    selected.transport=new CodexTransport(child);selected.proxy=child;selected.phase="ready";
+    selected.transport=new AgentJsonTransport(child,"Codex",6*1024*1024,8*1024*1024);selected.proxy=child;selected.phase="ready";
     var session=selected.sessions.get(kind);if(session==null) throw "missing seeded Codex session";
     session.reconnectBlocked=true;selected.names(session).nextRead=clock()+100000;
     codex=selected;provider=selected;
    } else provider=new ClaudeProvider(directories,function() return [],processes,clock,store,"exosuit-must-not-launch-claude");
-   var service=new WorkspaceAgentService("w","owner",directories.root,[provider],store);
+   var service=new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([provider]),store);
    var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
    service.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
    function pump():Void {server.poll();service.poll();client.poll();Sys.sleep(0.002);}

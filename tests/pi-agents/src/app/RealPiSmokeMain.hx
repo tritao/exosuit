@@ -16,9 +16,9 @@ class RealPiSmokeMain {
   var args=Sys.args(),root=args[0],binary=args[1],clock=function() return Sys.time()*1000;
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
-  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
+  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),root);
   function pi():PiProvider return new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,binary);
-  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi()], store);
+  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi()]), store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var value:Null<AgentView>=null,code="";
@@ -62,7 +62,7 @@ class RealPiSmokeMain {
   // Rebuild the provider as a daemon restart, retaining only the SQLite state.
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
-  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi()], store);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi()]), store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   require(processes.activeCount()==0,"Pi resumed without explicit connection");
   action("connect");until("idle");require(view().record.thread==session,"Real Pi resume changed native identity");

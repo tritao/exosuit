@@ -86,7 +86,7 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 	}
 	var models:Null<Array<AgentModel>>;
 	var modelsNext:Null<String>;
-	var transport:Null<CodexTransport>;
+	var transport:Null<AgentJsonTransport>;
 	var proxy:Null<OwnedProcess>;
 	var starter:Null<OwnedProcess>;
 	var phase = "stopped";
@@ -286,6 +286,13 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 		return base * (0.8 + Math.random() * 0.4);
 	}
 
+	/**
+	 * A client read a saved session or asked Codex for something: from then on Codex is started, and started again after
+	 * a failure, while saved sessions wait to be reconnected. Before that a service with saved Codex sessions starts no
+	 * process for them.
+	 */
+	var opened:Bool = false;
+
 	function hasRecoverableSessions():Bool {
 		for (s in sessions)
 			if (s.record.thread != "" && !s.attached && !s.reconnectBlocked) return true;
@@ -348,6 +355,7 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 	}
 
 	function start(manual:Bool = false):Void {
+		opened = true;
 		if (manual) startupBlocked = false;
 		if ((phase != "stopped" && phase != "failed") || startupBlocked)
 			return;
@@ -403,7 +411,7 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 						if (bridge == null) throw "Codex WebSocket proxy bridge is not configured";
 						var python = Sys.systemName() == "Windows" ? "python" : "python3";
 						proxy = processes.start(python, [bridge, executable].concat(commandPrefix), directories.root);
-						var connection = new CodexTransport(proxy);
+						var connection = new AgentJsonTransport(proxy, "Codex", 6 * 1024 * 1024, 8 * 1024 * 1024);
 						transport = connection;
 						phase = "initializing";
 						status = "Initializing Codex";
@@ -441,7 +449,7 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 			if (current.failure != null)
 				disconnect(current.failure);
 		}
-		if ((phase == "stopped" || phase == "failed") && !startupBlocked && hasRecoverableSessions() && clock() >= retryAt)
+		if (opened && (phase == "stopped" || phase == "failed") && !startupBlocked && hasRecoverableSessions() && clock() >= retryAt)
 			start();
 		if (phase == "ready") {
 			if(!storageFailed && !nativeNamingUnsupported) for(s in sessions) if(names(s).poll()) break;
@@ -1075,6 +1083,8 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 			return;
 		}
 		if (q.action == "read") {
+			// The first read of a saved session starts Codex, which then reconnects every saved session.
+			if (!s.attached) opened = true;
 			if(q.after != null && CodexHistoryPages.isNative(q.after)) {nativeHistory(s,q.after,ctx);return;}
 			var before:Null<Int> = null;
 			if (q.after != null) {

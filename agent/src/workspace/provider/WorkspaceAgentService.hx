@@ -5,64 +5,105 @@ import workspace.service.WorkspaceAgents;
 import workspace.service.WorkspaceAgentPersistence;
 import workspace.service.WorkspaceAgentProtocol;
 
-/** Workspace authorization, provider routing and resource limits; adapters own only their protocols. */
+/**
+ * Workspace authorization, provider routing and resource limits; adapters own only their protocols.
+ *
+ * Providers are built when first needed: a session of theirs is created, listed or acted on, or their models or
+ * sessions are asked for. A workspace whose agents are all terminals builds none, and the image staging folder is made
+ * only for the first image.
+ */
 @:access(haxeon.rpc.RpcConnection)
 class WorkspaceAgentService implements WorkspaceAgents {
  final workspace:String;
  final instance:String;
  final root:String;
- final providers:Array<LocalAgentProvider>;
+ final factories:Array<AgentProviderFactory>;
+ /** Built providers, in the order of `factories`. */
+ final providers:Array<LocalAgentProvider> = [];
  final registry:Map<String,LocalAgentProvider> = [];
- final images:AgentImageStaging;
- final snapshots:Array<{connection:RpcConnection,cache:AgentSnapshotCache}> = [];
+ /** The provider of each saved session, read once at start. */
+ final saved:Map<String,String> = [];
+ final imageStorageIdentity:Null<String>;
+ var staging:Null<AgentImageStaging>;
  public var status(get,never):String;
  function get_status():String return [for(provider in providers) provider.summary()].join("; ");
 
- public function new(workspace:String,instance:String,root:String,providers:Array<LocalAgentProvider>,?persistence:WorkspaceAgentPersistence, ?imageStorageIdentity:String) {
-  this.workspace=workspace;this.instance=instance;this.root=root;this.providers=providers.copy();
-  var tempBase = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : Sys.getEnv("TMPDIR");
-  if (tempBase == null && Sys.systemName() != "Windows") tempBase = "/tmp";
-  var stageLock:Null<app.AgentManagerNative.AgentLockHandle> = null;
-  if (imageStorageIdentity == null || imageStorageIdentity == "") tempBase = null;
-  images = new AgentImageStaging(tempBase, root + "\n" + imageStorageIdentity, app.AgentManagerNative.randomToken, Sys.time,
-   app.AgentManagerNative.prepareDirectory, app.AgentManagerNative.privateFile,
-   function(path) { stageLock = app.AgentManagerNative.acquireLock(path); return stageLock != null; },
-   function() { if (stageLock != null) { app.AgentManagerNative.releaseLock(stageLock); stageLock = null; } });
-  var identities:Map<String,Bool>=[];
-  for(provider in providers) {
-   var kind=provider.driverKind();
-   if(kind == null || kind == "" || registry.exists(kind)) throw "Duplicate or invalid agent provider";
-   registry.set(kind,provider);
-   if (kind == "codex" && Std.isOfType(provider, CodexProvider)) {
-    var codex:CodexProvider = cast provider;
-    codex.imageUploadAvailable = images.supported();
-    codex.imageIdentity = images.archive;
-   }
-   if(kind=="pi" && Std.isOfType(provider,PiProvider)) {
-    var pi:PiProvider=cast provider;
-    pi.imageUploadAvailable=images.supported();
-    pi.imagePrepare=function(session,ids,turn,item) return images.piImages(session,ids,turn,item);
-    pi.imageHold=function(session,thread,turn,item,ids) return images.holdInput(session,thread,turn,item,ids);
-   }
-   if(kind=="claude" && Std.isOfType(provider,ClaudeProvider)) {
-    var claude:ClaudeProvider=cast provider;
-    claude.imageUploadAvailable=images.supported();
-    claude.imagePrepare=function(session,ids,turn,item) return images.piImages(session,ids,turn,item);
-    claude.imageHold=function(session,thread,turn,item,ids) return images.holdInput(session,thread,turn,item,ids);
-   }
-   for(record in provider.records()) {
-    if(identities.exists(record.id)) throw "Agent identity belongs to multiple providers";
-    identities.set(record.id,true);
-   }
+ public function new(workspace:String,instance:String,root:String,factories:Array<AgentProviderFactory>,?persistence:WorkspaceAgentPersistence, ?imageStorageIdentity:String) {
+  this.workspace=workspace;this.instance=instance;this.root=root;this.factories=factories.copy();this.imageStorageIdentity=imageStorageIdentity;
+  var kinds:Map<String,Bool>=[];
+  for(factory in factories) {
+   if(factory.kind == null || factory.kind == "" || kinds.exists(factory.kind)) throw "Duplicate or invalid agent provider";
+   kinds.set(factory.kind,true);
   }
+  // A record of a provider this build does not have (the built-in agent, removed 2026-11-15) is left in the store
+  // unread: the service starts without it.
   if(persistence != null) for(record in persistence.loadAgents()) {
    var kind=record.provider == null ? "codex" : record.provider;
-   if(!registry.exists(kind)) throw "Unknown persisted agent provider: " + kind;
+   if(!kinds.exists(kind)) Sys.stderr().writeString("Agent " + record.id + " skipped: no provider \"" + kind + "\" in this build\n");
+   else saved.set(record.id,kind);
+  }
+  for(factory in factories) if(factory.existing != null) provider(factory.kind);
+ }
+ /** The provider of `kind`, built now if it was not; null for a kind this service does not have. */
+ function provider(kind:String):Null<LocalAgentProvider> {
+  var built=registry.get(kind);
+  if(built != null) return built;
+  for(factory in factories) if(factory.kind == kind) {
+   built=factory.build();
+   registry.set(kind,built);
+   providers.resize(0);
+   for(f in factories) { var p=registry.get(f.kind); if(p != null) providers.push(p); }
+   attachImages(built);
+   return built;
+  }
+  return null;
+ }
+ /** The image staging folder, made (and locked) when an image is first uploaded, sent or shown. */
+ function images():AgentImageStaging {
+  var existing=staging;
+  if(existing != null) return existing;
+  var stageLock:Null<app.AgentNative.AgentLockHandle> = null;
+  var made = new AgentImageStaging(imageBase(), root + "\n" + imageStorageIdentity, app.AgentNative.randomToken, Sys.time,
+   app.AgentNative.prepareDirectory, app.AgentNative.privateFile,
+   function(path) { stageLock = app.AgentNative.acquireLock(path); return stageLock != null; },
+   function() { if (stageLock != null) { app.AgentNative.releaseLock(stageLock); stageLock = null; } });
+  staging=made;
+  return made;
+ }
+ /** Where images are staged; null when this service stages none (no storage identity, no temporary folder). */
+ function imageBase():Null<String> {
+  if (imageStorageIdentity == null || imageStorageIdentity == "") return null;
+  var tempBase = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : Sys.getEnv("TMPDIR");
+  return tempBase == null && Sys.systemName() != "Windows" ? "/tmp" : tempBase;
+ }
+ function attachImages(provider:LocalAgentProvider):Void {
+  var available=imageBase() != null;
+  if (Std.isOfType(provider, CodexProvider)) {
+   var codex:CodexProvider = cast provider;
+   codex.imageUploadAvailable = available;
+   codex.imageIdentity = function(session,turn,item,path) return images().archive(session,turn,item,path);
+  }
+  if(Std.isOfType(provider,PiProvider)) {
+   var pi:PiProvider=cast provider;
+   pi.imageUploadAvailable=available;
+   pi.imagePrepare=function(session,ids,turn,item) return images().piImages(session,ids,turn,item);
+   pi.imageHold=function(session,thread,turn,item,ids) return images().holdInput(session,thread,turn,item,ids);
+  }
+  if(Std.isOfType(provider,ClaudeProvider)) {
+   var claude:ClaudeProvider=cast provider;
+   claude.imageUploadAvailable=available;
+   claude.imagePrepare=function(session,ids,turn,item) return images().piImages(session,ids,turn,item);
+   claude.imageHold=function(session,thread,turn,item,ids) return images().holdInput(session,thread,turn,item,ids);
   }
  }
- function owner(id:String):Null<LocalAgentProvider> {
+ function owner(id:Null<String>):Null<LocalAgentProvider> {
+  // A request without an id names no session (Map.get(null) would crash natively).
+  if(id == null) return null;
   for(provider in providers) if(provider.owns(id)) return provider;
-  return null;
+  var kind=saved.get(id);
+  if(kind == null || registry.exists(kind)) return null;
+  var built=provider(kind);
+  return built != null && built.owns(id) ? built : null;
  }
  public function requestCounts():Map<String,Int> {
   var counts = new Map<String,Int>();
@@ -72,14 +113,14 @@ class WorkspaceAgentService implements WorkspaceAgents {
   }
   return counts;
  }
+ /** Every session; a provider with saved sessions is built to list them. */
  public function records():Array<AgentRecord> {
+  for(kind in saved) if(!registry.exists(kind)) provider(kind);
   var found:Array<AgentRecord>=[];
   for(provider in providers) found=found.concat(provider.records());
   return found;
  }
  public function bind(connection:RpcConnection,capabilities:Array<String>):Void {
-  var cache=new AgentSnapshotCache(root,Sys.time,app.AgentManagerNative.randomToken);
-  snapshots.push({connection:connection,cache:cache});
   function allowed(w:String,i:String,control:Bool):Bool return w == workspace && i == instance
    && capabilities.contains(WorkspaceAgentProtocol.READ) && (!control || capabilities.contains(WorkspaceAgentProtocol.CONTROL));
   connection.register(WorkspaceAgentProtocol.LIST,function(q,ctx) {
@@ -90,7 +131,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    var more=found.length>6;
    if(more) found.resize(6);
    ctx.respond({instance:instance,root:root,records:found,status:status,
-    canMove:true,canRename:true,supportsSnapshots:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
+    canMove:true,canRename:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(f in factories) f.kind],next:more ? found[found.length-1].id : null});
   });
   connection.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Agent creation denied",ambiguous:false});return;}
@@ -98,7 +139,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
     ctx.fail({code:"invalid_request",message:"Invalid agent identity",ambiguous:false});return;
    }
    var kind=q.provider == null ? "codex" : q.provider;
-   var provider=registry.get(kind);
+   var provider=provider(kind);
    if(provider == null) {ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;}
    var existing=owner(q.id);
    if(existing != null && existing != provider) {ctx.fail({code:"conflict",message:"Agent id belongs to another provider",ambiguous:false});return;}
@@ -119,41 +160,15 @@ class WorkspaceAgentService implements WorkspaceAgents {
      provider.action(q,ctx);return;
     }
     if (q.action != "prompt" || !Std.isOfType(provider, CodexProvider)) {ctx.fail({code:"unsupported_operation",message:"This provider does not support image attachments",ambiguous:false});return;}
-    var paths = images.resolve(q.id, q.imageIds);
+    var paths = images().resolve(q.id, q.imageIds);
     if (paths == null) {ctx.fail({code:"image_unavailable",message:"An image expired or is unavailable. Remove it and upload it again.",ambiguous:false});return;}
-    (cast provider:CodexProvider).actionWithImages(q,ctx,paths,function(thread) return images.pin(q.id,thread,q.imageIds)); return;
+    (cast provider:CodexProvider).actionWithImages(q,ctx,paths,function(thread) return images().pin(q.id,thread,q.imageIds)); return;
    }
    provider.action(q,ctx);
   }
-  connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
-   var adapter=new AgentSnapshotContext(cast ctx,function(value) {
-    var encoded:Null<haxe.io.Bytes> = null;
-    try encoded=haxeon.wire.MessagePack.encode(value) catch (_:Dynamic) {}
-    if(encoded == null || encoded.length > connection.maxMessageBytes - 128)
-     return ctx.fail({code:"snapshot_too_large",message:q.action == "read"
-      ? "Agent view exceeds this client's transport limit. Update the client and refresh the session."
-      : "Action completed, but its view exceeds this client's transport limit. Update the client and refresh the session.",ambiguous:q.action != "read"});
-    return ctx.respond(value);
-   });
-   action(q,adapter);
-  });
-  connection.register(WorkspaceAgentProtocol.ACTION_SNAPSHOT,function(q,ctx) {
-   var adapter=new AgentSnapshotContext(cast ctx,function(value) {
-    var bytes:Null<haxe.io.Bytes> = null;
-    try bytes=haxeon.wire.MessagePack.encode(value) catch (_:Dynamic) {}
-    var reply:AgentSnapshotReply;
-    try reply=cache.create(q.id,bytes,value.inputToken) catch (_:Dynamic)
-     reply=cache.failed(q.id,value.inputToken,"Snapshot could not be prepared");
-    return ctx.respond(reply);
-   });
-   action(q,adapter);
-  });
-  connection.register(WorkspaceAgentProtocol.SNAPSHOT_READ,function(q,ctx) {
-   if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Snapshot denied",ambiguous:false});return;}
-   var reply=q.session == null || q.token == null || q.token.length > 128 ? null : cache.read(q.session,q.token,q.offset);
-   if(reply == null) ctx.fail({code:"snapshot_unavailable",message:"Snapshot expired or is unavailable",ambiguous:false});
-   else ctx.respond(reply);
-  });
+  // A view is one page of a session (8 items, each cut to a few KiB). Over a forwarded stream (about 64 KiB) a page of
+  // long or non-ASCII texts can still be too large: `fitted` cuts its texts further, so one reply always carries it.
+  connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) action(q,new FittedViewContext(ctx,function(view) return fitted(view,connection.maxMessageBytes - 1024))));
   connection.register(WorkspaceAgentProtocol.MESSAGE_CONTENT,function(q,ctx) {
    if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Message content denied",ambiguous:false});return;}
    if (q.session == null || q.session.length == 0 || q.session.length > 128 || q.turn == null || q.item == null || q.token == null
@@ -173,7 +188,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Image upload denied",ambiguous:false});return;}
    var provider = owner(q.session);
    if (provider == null || (!Std.isOfType(provider,CodexProvider) && !Std.isOfType(provider,PiProvider) && !Std.isOfType(provider,ClaudeProvider))) {ctx.fail({code:"unsupported_operation",message:"Image upload is unavailable for this session",ambiguous:false});return;}
-   try ctx.respond(images.process(q)) catch (error:Dynamic) {
+   try ctx.respond(images().process(q)) catch (error:Dynamic) {
     var message = Std.string(error);
     var safe = ["Image staging requires recovery; check the workspace service", "Invalid session", "Image must be at most 2 MiB",
      "Image staging quota reached; wait for abandoned uploads to expire or reconcile the session", "Could not create image identity",
@@ -188,28 +203,46 @@ class WorkspaceAgentService implements WorkspaceAgents {
        || q.turn.length > 128 || q.item.length > 128 || q.token.length > 256 || q.offset < 0 || owner(q.session) == null) {
     ctx.fail({code:"image_unavailable",message:"Sent image is unavailable",ambiguous:false});return;
    }
-   var chunk=images.readArchive(q.session,q.turn,q.item,q.token,q.offset);
+   var chunk=images().readArchive(q.session,q.turn,q.item,q.token,q.offset);
    if (chunk == null) ctx.fail({code:"image_unavailable",message:"Sent image is no longer available",ambiguous:false});
    else ctx.respond(chunk);
   });
   connection.register(WorkspaceAgentProtocol.MODELS,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Model catalog denied",ambiguous:false});return;}
-   var provider=registry.get(q.provider == null ? "codex" : q.provider);
+   var provider=provider(q.provider == null ? "codex" : q.provider);
    if(provider == null) {ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;}
    provider.modelCatalog(q,ctx);
   });
   connection.register(WorkspaceAgentProtocol.DISCOVER,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Session discovery denied",ambiguous:false});return;}
-   var provider=registry.get(q.provider == null ? "codex" : q.provider);
+   var provider=provider(q.provider == null ? "codex" : q.provider);
    if(provider == null) {ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;}
    provider.discover(q,ctx);
   });
  }
+ /**
+  `view` with its items' texts cut (halving their length each round) until its reply fits in `bytes`; a cut item is
+  marked truncated, and MESSAGE_CONTENT reads it whole. The provider's own items are not changed.
+ */
+ static function fitted(view:AgentView,bytes:Int):AgentView {
+  var items=view.items;
+  if(items == null || WorkspaceAgentProtocol.ACTION.encodeResponse(view).length <= bytes) return view;
+  var limit=2048;
+  while(limit >= 32) {
+   view.items=[for(item in items) item.text.length <= limit && item.detail.length <= limit ? item : {
+    id:item.id,turn:item.turn,kind:item.kind,title:item.title,text:item.text.substr(0,limit),detail:item.detail.substr(0,limit),
+    state:item.state,truncated:true,files:item.files,contentToken:item.contentToken,images:item.images,imagePath:item.imagePath,
+    contentDigest:item.contentDigest
+   }];
+   if(WorkspaceAgentProtocol.ACTION.encodeResponse(view).length <= bytes) return view;
+   limit=Std.int(limit/2);
+  }
+  return view;
+ }
  public function poll():Void {
-  var index=snapshots.length;
-  while(index>0) {index--;var entry=snapshots[index];if(!entry.connection.isOpen()) {entry.cache.clear();snapshots.splice(index,1);} else entry.cache.clean();}
   for(p in providers) p.poll();
-  images.clean(function(id) return owner(id) != null, function(id, thread) {
+  var made=staging;
+  if(made != null) made.clean(function(id) return owner(id) != null, function(id, thread) {
    var provider=owner(id);
    if (provider == null) return true; // An orphaned pinned lease has no proof that the native turn finished.
    if(Std.isOfType(provider,PiProvider) && (cast provider:PiProvider).hasHeldImages(id)) return true;
@@ -229,5 +262,20 @@ class WorkspaceAgentService implements WorkspaceAgents {
  public function updateActivityCount():Int {
   var count=0;for(p in providers) count+=p.updateActivityCount();return count;
  }
- public function dispose():Void {for(entry in snapshots) entry.cache.clear();snapshots.resize(0);for(p in providers) p.dispose(); images.dispose();}
+ public function dispose():Void {for(p in providers) p.dispose(); var made=staging; if(made != null) made.dispose();}
+}
+
+/** Hands the view a provider answers ACTION with through `fit` before it is sent; cancellation and failure pass through. */
+private class FittedViewContext extends haxeon.rpc.RpcContext<AgentView> {
+ final source:haxeon.rpc.RpcContext<AgentView>;
+ final fit:AgentView->AgentView;
+ public function new(source:haxeon.rpc.RpcContext<AgentView>,fit:AgentView->AgentView) {
+  super(null,null,null);
+  this.source=source;
+  this.fit=fit;
+ }
+ override public function deadline():Float return source.deadline();
+ override public function isCancelled():Bool return source.isCancelled();
+ override public function respond(value:AgentView):Bool return source.respond(fit(value));
+ override public function fail(error:haxeon.rpc.RpcError):Bool return source.fail(error);
 }

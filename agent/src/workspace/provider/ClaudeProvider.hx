@@ -24,7 +24,7 @@ private typedef ClaudeSession = {
  var ready:Bool;
  var busy:Bool;
  var error:Null<String>;
- var conversation:ClaudeConversation;
+ var conversation:AgentConversation;
  var approvals:Map<String,ClaudeApproval>;
  var models:Array<AgentModel>;
  var message:String;
@@ -104,7 +104,7 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
  }
  function inside(path:String):Bool return WorkspaceDirectories.persisted(path);
  function session(r:AgentRecord):ClaudeSession return {
-  record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay,new AgentResponseArchive("claude",r.id,persistence)),
+  record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new AgentConversation("Claude",r.replay,new AgentResponseArchive("claude",r.id,persistence)),
   approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false,
   imported:false,queued:null,fresh:false,broken:null
  };
@@ -118,10 +118,10 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
   try {
    var path=ClaudeTranscript.locate(s.record.thread,s.record.cwd);
    if (path == null) return;
-   var history=ClaudeTranscript.read(path,ClaudeConversation.MAX_ENTRIES);
+   var history=ClaudeTranscript.read(path,AgentConversation.MAX_ENTRIES);
    if (history == null || history.items.length == 0) return;
-   var items=ClaudeTranscript.merge(history.items,s.conversation.snapshot());
-   s.conversation=new ClaudeConversation(items,new AgentResponseArchive("claude",s.record.id,persistence),true,history.omitted);
+   var items=AgentTranscript.merge(history.items,s.conversation.snapshot());
+   s.conversation=new AgentConversation("Claude",items,new AgentResponseArchive("claude",s.record.id,persistence),true,history.omitted);
   } catch (_:Dynamic) {}
  }
  function save(s:ClaudeSession):Void {

@@ -5,7 +5,7 @@ Owns only the proxy child. No daemon lifetime or inference policy is changed.
 """
 import base64,hashlib,json,os,queue,selectors,struct,subprocess,sys,threading,time,signal
 
-# Keep these byte limits in sync with CodexTransport. Each queue is bounded;
+# Keep these byte limits in sync with the Codex AgentJsonTransport in CodexProvider. Each queue is bounded;
 # a complete maximum-sized message and its WebSocket framing fit at once.
 LIMIT=6*1024*1024
 QUEUE=8*1024*1024

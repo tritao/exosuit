@@ -24,20 +24,27 @@ class TerminalProfile {
         return new TerminalProfile(path, [], cwd);
     }
 
-    /**
-     * Interactive CLI, without a command string injected into a shell. `extra` comes after the program (and its script
-     * override): the provider's own arguments, such as the conversation to resume. Each must be a plain word (letters,
-     * digits, `-`) or an absolute path of plain characters, because a Windows command shim passes them through the command
-     * processor.
-     */
-    /** An absolute path of plain characters (Pi's session file), which a command shim passes through unchanged. */
-    static function sessionFile(argument:String):Bool
+    /** An absolute path of plain characters (a settings or extension file), which a command shim passes through unchanged. */
+    static function plainPath(argument:String):Bool
         return argument.length <= 1024 && argument.indexOf("..") < 0
             && ~/^([A-Za-z]:[\\\/]|\/)[A-Za-z0-9 _.\\\/:-]+$/.match(argument);
 
+    /** A setting whose value is a list of literal strings of plain characters (Codex `notify=['program','path']`): no `"`. */
+    static function plainList(argument:String):Bool
+        return argument.length <= 2048 && argument.indexOf("..") < 0
+            && ~/^[a-z_]{1,64}=\['[A-Za-z0-9 _.\\\/:-]*'(,'[A-Za-z0-9 _.\\\/:-]*')*\]$/.match(argument);
+
+    /**
+     * Interactive CLI, without a command string injected into a shell. `extra` comes after the program (and its script
+     * override): the provider's own arguments, such as the conversation to resume. Each must be a plain word (letters,
+     * digits, `.`, `_`, `-`), an absolute path of plain characters or a list of such, because a Windows command shim
+     * passes them through the command processor.
+     */
     public static function agent(provider:String, cwd:String, ?extra:Array<String>):TerminalProfile {
         if (extra == null) extra = [];
-        for (argument in extra) if (!~/^[A-Za-z0-9-]{1,64}$/.match(argument) && !sessionFile(argument)) throw "Invalid terminal agent argument";
+        for (argument in extra)
+            if (!~/^[A-Za-z0-9-][A-Za-z0-9._-]{0,127}$/.match(argument) && !plainPath(argument) && !plainList(argument))
+                throw "Invalid terminal agent argument";
         if (["codex", "claude", "pi"].indexOf(provider) < 0) throw "Unsupported terminal agent provider";
         var overrideName = "EXOSUIT_" + provider.toUpperCase() + "_BIN";
         var configured = Sys.getEnv(overrideName);

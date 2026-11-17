@@ -66,7 +66,7 @@ class SessionProjectionTestMain {
     conversation.put("turn", {id:"many", type:"fileChange", changes:many}, true);
     var manyFiles:Array<AgentFileChange> = cast conversation.items()[2].files;
     require(manyFiles.length == 8 && conversation.items()[2].truncated, "Metadata is unbounded");
-    var pi = new workspace.provider.PiConversation();
+    var pi = new workspace.provider.AgentConversation("Pi");
     var arguments = '{"path":"src/Pi.hx","oldText":"old","newText":"new"}';
     pi.put("edit","t","tool","edit","",arguments,"inProgress");
     pi.put("edit","t","tool","edit","Successfully replaced text","","completed");
@@ -90,11 +90,11 @@ class SessionProjectionTestMain {
     var retained = pi.page()[1];
     require(retained.detail.length == 2048 && retained.truncated && retained.files[0].truncated,
       "Pi patch retention exceeded its bound or hid partial status");
-    var restoredPi = new workspace.provider.PiConversation(pi.snapshot());
+    var restoredPi = new workspace.provider.AgentConversation("Pi",pi.snapshot());
     var restoredPatch = restoredPi.page()[1];
     require(restoredPatch.files[0].path == "src/Pi.hx" && restoredPatch.files[0].length <= restoredPatch.detail.length
       && restoredPatch.files[0].truncated,"Pi restart lost bounded patch metadata");
-    var claude = new workspace.provider.ClaudeConversation();
+    var claude = new workspace.provider.AgentConversation("Claude");
     claude.put("tool","t","tool","Edit","",arguments,"inProgress");
     claude.put("tool","t","tool","Tool","Edit succeeded","","completed");
     require(claude.page()[0].title == "Edit" && claude.page()[0].detail == arguments && claude.page()[0].text == "Edit succeeded",
@@ -141,7 +141,7 @@ class SessionProjectionTestMain {
     var partial = conversation.content("content-turn", "oversize", big.contentToken, 0);
     require(partial != null && partial.partial && partial.total == 256*1024, "Large content did not report bounded partial snapshot");
     var textBlock="é"; for (_ in 0...13) textBlock+=textBlock;
-    var streamedClaude=new workspace.provider.ClaudeConversation();
+    var streamedClaude=new workspace.provider.AgentConversation("Claude");
     streamedClaude.delta("reply","ct",textBlock);
     var cItem=streamedClaude.page()[0], cOld=cItem.contentToken;
     streamedClaude.delta("reply","ct"," tail"); streamedClaude.finish("ct","completed");
@@ -152,14 +152,14 @@ class SessionProjectionTestMain {
     require(cChunk != null && !cChunk.partial && cChunk.bytes.toString() == textBlock+" tail", "Claude lost UTF-8 streamed source");
     var savedClaude=streamedClaude.snapshot();
     require(MessagePack.encode(savedClaude).length <= 6144 && savedClaude[0].contentToken == null, "Claude persisted an ephemeral content token");
-    var replayClaude=new workspace.provider.ClaudeConversation(savedClaude), cReplay=replayClaude.page()[0];
+    var replayClaude=new workspace.provider.AgentConversation("Claude",savedClaude), cReplay=replayClaude.page()[0];
     require(cReplay.truncated && cReplay.contentToken == null, "Claude restored a truncated snippet as full content");
     replayClaude.delta("reply","ct","later"); cReplay=replayClaude.page()[0];
     require(cReplay.contentToken == null, "Claude invented full content when appending to a restored snippet");
     replayClaude.put("reply","ct","agentMessage","Claude",textBlock+" authoritative","","completed");
     cReplay=replayClaude.page()[0]; cChunk=replayClaude.content("ct","reply",cReplay.contentToken,0);
     require(cChunk != null && cChunk.bytes.toString() == textBlock+" authoritative", "Claude authoritative completion did not restore full content");
-    var streamedPi=new workspace.provider.PiConversation();
+    var streamedPi=new workspace.provider.AgentConversation("Pi");
     streamedPi.delta("reply","pt",textBlock);
     var pItem=streamedPi.page()[0], pOld=pItem.contentToken;
     streamedPi.delta("reply","pt"," tail"); streamedPi.finish("pt","completed");
@@ -170,7 +170,7 @@ class SessionProjectionTestMain {
     require(pChunk != null && !pChunk.partial && pChunk.bytes.toString() == textBlock+" tail", "Pi lost UTF-8 streamed source");
     var savedPi=streamedPi.snapshot();
     require(MessagePack.encode(savedPi).length <= 6144 && savedPi[0].contentToken == null, "Pi persisted an ephemeral content token");
-    var replayPi=new workspace.provider.PiConversation(savedPi), pReplay=replayPi.page()[0];
+    var replayPi=new workspace.provider.AgentConversation("Pi",savedPi), pReplay=replayPi.page()[0];
     require(pReplay.truncated && pReplay.contentToken == null, "Pi restored a truncated snippet as full content");
     replayPi.delta("reply","pt","later"); pReplay=replayPi.page()[0];
     require(pReplay.contentToken == null, "Pi invented full content when appending to a restored snippet");

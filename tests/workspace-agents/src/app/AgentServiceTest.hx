@@ -42,7 +42,7 @@ class AgentServiceTest {
   require(fallback.requests.length==1 && fallback.requests[0].id=="huge" && !fallback.requests[0].reviewable
    && fallback.requests[0].options==null && fallback.omitted==0,"Oversized request lost its safe decline path");
   var alpha=new MessageFixtureProvider("alpha",31),beta=new FixtureProvider("beta",1);
-  var service=new WorkspaceAgentService("w","owner","/work",[alpha,beta]);
+  var service=new WorkspaceAgentService("w","owner","/work",workspace.provider.AgentProviderFactory.built([alpha,beta]));
   var clock=function() return Sys.time()*1000;
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   service.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
@@ -61,7 +61,7 @@ class AgentServiceTest {
   server.poll();client.poll();
   require(catalog!=null && catalog.records.length==6 && catalog.next!=null,"Combined catalog pagination failed");
   var duplicate=false;
-  try new WorkspaceAgentService("w","owner","/work",[alpha,alpha]) catch(_:Dynamic) duplicate=true;
+  try new WorkspaceAgentService("w","owner","/work",workspace.provider.AgentProviderFactory.built([alpha,alpha])) catch(_:Dynamic) duplicate=true;
   require(duplicate,"Duplicate provider registration was accepted");
   var roPair=MemoryTransport.pair(),ro=new RpcConnection(roPair.client,clock),roServer=new RpcConnection(roPair.server,clock),denied=false;
   service.bind(roServer,[WorkspaceAgentProtocol.READ]);

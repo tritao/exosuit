@@ -29,7 +29,7 @@ class AgentMoveTest {
     case "claude": new ClaudeProvider(directories,function() return groups,processes,clock,store);
     default: new PiProvider(directories,function() return groups,processes,clock,directories.root,store);
    };
-   var service = new WorkspaceAgentService("w","owner",directories.root,[make()],store);
+   var service = new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([make()]),store);
    var pair = MemoryTransport.pair();
    var client = new RpcConnection(pair.client,clock), server = new RpcConnection(pair.server,clock);
    function bind(control:Bool):Void {
@@ -65,7 +65,7 @@ class AgentMoveTest {
    move("one","one");require(code=="conflict",kind+" accepted a stale source");
    move("two","missing");require(code=="unknown_group",kind+" accepted missing destination");
    service.dispose();
-   service = new WorkspaceAgentService("w","owner",directories.root,[make()],store);
+   service = new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([make()]),store);
    bind(false);
    move("two","one");require(code=="unauthorized" && store.record.group=="two",kind+" allowed read-only move");
    rename("Plan α","Denied");require(code=="unauthorized",kind+" allowed read-only rename");
@@ -86,14 +86,14 @@ class AgentMoveTest {
    store.fail=true;action("move","one","one",9);
    require(code=="storage_unavailable" && store.record.order==3,kind+" kept an order it could not save");
    store.fail=false;service.dispose();
-   service=new WorkspaceAgentService("w","owner",directories.root,[make()],store);bind(true);
+   service=new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([make()]),store);bind(true);
    var listed:Null<AgentCatalog>=null;
    client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,function(catalog) listed=catalog,function(error) throw error.message);
    server.poll();client.poll();
    require(listed != null && listed.records.length==1 && listed.records[0].order==3,kind+" lost its position across restart");
    store.fail=true;move("one","two");require(code=="storage_unavailable" && store.record.group=="one",kind+" accepted failed storage");
    store.fail=false;service.dispose();
-   service=new WorkspaceAgentService("w","owner",directories.root,[make()],store);bind(true);
+   service=new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([make()]),store);bind(true);
    store.fail=true;rename("Plan α","Unsaved");
    require(code=="storage_unavailable" && store.record.name=="Plan α",kind+" accepted failed rename persistence");
    client.close();server.close();service.dispose();processes.shutdown();

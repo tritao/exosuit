@@ -29,7 +29,7 @@ private typedef PiSession = {
  var policyReady:Bool;
  var busy:Bool;
  var error:Null<String>;
- var conversation:PiConversation;
+ var conversation:AgentConversation;
  var dialogs:Map<String,PiDialog>;
  var models:Array<AgentModel>;
  var commands:Null<Array<AgentCommand>>;
@@ -115,7 +115,7 @@ class PiProvider implements AgentMessageSource {
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
  function inside(v:String):Bool return WorkspaceDirectories.persisted(v);
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
-  conversation:new PiConversation(r.replay,new AgentResponseArchive("pi",r.id,persistence)),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
+  conversation:new AgentConversation("Pi",r.replay,new AgentResponseArchive("pi",r.id,persistence)),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
   settling:false,currentModel:null,currentEffort:null,broken:null,resumePrompt:null,imported:false};
  /**
   * Replaces the shortened preview with the conversation Pi itself recorded in the session file, once per session and
@@ -126,10 +126,10 @@ class PiProvider implements AgentMessageSource {
   s.imported=true;
   try {
    if(s.record.thread == "" || !FileSystem.exists(s.record.thread)) return;
-   var history=PiTranscript.read(s.record.thread,ClaudeConversation.MAX_ENTRIES);
+   var history=PiTranscript.read(s.record.thread,AgentConversation.MAX_ENTRIES);
    if(history == null || history.items.length == 0) return;
-   var items=ClaudeTranscript.merge(history.items,s.conversation.snapshot());
-   s.conversation=new PiConversation(items,new AgentResponseArchive("pi",s.record.id,persistence),true,history.omitted);
+   var items=AgentTranscript.merge(history.items,s.conversation.snapshot());
+   s.conversation=new AgentConversation("Pi",items,new AgentResponseArchive("pi",s.record.id,persistence),true,history.omitted);
   } catch(_:Dynamic) {}
  }
  /** A message typed into a stopped session starts Pi again in the same conversation and is sent once it is ready. */

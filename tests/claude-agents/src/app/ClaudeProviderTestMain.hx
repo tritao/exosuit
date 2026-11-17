@@ -32,9 +32,9 @@ class ClaudeProviderTestMain {
   var sid="a";
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
-  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
+  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),root);
   var claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,python,script);
-  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store,"claude-image-fixture");
+  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([claude]), store,"claude-image-fixture");
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   function pump():Void {server.poll();provider.poll();client.poll();Sys.sleep(0.002);}
@@ -127,7 +127,7 @@ class ClaudeProviderTestMain {
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,python,script);
-  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store,"claude-image-fixture");
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([claude]), store,"claude-image-fixture");
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
   var restored=claude.sessions.get("a");
@@ -158,7 +158,7 @@ class ClaudeProviderTestMain {
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,python,script);
-  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store,"claude-image-fixture");
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([claude]), store,"claude-image-fixture");
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var rows:Array<String>=[],rowsDone=false;
   client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {rows=[for(row in r.records) row.id+":"+row.state];rowsDone=true;},function(e) throw e.message);
@@ -225,10 +225,10 @@ class ClaudeProviderTestMain {
   ro.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"connect",text:"",request:null},5000,function(_) throw "Read-only control succeeded",function(e) {require(e.code=="unauthorized","Wrong permission error");denied=true;});
   roServer.poll();ro.poll();require(denied,"Missing read-only rejection");
   // Replay evictions invalidate cursors, and persistence snapshots remain bounded.
-  var c=new workspace.provider.ClaudeConversation();
+  var c=new workspace.provider.AgentConversation("Claude");
   for(i in 0...20) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
   var cursor=c.next();
-  for(i in 20...(workspace.provider.ClaudeConversation.MAX_ENTRIES+40)) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
+  for(i in 20...(workspace.provider.AgentConversation.MAX_ENTRIES+40)) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
   require(c.offset(cursor)==null && c.snapshot().length==6,"Replay bounds/cursors failed");
   provider.dispose();client.close();server.close();ro.close();roServer.close();
   var silent=processes.start(python,[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);

@@ -26,7 +26,7 @@ class CodexHistoryTest {
   var clock=function() return Sys.time()*1000, processes=new ProcessManager();
   var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>=[{id:"work",name:"Work",cwd:root,revision:1}];
   var adapter=new CodexProvider("owner",directories,function() return groups,processes,clock,null,python,bridge,script);
-  var service=new WorkspaceAgentService("w","owner",directories.root,[adapter]);
+  var service=new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([adapter]));
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   service.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   function pump():Void {server.poll();service.poll();client.poll();Sys.sleep(0.002);}
