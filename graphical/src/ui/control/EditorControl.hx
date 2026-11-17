@@ -7,6 +7,7 @@ import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
 import exohost.ExohostLink;
 import exohost.control.ControlError;
+import ui.ExosuitApp;
 import ui.TerminalPane;
 import ui.UiEditorTab;
 
@@ -78,7 +79,7 @@ class EditorControl {
 		// The window took the OS focus: it is now the most recently used window, where exohost routes calls without a target.
 		focusSubscription = host == null ? null : host.events.listen(function(event) {
 			switch event {
-				case WindowStateChanged(_, flags) if ((flags & WindowStateFlags.Active) != 0):
+				case WindowStateChanged(_, flags) if (flags.contains(WindowStateFlags.Active)):
 					link.focused();
 				case _:
 			}

@@ -287,14 +287,15 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 	}
 
-	public function splitActive(kind:LayoutKind, newFirst:Bool = false):Bool {
+	public function splitActive(kind:LayoutKind, ?newFirst:Bool):Bool {
 		if (kind == LayoutKind.Leaf) return false;
+		var first = newFirst == true;
 		var source = activeView();
 		var created = new UiEditorPane("editor-pane-" + nextPaneId++);
 		dockActions.model.register(new DockPanelDescriptor(created.id, "Editor", false, true, null, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
 		var zone = kind == LayoutKind.Horizontal ?
-			(newFirst ? DockDropZone.Left : DockDropZone.Right) :
-			(newFirst ? DockDropZone.Top : DockDropZone.Bottom);
+			(first ? DockDropZone.Left : DockDropZone.Right) :
+			(first ? DockDropZone.Top : DockDropZone.Bottom);
 		if (!dockActions.model.dock(created.id, activePane.id, zone)) return false;
 		if (source != null) {
 			var selection = new BufferSelection();
@@ -732,7 +733,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var moving = pane.items.splice(from, 1)[0];
 		pane.items.insert(to, moving);
 		if (active != null) {
-			pane.activeIndex = pane.items.indexOf(active);
+			pane.activeIndex = tabIndex(pane.items, active);
 			if (pane == activePane) activeIndex = pane.activeIndex;
 		}
 		requestFrame();
@@ -864,7 +865,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane.items.push(beforeTab);
 		setActiveIndex(activePane.items.length - 1);
 		if (!splitActive(LayoutKind.Horizontal)) {
-			var beforeIndex = activePane.items.indexOf(beforeTab);
+			var beforeIndex = tabIndex(activePane.items, beforeTab);
 			if (beforeIndex >= 0) activePane.items.splice(beforeIndex, 1);
 			beforeView.dispose();
 			afterDocument.dispose();
@@ -1196,11 +1197,36 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return item == null ? [] : documentsLostByClosingTab(item);
 	}
 
+	/**
+		Where `item` is in `items`, or -1: the tab holding the same object, not an equal one. `UiEditorTab` declares no
+		equality, so `indexOf` and `remove` do not take it.
+	**/
+	static function tabIndex(items:Array<UiEditorTab>, item:UiEditorTab):Int {
+		for (index in 0...items.length) {
+			var same = switch item {
+				case Settings(value): UiEditorTabs.settings(items[index]) == value;
+				case Document(value): UiEditorTabs.document(items[index]) == value;
+				case Image(value): UiEditorTabs.image(items[index]) == value;
+				case UnsupportedFile(value): UiEditorTabs.unsupportedFile(items[index]) == value;
+				case Terminal(value): UiEditorTabs.terminal(items[index]) == value;
+				case Agent(value): UiEditorTabs.agent(items[index]) == value;
+				case WorkspaceFile(value): UiEditorTabs.workspaceFile(items[index]) == value;
+			};
+			if (same) return index;
+		}
+		return -1;
+	}
+
+	static function removeTab(items:Array<UiEditorTab>, item:UiEditorTab):Void {
+		var index = tabIndex(items, item);
+		if (index >= 0) items.splice(index, 1);
+	}
+
 	/** Close by identity so confirmation cannot accidentally close a different active tab. */
 	public function closeTab(item:UiEditorTab, paneId:String, force:Bool = false):Bool {
 		var pane = paneById(paneId);
 		if (pane == null) return false;
-		var index = pane.items.indexOf(item);
+		var index = tabIndex(pane.items, item);
 		if (index < 0) return false;
 		var settings = UiEditorTabs.settings(item);
 		if (settings != null && !settings.allowClose && !settings.requestClose()) return false;
@@ -1245,8 +1271,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	/** Opens the file whose tab was closed last in this context again, in the place it had, and remembers the one before it. */
 	public function reopenClosedTab():Bool {
 		var closed = closedTabs.get(contextKey);
-		while (closed != null && closed.length > 0) {
+		while (closed != null) {
 			var last = closed.pop();
+			if (last == null) break;
 			if (!workspace.fileSystem.exists(last.path)) continue;
 			var view = openFile(last.path);
 			var from = -1;
@@ -1269,7 +1296,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		for (state in contextLayouts) for (pane in state.panes) for (item in pane.items.copy()) {
 			var view = UiEditorTabs.document(item);
 			if (view == null || view.document != document) continue;
-			var index = pane.items.indexOf(item); pane.items.remove(item); view.dispose();
+			var index = tabIndex(pane.items, item); pane.items.splice(index, 1); view.dispose();
 			if (pane.activeIndex > index) pane.activeIndex--;
 			else if (pane.activeIndex == index) pane.activeIndex = Std.int(Math.min(index, pane.items.length - 1));
 		}
@@ -1287,7 +1314,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return true;
 	}
 
-	public function closeActiveTab(force:Bool = false):Bool {
+	public function closeActiveTab(force:Bool):Bool {
 		var item = activeTab();
 		return item != null && closeTab(item, activePane.id, force);
 	}
@@ -1306,7 +1333,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return result;
 	}
 
-	public function closeActivePane(force:Bool = false):Bool return closePane(activePane.id, force);
+	public function closeActivePane(force:Bool):Bool return closePane(activePane.id, force);
 
 	function closePane(id:String, force:Bool):Bool {
 		var removed = paneById(id);
@@ -1517,7 +1544,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				var view = UiEditorTabs.document(item);
 				var wanted = dirtyOnly ? view != null && view.diffDocument == null && unsavedDocument(view.document) : view == null || view.diffDocument == null;
 				if (!wanted) continue;
-				pane.items.remove(item);
+				removeTab(pane.items, item);
 				// Already open here: by document for text, by tab id for files and images. A shell is never merged away.
 				var duplicate = view != null ? hasDocumentTab(view.document) : UiEditorTabs.terminal(item) == null && present.exists(UiEditorTabs.key(item));
 				if (duplicate) { UiEditorTabs.dispose(item); continue; }
@@ -1794,7 +1821,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (lastSwitchCold) coldSwitches++;
 		if (saved != null) {
 			for (pane in saved.panes) {
-				for (item in pane.items.copy()) { var terminal = UiEditorTabs.terminal(item); if (terminal != null && terminal.disposed) pane.items.remove(item); }
+				for (item in pane.items.copy()) { var terminal = UiEditorTabs.terminal(item); if (terminal != null && terminal.disposed) removeTab(pane.items, item); }
 				pane.activeIndex = Std.int(Math.min(pane.activeIndex, pane.items.length - 1));
 				for (view in pane.tabs) view.restoreScroll(view.scrollX(), view.scrollY());
 				panes.push(pane);
@@ -2197,15 +2224,24 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	// -- Overlay presentation (uikit-specific; not part of core.WorkbenchHost) --
 
-	/** The command-view or language-popup overlay to render this frame, or null for neither. */
+	/** The command-view or language-popup overlay to render this frame, or null for neither. Read during the build: writes nothing. */
 	public function overlayView():Null<NkView> {
 		if (commandView.active) return commandPicker;
-		if (languageKind != LANG_NONE) {
-			var active = activeDocument();
-			if (active == null || active.id != languageDocumentId) dismissLanguagePopup();
-			else return languageCapture;
-		}
-		return null;
+		return languagePopupOnActiveDocument() ? languageCapture : null;
+	}
+
+	/**
+		Closes a language popup whose document is no longer the active one. `ExosuitApp.submit` calls it before the build,
+		which may not write the state that dismissing touches (the frame tick, the editor focus request).
+	**/
+	public function dismissStaleLanguagePopup():Void {
+		if (!commandView.active && languageKind != LANG_NONE && !languagePopupOnActiveDocument()) dismissLanguagePopup();
+	}
+
+	function languagePopupOnActiveDocument():Bool {
+		if (languageKind == LANG_NONE) return false;
+		var active = activeDocument();
+		return active != null && active.id == languageDocumentId;
 	}
 
 

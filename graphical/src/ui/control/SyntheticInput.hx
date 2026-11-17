@@ -197,7 +197,7 @@ class SyntheticInput {
 		}
 		var functionKey = ~/^f([1-9][0-9]?)$/;
 		if (functionKey.match(name)) {
-			var number = Std.parseInt(functionKey.matched(1));
+			var number = Std.parseInt(functionKey.matched(1)) ?? 0;
 			return number >= 1 && number <= 25 ? 289 + number : -1;
 		}
 		return switch name {
