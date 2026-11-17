@@ -9,6 +9,71 @@
 - Input latency is equal within noise.
 - Nothing is pushed.
 
+## Follow-up 2026-11-18: newest upstream, editor scope, Problems
+
+- **Pin moved to upstream `origin/main` `68657687a`** (65 commits past `ff7e29aac`).
+  - The haxeon branch is `exosuit-upstream-2`, tip `959946ee5`. On top of upstream it carries:
+    - our 21 commits;
+    - the tooltip-in-scope fix (`553150bb9`);
+    - one fix to upstream's own code (`959946ee5`).
+  - Only one upstream change needed exosuit edits: private members are now enforced as in Haxe (`27ffdb132` and its
+    steps). The members other classes read got `@:allow` grants.
+  - Two failing sites were in upstream's own code. Both are worth reporting to tritao:
+    - `DesktopUiHost` creates and shuts down an `EventPump`, but the pump's constructor and `runtimeShutdown` don't
+      grant it access.
+    - `PropertyEditor`'s row classes read its private `options`.
+  - The full inventory is `.port/docs/F-upstream-delta.md`.
+- **F3 finished (editor scope).** Caret moves, selections and typing bump the document view's `editing` signal, and
+  rebuild only the editor pane and the status bar (now a TrackedScope). These still rebuild the root:
+  - changes to the unsaved or preview marks, or to the view's identity;
+  - any change while completion, hover info, signature help, the command view or a context menu is open.
+- **F4 for Problems.**
+  - The row hover and selection fills come from a workbench style rule (`problem-row`). Before, a fill was set on the
+    built row.
+  - Problems is a `DockPanelContent.observing` panel. Its commit says why each value the panel reads is tracked.
+- **Verified on the merged tree.** Port side, each run with `HAXEON_UI_VERIFY_RETENTION=5`, and no retention difference
+  in any run:
+
+  | Scenario | Checks |
+  |---|---|
+  | G01 settings/editor | 7/7 |
+  | G14 panels | 10/10 |
+  | G06 palette | 7/8, the known scenario fault, same on the baseline |
+  | G10 tab sweep | 26/26 |
+  | G08 chat | 11/11 |
+  | G04 hover affordances | 8/8 |
+  | G03 explorer (on the new pin, before F3b and F4 were merged) | 11/11 |
+
+  - All six entry points compile, and so do the transport and phone-view test projects.
+  - The full build passes (90 s).
+  - These suites pass: editor-view-test, document-test, status-bar, narrow-tabs, tab-tooltip, problems,
+    sidebar-layout and layout-modes.
+  - More scenarios on the final tree:
+
+    | Scenario | Port | Baseline |
+    |---|---|---|
+    | G12 live mode | 7/7 | — |
+    | G13a workspaces tree | 11/11 | — |
+    | G16b two windows, tabs | 10/10 | — |
+    | G17 terminals survive | 14/14 | — |
+    | G07 FPS title | 6/9 | 3/9 |
+
+    G07 matches the port's run on the previous pin. Its failing idle-reading checks see about 3 frames/s on both
+    sides.
+  - Allocation census on the final tree. The baseline runs are the overnight `base-*-alloc` runs.
+
+    | Scenario | Bytes per frame, port vs base | Total bytes, port vs base | Frames |
+    |---|---|---|---|
+    | G02 idle | 617 KB vs 677 KB (−9 %) | 218 MB vs 656 MB (−67 %) | 374 vs 989 |
+    | G01 settings/editor | 409 KB vs 454 KB (−10 %) | 234 MB vs 244 MB (−4 %) | 591 vs 558 |
+    | G08 chat | 738 KB vs 791 KB (−7 %) | 106 MB vs 184 MB (−43 %) | 163 vs 253 |
+
+  - Input latency was not measured again: the real-input scenarios move the mouse, and the desktop was in use.
+- **Not checked:**
+  - The Android host. It is built only by the phone/NDK pipeline.
+  - The Problems row hover, by eye. No scenario produces problem rows. The rule was checked against the code it
+    replaced.
+
 ## What was done
 
 Exosuit moved from haxeon `fa128931e` to upstream haxeon `origin/main` `ff7e29aac`, which is 991 upstream commits
@@ -259,27 +324,28 @@ both sides alike.
 Push bottom-up: haxeon first, then exosuit.
 
 ```
-# 1. haxeon: the upstreamable series (21 commits on tritao/haxeon main ff7e29aac)
-git -C C:\Users\corbi\projects\exosuit-port\haxeon push origin exosuit-upstream
-#    optional, the tooltip-in-scope fix on top (not pinned by the port yet):
-git -C C:\Users\corbi\projects\exosuit-port\haxeon push origin tooltip-scope-fix
+# 1. haxeon: our series on tritao/haxeon main 68657687a (what the port pins, 959946ee5)
+git -C C:\Users\corbi\projects\exosuit-port\haxeon push origin exosuit-upstream-2
 
-# 2. exosuit: the port as a branch (topic stack); merge to main once you have tried it
-git -C C:\Users\corbi\projects\exosuit-port push origin haxeon-port-topics:haxeon-port
+# 2. exosuit: the port as a branch (topic stack, 14 commits); merge to main once you have tried it
+git -C C:\Users\corbi\projects\exosuit-port push origin haxeon-port-topics-2:haxeon-port
 #    when landing on main (fast-forward; main is 6ee0435b, the stack's base):
-git -C C:\Users\corbi\projects\exosuit push origin haxeon-port-topics:main
+git -C C:\Users\corbi\projects\exosuit push origin haxeon-port-topics-2:main
 ```
 
-**Push the haxeon branches before you remove the `exosuit-port` worktree.** `exosuit-upstream` and
-`tooltip-scope-fix` exist only in that worktree's own haxeon repository
+**Push the haxeon branch before you remove the `exosuit-port` worktree.** `exosuit-upstream-2` and the older
+`exosuit-upstream` and `tooltip-scope-fix` exist only in that worktree's own haxeon repository
 (`C:\Users\corbi\projects\exosuit\.git\worktrees\exosuit-port\modules\haxeon`), and removing the worktree deletes them.
 
 The baseline worktree `C:\Users\corbi\projects\exosuit-baseline` (detached at `6ee0435b`, built) is left in place for
 side-by-side checks. Remove it with `git -C C:\Users\corbi\projects\exosuit worktree remove --force
 C:\Users\corbi\projects\exosuit-baseline` when you are done comparing.
 
-`exosuit-upstream` is new on tritao/haxeon. Upstream `origin/main` has moved past `ff7e29aac` since the night began
-(it was at `2071f2aa5` at 03:30). Rebase the series before you open an upstream PR, then move the exosuit pin with it.
+`exosuit-upstream-2` sits on upstream `origin/main` `68657687a`, as of 2026-11-18 14:00.
+
+- `haxeon-port-topics-2` replaces `haxeon-port-topics`, which was on `ff7e29aac`.
+- The worktrees `exosuit-f3b` and `exosuit-f4` (branches `port-f3b` and `port-f4`) held the follow-up's parallel work.
+  Their commits are in the stack, so the worktrees can be removed.
 
 To try the port: `C:\Users\corbi\projects\exosuit-port` is built (`graphical\build\host\main.hl`). In a fresh pwsh,
 dot-source `.port\env.ps1`, then run `python scripts\run.py`; it starts in isolated state
@@ -287,14 +353,11 @@ dot-source `.port\env.ps1`, then run `python scripts\run.py`; it starts in isola
 
 ## Open issues
 
-- **Tooltip fix not pinned.** `tooltip-scope-fix` (`7f5ad7510`) is not in the port's pin yet. Pinning it unblocks the
-  rest of F3: caret moves and typing would rebuild only the editor pane and status bar.
-- **F4 (observing dock panels) was not done.** No candidate panel could be proven refresh-correct tonight. The reasons
-  are in `.port/docs/C-handoffs.md`.
-- **Leftover files in the user's checkout.** During integration, a port agent wrote two native-cache folders into your
-  checkout, under `C:\Users\corbi\projects\exosuit\haxeon\out\native-cache\host\`: `exosuit-ui-native-5c873c8ea8` and
-  `pluginhost-ef9e216aec`, plus their `.lock` and `.lock.holder` files. Deleting them was blocked by the permission
-  rules, so please remove them.
+- **Other dock panels are not observing yet.** Problems is; the rest still rebuild with the root.
+  `.port/docs/C-handoffs.md` lists what each one needs.
+- **Native-cache folders in your checkout.** A port agent wrote two folders under `haxeon\out\native-cache\host\`:
+  `exosuit-ui-native-5c873c8ea8` and `pluginhost-ef9e216aec`. Your checkout now runs the port on the same haxeon commit
+  and uses them, so leave them in place.
 - **Untracked `suit/` in your checkout.** Your checkout shows an untracked `suit/` folder, left over from the
   suit→exohost rename that another session landed on main. It is not from this work and was left alone.
 - **Upstream has a Windows bug in check-self-hosting.** The step that compiles the program cases with the self-hosted
