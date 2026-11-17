@@ -204,9 +204,7 @@ class RemoteAccessPanel implements View {
 				var origin = chosenRelay();
 				if (origin == null) return;
 				view.enable(origin, function(error) { actionError = error; requestFrame(); });
-			}, "remote-access-enable");
-			enable.variant = ButtonVariant.Primary;
-			enable.enabled = StringTools.trim(relayOrigin).length > 0 && !view.busy();
+			}, "remote-access-enable", StringTools.trim(relayOrigin).length > 0 && !view.busy(), ButtonVariant.Primary);
 			rows.push(new KeyedView("enable", enable));
 		}
 		if (status != null && status.origin != null) rows.push(new KeyedView("relay", paragraph("Relay: " + status.origin, context, true)));
@@ -219,8 +217,7 @@ class RemoteAccessPanel implements View {
 				var disconnect = new Button("Disconnect from this relay", null, function() {
 					confirmDisconnect = false;
 					view.disable(function(error) { actionError = error; relayEdited = false; requestFrame(); });
-				}, "remote-access-disconnect-relay");
-				disconnect.enabled = !view.busy();
+				}, "remote-access-disconnect-relay", !view.busy());
 				rows.push(new KeyedView("relay-change-confirm", disconnect));
 				rows.push(new KeyedView("relay-change-cancel", new Button("Keep this relay", null, function() { confirmDisconnect = false; requestFrame(); }, "remote-access-keep-relay")));
 			}
@@ -230,9 +227,7 @@ class RemoteAccessPanel implements View {
 				machineInvitation = null;
 				invitationError = null;
 				view.invite(300, function(value, error) { machineInvitation = value; invitationError = error; requestFrame(); });
-			}, "remote-access-create");
-			create.variant = ButtonVariant.Primary;
-			create.enabled = !view.busy() && status.connected;
+			}, "remote-access-create", !view.busy() && status.connected, ButtonVariant.Primary);
 			rows.push(new KeyedView("create", create));
 		}
 		var current = machineInvitation;
@@ -244,8 +239,7 @@ class RemoteAccessPanel implements View {
 				if (copyText == null || !copyText(current.invitationUrl)) actionError = "Could not copy the pairing address";
 				else actionError = "Pairing address copied";
 				requestFrame();
-			}, "remote-access-copy");
-			copy.enabled = copyText != null;
+			}, "remote-access-copy", copyText != null);
 			rows.push(new KeyedView("copy", copy));
 		}
 		if (invitationError != null) rows.push(new KeyedView("invitation-error", paragraph("Could not create invitation: " + invitationError, context)));
@@ -256,12 +250,10 @@ class RemoteAccessPanel implements View {
 				var id = pending.deviceId;
 				var approve = new Button("Approve", null, function() {
 					view.approve(id, pickList(id, workspaces), function(error) { actionError = error; requestFrame(); });
-				}, "pairing-approve-" + id);
-				approve.enabled = !view.busy() && confirmed.get(id) == true;
+				}, "pairing-approve-" + id, !view.busy() && confirmed.get(id) == true);
 				var reject = new Button("Reject", null, function() {
 					view.reject(id, function(error) { actionError = error; requestFrame(); });
-				}, "pairing-reject-" + id);
-				reject.enabled = !view.busy();
+				}, "pairing-reject-" + id, !view.busy());
 				var details:Array<KeyedView> = [
 					new KeyedView("code-heading", paragraph("Compare this code on both devices", context)),
 					new KeyedView("code", new Text(pending.authenticationCode, null, context.theme.tokens.textPrimary, new TextStyleOverride(null, 24, 0, TextWrap.None))),
@@ -306,8 +298,7 @@ class RemoteAccessPanel implements View {
 				}
 				var revoke = new Button("Revoke", null, function() {
 					view.revoke(deviceId, function(error) { actionError = error == null ? "Device revoked" : error; requestFrame(); });
-				}, "pairing-revoke-" + deviceId);
-				revoke.enabled = !view.busy();
+				}, "pairing-revoke-" + deviceId, !view.busy());
 				children.push(new KeyedView("revoke", revoke));
 			}
 			rows.push(new KeyedView("device:" + deviceId, new Column("paired-device-" + deviceId, children, sectionStyle())));
