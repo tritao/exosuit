@@ -61,8 +61,9 @@ class StatusBarView implements View {
 			style.childAlignY = LayoutAlignmentY.Center; style.childGap = sizes.gap;
 			style.padding = new Insets(sizes.left, 0, sizes.right, 0);
 			style.background = context.theme.tokens.surfaceRaised;
-			// Clip bounded labels and controls, leaving tooltip overlays free.
-			var root = new RenderNode(context.id("status-bar"), LayoutVisualKind.Box, style);
+			// Clip bounded labels and controls, leaving tooltip overlays free. The root takes the identity of the scope the bar
+			// is built in (ExosuitApp.statusBar), so the scope can run again alone.
+			var root = context.createNode(context.rootId("status-bar"), LayoutVisualKind.Box, style);
 			WorkbenchBoundary.top(context, root);
 
 			if (remote) {
