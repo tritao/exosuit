@@ -1155,8 +1155,10 @@ class ExosuitApp implements DesktopUiApplication {
 		if (explorerModel != null) explorerModel.prepareBuild();
 		if (contextFiles != null) contextFiles.prepareBuild();
 		// The same for the Workbench rows and drafts, a Settings tab whose store was reloaded, and a language popup whose
-		// document stopped being the active one: each writes state or requests a frame, which the build may not.
-		if (workbenchPanel != null) workbenchPanel.prepareBuild();
+		// document stopped being the active one: each writes state or requests a frame, which the build may not. The
+		// Workbench only while its sidebar mode is shown, as when it synced in its build: hidden, it neither reports errors
+		// nor asks for frames.
+		if (workbenchPanel != null && sidebar.visible && sidebar.activeId == "workbench") workbenchPanel.prepareBuild();
 		settingsTab.syncStore();
 		host.dismissStaleLanguagePopup();
 		// Plain state the root build shows, which it cannot track: a change makes this frame a full build. A document view's

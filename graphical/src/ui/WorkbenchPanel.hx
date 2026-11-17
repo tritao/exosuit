@@ -1106,8 +1106,8 @@ class WorkbenchPanel implements View {
 
 	/**
 		Brings the rows and drafts up to date with the machine, the catalogs and the panel's own state, and reports a new
-		error. The app calls it before every build, outside tracking: it writes the tree model, the tree's selection and
-		expansion, and requests frames, none of which a build may do.
+		error. The app calls it before each build that shows the panel, outside tracking: it writes the tree model, the
+		tree's selection and expansion, and requests frames, none of which a build may do.
 	**/
 	public function prepareBuild():Void {
 		syncState();
