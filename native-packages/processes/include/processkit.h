@@ -106,12 +106,6 @@ PROCESSKIT_API double processkit_started(int pid);
 PROCESSKIT_API int processkit_identify(int pid, double started);
 /** Forcibly ends one process (not its children) if processkit_identify accepts it. */
 PROCESSKIT_API int processkit_terminate(int pid, double started);
-/**
- * Asks a process to close gracefully: on Windows, posts WM_CLOSE to its visible
- * top-level windows; elsewhere, sends SIGTERM. Returns PROCESSKIT_NOT_FOUND when
- * nothing could be asked (no such process, or no window to close).
- */
-PROCESSKIT_API int processkit_request_close(int pid, double started);
 PROCESSKIT_API int processkit_current_pid(void);
 
 #ifdef __cplusplus

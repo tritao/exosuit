@@ -2,7 +2,6 @@ package app;
 
 import processkit.Processes;
 import suit.SuitClient;
-import suit.SuitClient.SuitMode;
 import suit.SuitClock;
 import suit.SuitInventory;
 import suit.SuitInventory.SuitProcess;
@@ -11,19 +10,18 @@ import suit.SuitKind;
 import suit.SuitLineage;
 import suit.SuitPaths;
 import suit.SuitProcessTree;
-import suit.TerminalHostFolder;
 import suit.MachineCatalog;
 
 /**
 	suit's ownership rules over made-up processes: which descendants a stop may kill, what suit adopts,
-	how a reused pid is caught, how registry times are checked, and the mode rule. Nothing here lists or
+	how a reused pid is caught, how registry times are checked, and where a registration goes. Nothing here lists or
 	touches a real process. scripts/test-suit.py runs this before its end-to-end tests.
 **/
 class SuitUnitTests {
 	static inline var WORKER:String = "hl.exe C:/Users/u/AppData/Local/haxeon/compiler/abc.hl C:/Users/u/AppData/Local/haxeon/compiler/abc.json";
-	static inline var DAEMON:String = "hl.exe C:/x/agent/build/host/main.hl \\\\.\\pipe\\p 1 C:/s/credential seed C:/s/db C:/root g1";
+	static inline var DAEMON:String = "hl.exe C:/x/agent/build/host/main.hl --workspace w1 --folder C:/root";
 	static inline var HOME:String = "C:/Users/u/AppData/Local/suit-unit-home";
-	static inline var OWN:String = "EXOSUIT_SUIT=isolated\nEXOSUIT_SUIT_HOME=C:/Users/u/AppData/Local/suit-unit-home\nPATH=C:/bin";
+	static inline var OWN:String = "EXOSUIT_SUIT_HOME=C:/Users/u/AppData/Local/suit-unit-home\nPATH=C:/bin";
 
 	static var failures:Int = 0;
 
@@ -34,14 +32,13 @@ class SuitUnitTests {
 		sweepRespectsEnvironment();
 		adoptionNeedsExosuitChainAndEnvironment();
 		homesCompareResolved();
-		modeRule();
+		registrationCreatesHome();
 		registryTimes();
 		deniedProcessKeepsItsRecord();
 		temporaryStateIsDisposable();
 		machineCatalog();
 		windowFocus();
 		terminalHosts();
-		terminalHostEndRequests();
 		haxeonClients();
 		failures += MachineRemoteUnitTests.run();
 		if (failures > 0) {
@@ -60,19 +57,18 @@ class SuitUnitTests {
 		return result.join(",");
 	}
 
-	/** The manager's daemon and its compiler worker die with it; a terminal shell and what it started do not. */
+	/** A service's compiler worker dies with it; a terminal shell and what it started do not. */
 	static function descendantsFollowOnlyExosuitKinds():Void {
 		var snapshot = [
-			process(10, 1, 100, "hl.exe", "hl.exe C:/x/agent/build/host/main.hl --manager C:/root --state-dir C:/s"),
-			process(11, 10, 110, "hl.exe", DAEMON),
+			process(11, 1, 110, "hl.exe", DAEMON),
 			process(12, 11, 120, "hl.exe", WORKER),
 			process(13, 11, 130, "pwsh.exe", "pwsh.exe -NoLogo"),
 			process(14, 13, 140, "hl.exe", WORKER), // a build the user ran in an exosuit terminal
 			process(15, 13, 150, "code.exe", "code.exe ."), // a program the user started from it
 			process(16, 11, 90, "hl.exe", WORKER) // names 11 as parent but started first: an earlier owner of that pid
 		];
-		var found = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(10, 100, -1));
-		check(found == "11,12", 'a stop kills only exosuit-spawned descendants, got $found');
+		var found = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(11, 110, -1));
+		check(found == "12", 'a stop kills only exosuit-spawned descendants, got $found');
 	}
 
 	/**
@@ -130,13 +126,12 @@ class SuitUnitTests {
 	static function sweepRespectsEnvironment():Void {
 		var snapshot = [
 			process(30, 1, 100, "hl.exe", DAEMON, OWN),
-			process(31, 30, 110, "hl.exe", WORKER, "EXOSUIT_SUIT=off\nPATH=C:/bin"),
-			process(32, 30, 120, "hl.exe", WORKER, "EXOSUIT_SUIT=isolated\nEXOSUIT_SUIT_HOME=C:/elsewhere\nPATH=C:/bin"),
+			process(32, 30, 120, "hl.exe", WORKER, "EXOSUIT_SUIT_HOME=C:/elsewhere\nPATH=C:/bin"),
 			process(33, 30, 130, "hl.exe", WORKER, OWN),
 			process(34, 30, 140, "hl.exe", WORKER, "")
 		];
 		var found = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(30, 100, -1));
-		check(found == "33,34", 'the sweep skips EXOSUIT_SUIT=off and another suit\'s processes, got $found');
+		check(found == "33,34", 'the sweep skips another suit\'s processes, got $found');
 	}
 
 	static function adoptionNeedsExosuitChainAndEnvironment():Void {
@@ -152,48 +147,33 @@ class SuitUnitTests {
 		var lineage = new SuitLineage(base, HOME);
 		check(lineage.adoptionOwner(base[2], owned) == null, "a worker started from a terminal is not adopted");
 		check(lineage.adoptionOwner(base[3], owned) == null, "a program of another kind is never adopted");
-		check(owner("EXOSUIT_SUIT=off\nPATH=C:/bin", HOME) == null, "EXOSUIT_SUIT=off is never adopted");
 		check(owner("", HOME) == null, "an unreadable environment is not adopted");
 		check(owner(OWN, "C:/elsewhere") == null, "another suit never adopts this suit's processes");
-		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
-		if (temp != null)
-			check(owner('PRAGTICAL_PORTABLE=$temp/run-1\nPATH=C:/bin', SuitPaths.defaultHome()) == null,
-				"unset EXOSUIT_SUIT with temporary state is off, on every platform");
 	}
 
 	/** An explicit default home and an unset one are the same suit. */
 	static function homesCompareResolved():Void {
 		var defaultHome = SuitPaths.defaultHome();
-		var explicit = process(40, 1, 100, "hl.exe", WORKER, 'EXOSUIT_SUIT=on\nEXOSUIT_SUIT_HOME=$defaultHome\nPATH=C:/bin');
-		var unset = process(41, 1, 100, "hl.exe", WORKER, "EXOSUIT_SUIT=on\nPATH=C:/bin");
-		check(SuitLineage.registersWith(explicit, null, defaultHome), "an explicit default home registers with the default suit");
-		check(SuitLineage.registersWith(unset, null, defaultHome), "an unset home registers with the default suit");
-		check(!SuitLineage.registersWith(unset, null, HOME), "an unset home does not register with an isolated suit");
-		check(SuitLineage.registersWith(explicit, null, StringTools.replace(defaultHome, "\\", "/") + "/"),
+		var explicit = process(40, 1, 100, "hl.exe", WORKER, 'EXOSUIT_SUIT_HOME=$defaultHome\nPATH=C:/bin');
+		var unset = process(41, 1, 100, "hl.exe", WORKER, "PATH=C:/bin");
+		check(SuitLineage.registersWith(explicit, defaultHome), "an explicit default home registers with the default suit");
+		check(SuitLineage.registersWith(unset, defaultHome), "an unset home registers with the default suit");
+		check(!SuitLineage.registersWith(unset, HOME), "an unset home does not register with an isolated suit");
+		check(SuitLineage.registersWith(explicit, StringTools.replace(defaultHome, "\\", "/") + "/"),
 			"homes compare as paths, not strings");
 	}
 
-	static function modeRule():Void {
+	/** A registration goes to EXOSUIT_SUIT_HOME, even under the temp folder, creating its missing parent folders. */
+	static function registrationCreatesHome():Void {
 		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
 		if (temp == null)
 			return;
-		var mine = Sys.systemName() == "Windows" ? "C:/Users/someone/AppData/Local/exosuit" : "/home/someone/.local/state";
-		check(SuitClient.modeOf(null, null, [temp + "/suit-test/settings"]) == SuitMode.Off, "unset with temporary state is off");
-		check(SuitClient.modeOf("on", null, [temp + "/suit-test/settings"]) == SuitMode.On, "an explicit on wins over temporary state");
-		check(SuitClient.modeOf(null, null, [mine, null]) == SuitMode.On, "unset with the user's own state is on");
-		check(SuitClient.modeOf("isolated", null, []) == SuitMode.Off, "isolated without a home is off");
-		var before = Sys.getEnv("EXOSUIT_SUIT");
-		SuitClient.mode(temp + "/suit-test/state");
-		check(Sys.getEnv("EXOSUIT_SUIT") == before, "mode() is a query: it does not change EXOSUIT_SUIT");
-		// Last use of the environment in this test: an explicit on registers even with temporary state, in a
-		// home whose parent folders do not exist yet.
-		Sys.putEnv("EXOSUIT_SUIT", "on");
+		// Last use of the environment in this test.
 		Sys.putEnv("EXOSUIT_SUIT_HOME", temp + "/suit-unit-" + Std.random(1000000) + "/a/b/home");
 		Sys.putEnv("EXOSUIT_SUIT_AUTOSTART", "0");
-		check(SuitClient.resolve(temp + "/suit-test/state") == SuitMode.On, "resolve() keeps an explicit on");
-		SuitClient.registerWorkspaceService(WorkspaceManager, {root: temp, stateDir: temp + "/suit-test/state", generation: "g", workspace: null});
+		SuitClient.registerWorkspaceService(WorkspaceHost, {root: temp, stateDir: temp + "/suit-test/state", generation: "g", workspace: null});
 		check(sys.FileSystem.exists(suit.SuitRecord.SuitRecords.path(SuitPaths.registry(), Sys.getPid())),
-			"an explicit on registers, creating the home's missing parent folders");
+			"a registration creates the home's missing parent folders");
 		SuitClient.unregister();
 	}
 
@@ -301,7 +281,7 @@ class SuitUnitTests {
 			var written:Dynamic = haxe.Json.parse(sys.io.File.getContent(file));
 			check(written.version == 2 && new MachineCatalog(file).state.workspaces[0].name == "n2", "a version 1 catalog is written back as version 2");
 			machineReply(file, twoInJson);
-			serviceReply(base);
+	
 			sys.io.File.saveContent(file, "{\"version\":1,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[{\"id\":\"w\",\"name\":\"n\",\"folders\":\"x\"}]}");
 			check(fails(function() new MachineCatalog(file)), "a damaged catalog is an error, not replaced");
 			sys.io.File.saveContent(file, "{\"version\":3,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[]}");
@@ -346,25 +326,10 @@ class SuitUnitTests {
 	}
 
 	/**
-		Window focus (M19 Phase 8): an editor's record carries its window and context; a `machine` reply lists them in
-		`windows`, next to `machine`. Frozen: the reply's shape, the entry's fields, an old record without them, junk entries.
+		Window focus (M19 Phase 8): each linked editor reports its window and context; a `machine` reply and the pushed
+		`exosuit.machine.changed` list them in `windows`, next to `machine`. Frozen: the shape, the entry's fields, junk entries.
 	**/
 	static function windowFocus():Void {
-		var base = haxe.io.Path.join([Sys.getEnv("TEMP") != null ? Sys.getEnv("TEMP") : ".", "suit-unit-window-" + Sys.getPid()]);
-		sys.FileSystem.createDirectory(base);
-		var record = suit.SuitRecord.SuitRecords.create(4242, SuitKind.Editor);
-		record.window = "w4242-1";
-		record.context = "m1/ws%2F1/g1";
-		suit.SuitRecord.SuitRecords.write(base, record);
-		var read = suit.SuitRecord.SuitRecords.read(suit.SuitRecord.SuitRecords.path(base, 4242));
-		check(read != null && read.window == "w4242-1" && read.context == "m1/ws%2F1/g1", "an editor record keeps its window and context");
-		var document:Dynamic = haxe.Json.parse(sys.io.File.getContent(suit.SuitRecord.SuitRecords.path(base, 4242)));
-		check(document.window == "w4242-1" && document.context == "m1/ws%2F1/g1" && document.version == 2, "the record's JSON names the fields window and context");
-		sys.io.File.saveContent(suit.SuitRecord.SuitRecords.path(base, 4243), '{"version":2,"pid":4243,"kind":"editor","registeredAt":1,"roots":[],"workspaces":[]}');
-		var old = suit.SuitRecord.SuitRecords.read(suit.SuitRecord.SuitRecords.path(base, 4243));
-		check(old != null && old.window == null && old.context == null, "a record written before windows registered none reads without them");
-		deleteTree(base);
-
 		var reply:Dynamic = haxe.Json.parse(haxe.Json.stringify({ok: true, machine: {}, windows: [{window: "w7-1", pid: 7, context: "m/w1/g1"}]}));
 		check(keys(reply) == "machine,ok,windows" && keys((reply.windows : Array<Dynamic>)[0]) == "context,pid,window", "a machine reply lists windows beside machine, got " + keys(reply));
 		var windows = suit.WindowFocus.WindowFocuses.decode(haxe.Json.parse('{"ok":true,"windows":[{"window":"a","pid":1,"context":"m/w1/g1"},{"window":"b","pid":2,"context":"m/w1/"},'
@@ -378,40 +343,6 @@ class SuitUnitTests {
 			"a group is marked by the windows on that group");
 		check(suit.WindowFocus.WindowFocuses.elsewhere(all, "x", "w1", "").length == 1 && suit.WindowFocus.WindowFocuses.elsewhere(all, "x", "w3").length == 0,
 			"the workspace root is a group with an empty id; another workspace has no marker");
-	}
-
-	/** A workspace's service in a `machine` reply: its running service process, with the socket its endpoint.json names. */
-	static function serviceReply(base:String):Void {
-		var state = base + "/service-state";
-		sys.FileSystem.createDirectory(state);
-		function record(pid:Int, kind:SuitKind, workspace:Null<String>, stateDir:Null<String>, started:Float, generation:Null<String>):SuitProcess
-			return {pid: pid, started: started, parent: 1, kind: kind, source: Registered, root: null, roots: [], workspace: workspace, workspaces: [],
-				stateDir: stateDir, generation: generation, window: null, context: null, owner: null, commandLine: "", orphaned: false, shared: false, group: OtherGroup, relay: null, terminal: null};
-		function endpoint(pid:Int, generation:String):Void
-			sys.io.File.saveContent(state + "/endpoint.json", "{\"socket\":\"pipe-w1\",\"workspaceId\":\"w1\",\"managerPid\":" + pid + ",\"generation\":\"" + generation + "\"}");
-		var processes = [record(7, Editor, "w1", state, 1, null), record(8, WorkspaceManager, "w2", state, 1, null),
-			record(9, WorkspaceManager, "w1", state, 5, "g2")];
-		check(SuitInventory.serviceFor(processes, "w1") == null, "a service whose endpoint.json is missing is not reported");
-		endpoint(9, "g2");
-		var found = SuitInventory.serviceFor(processes, "w1");
-		check(found != null && found.endpoint == "pipe-w1" && found.pid == 9 && found.running, "a running workspace service is reported with its socket");
-		endpoint(4, "g1");
-		check(SuitInventory.serviceFor(processes, "w1") == null, "a stale endpoint.json of a service that is gone does not pair with a new pid");
-		// A child that shares the generation is not the service; a manager that does is, when the pid is stale.
-		var child = record(12, WorkspaceHost, "w1", state, 6, "g1");
-		check(SuitInventory.serviceFor(processes.concat([child]), "w1") == null, "a process that is not a manager does not match by generation");
-		var manager = record(13, WorkspaceManager, "w1", state, 7, "g1");
-		manager.commandLine = "hl.exe C:/x/agent/build/host/main.hl --manager C:/root";
-		var viaGeneration = SuitInventory.serviceFor(processes.concat([manager]), "w1");
-		check(viaGeneration != null && viaGeneration.pid == 13, "a manager matches its endpoint.json by generation");
-		// The pid the file names wins over a newer process that shares its generation.
-		endpoint(9, "g2");
-		var newer = record(10, WorkspaceManager, "w1", state, 9, "g2");
-		newer.commandLine = "hl.exe C:/x/agent/build/host/main.hl --manager C:/root";
-		var preferred = SuitInventory.serviceFor(processes.concat([newer]), "w1");
-		check(preferred != null && preferred.pid == 9, "the process named by pid wins");
-		check(SuitInventory.serviceFor(processes, "w3") == null, "a workspace without a service has none");
-		check(SuitInventory.serviceFor(processes, "w3") == null, "a workspace without a service has none");
 	}
 
 	/** An object's field names, sorted and joined. */
@@ -449,26 +380,26 @@ class SuitUnitTests {
 			"a terminal host names its folder and its workspace's state folder");
 		var bundled = suit.SuitClassifier.classify("exosuit-agent.exe", "C:/s/terminal-host/abc/exosuit-agent.exe --terminal-host C:/s/workspaces/w1/terminal-hosts/0123");
 		check(bundled != null && bundled.kind == SuitKind.TerminalHost, "a bundle's terminal host is not taken for a workspace service");
-		var manager = suit.SuitClassifier.classify("hl.exe", "hl.exe C:/x/agent/build/host/main.hl --manager C:/root --state-dir C:/s");
-		check(manager != null && manager.kind == SuitKind.WorkspaceManager, "a manager is still a manager");
+		var service = suit.SuitClassifier.classify("hl.exe", DAEMON);
+		check(service != null && service.kind == SuitKind.WorkspaceHost && service.workspace == "w1" && service.root == "C:/root",
+			"a service's command line is its workspace's service, started in its first folder");
 		check(SuitKinds.orphanRule(SuitKind.TerminalHost) == Never, "a terminal host is never orphaned");
 		check(SuitKinds.keptByPoliteQuit(SuitKind.TerminalHost) && !SuitKinds.keptByPoliteQuit(SuitKind.WorkspaceHost), "only terminal hosts are kept by the polite quit");
 		check(!SuitKinds.spawnedByExosuit(SuitKind.TerminalHost), "a terminal host is not stopped as part of a service's tree");
-		check(SuitKinds.stop(SuitKind.TerminalHost) == EndRequest && SuitKinds.parse("terminal-host") == SuitKind.TerminalHost, "a terminal host is ended by request");
-		// Stopping the manager sweeps its daemon, never the host the daemon started.
+		check(SuitKinds.stop(SuitKind.TerminalHost) == Kill && SuitKinds.parse("terminal-host") == SuitKind.TerminalHost, "suit ends a terminal host by killing it");
+		// Stopping a service never sweeps the host it started.
 		var snapshot = [
-			process(10, 1, 100, "hl.exe", "hl.exe C:/x/agent/build/host/main.hl --manager C:/root --state-dir C:/s"),
-			process(11, 10, 110, "hl.exe", DAEMON),
+			process(11, 1, 110, "hl.exe", DAEMON),
 			process(17, 11, 120, "hl.exe", host, OWN)
 		];
-		var swept = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(10, 100, -1));
-		check(swept == "11", 'stopping a service leaves its terminal hosts, got $swept');
+		var swept = pids(new SuitLineage(snapshot, HOME).exosuitDescendants(11, 110, -1));
+		check(swept == "", 'stopping a service leaves its terminal hosts, got $swept');
 		var info = process(17, 11, 120, "hl.exe", host, OWN);
-		check(SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", 17, HOME), "a host whose folder names its pid, under this suit, is exosuit's");
-		check(!SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", 18, HOME), "a host whose folder names another pid is not adopted");
-		check(!SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", null, HOME), "a host with no host.json is not adopted");
-		check(!SuitInventory.ownsTerminalHost(info, "C:/s/workspaces/w1", 17, "C:/elsewhere"), "another suit's host is not adopted");
-		check(!SuitInventory.ownsTerminalHost(process(17, 11, 120, "hl.exe", host, ""), "C:/s/workspaces/w1", 17, HOME),
+		check(SuitInventory.ownsTerminalHost(info, 17, HOME), "a host whose folder names its pid, under this suit, is exosuit's");
+		check(!SuitInventory.ownsTerminalHost(info, 18, HOME), "a host whose folder names another pid is not adopted");
+		check(!SuitInventory.ownsTerminalHost(info, null, HOME), "a host with no host.json is not adopted");
+		check(!SuitInventory.ownsTerminalHost(info, 17, "C:/elsewhere"), "another suit's host is not adopted");
+		check(!SuitInventory.ownsTerminalHost(process(17, 11, 120, "hl.exe", host, ""), 17, HOME),
 			"a host whose environment could not be read is not adopted");
 		// What a terminal runs is the user's, even an SDK-mode claude: below a host found by its command line or its pid.
 		var claude = "claude.exe --output-format stream-json --permission-prompt-tool stdio";
@@ -486,50 +417,6 @@ class SuitUnitTests {
 		check(lineage.belowTerminalHost(terminal[4], [20 => true]), "a host suit knows by pid hides its program too");
 		check(!lineage.belowTerminalHost(terminal[5], [20 => true]), "a daemon's own provider is not below a terminal host");
 		check(suit.SuitReport.keptTerminals(0) == "" && suit.SuitReport.keptTerminals(2).indexOf("2 terminals keep running") == 0, "the polite quit says how many terminals stay");
-	}
-
-	/**
-		Which end request in a host's folder ends which host. A file that cannot be read is no request: read as one for any
-		host, the new host of a restarted terminal ended its fresh program when the old host took the old one's request
-		between the new host's look and its read.
-	**/
-	static function terminalHostEndRequests():Void {
-		check(TerminalHostFolder.endRequestOf(null) == null, "an end request that could not be read is no request");
-		check(TerminalHostFolder.endRequestOf("garbage") == null && TerminalHostFolder.endRequestOf({reason: "no version"}) == null
-			&& TerminalHostFolder.endRequestOf({version: "2", reason: "x"}) == null, "a file that is not an end request is no request");
-		var old = TerminalHostFolder.endRequestOf({version: 1, reason: "old writer", pid: 5});
-		check(old != null && old.reason == "old writer" && TerminalHostFolder.addressedTo(old, 7, "b"), "an older writer's request is for any host");
-		var addressed = TerminalHostFolder.endRequestOf({version: 2, reason: "restart", pid: 5, instance: "a"});
-		check(addressed != null && TerminalHostFolder.addressedTo(addressed, 5, "a") && !TerminalHostFolder.addressedTo(addressed, 7, "b"),
-			"a request names its host by pid and instance");
-		var unknown = TerminalHostFolder.endRequestOf({version: 2, reason: "before host.json"});
-		check(unknown != null && TerminalHostFolder.addressedTo(unknown, 7, "b"), "a request whose writer knew no host is for any host");
-		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
-		var directory = haxe.io.Path.join([temp, "suit-end-request-" + Sys.getPid() + "-" + Std.int(Sys.time())]);
-		sys.FileSystem.createDirectory(directory);
-		var file = haxe.io.Path.join([directory, TerminalHostFolder.END_REQUEST_FILE]);
-		try {
-			check(TerminalHostFolder.endRequest(directory) == null, "no file is no request");
-			sys.io.File.saveContent(file, "{\"version\":2,\"reason\":");
-			check(TerminalHostFolder.endRequest(directory) == null && sys.FileSystem.exists(file), "a half-written request is no request and is left to be read again");
-			sys.io.File.saveContent(file, '{"version":1,"reason":"' + StringTools.lpad("", "x", 20000) + '"}');
-			check(TerminalHostFolder.endRequest(directory) == null, "an end request too large to read is no request");
-			TerminalHostFolder.requestEnd(directory, "restart", 5, "a");
-			var read = TerminalHostFolder.endRequest(directory);
-			check(read != null && read.pid == 5 && read.instance == "a" && !TerminalHostFolder.addressedTo(read, 7, "b"), "a written request reads back for its host only");
-			// Two hosts on one folder (Restart Terminal): a request for the new one leaves the old one's in its own file.
-			TerminalHostFolder.requestEnd(directory, "suit: end terminal", 7, "b");
-			var forOld = TerminalHostFolder.ownEndRequest(directory, 5, "a"), forNew = TerminalHostFolder.ownEndRequest(directory, 7, "b");
-			check(forOld != null && forOld.reason == "restart" && forNew != null && forNew.reason == "suit: end terminal",
-				"a later request for another host does not replace an earlier host's");
-			check(TerminalHostFolder.ownEndRequest(directory, 5, "c") == null && TerminalHostFolder.ownEndRequest(directory, 5, "a") == null,
-				"a request for an earlier process with the same pid is no request and is removed");
-			TerminalHostFolder.clearOwnEndRequest(directory, 7);
-			check(TerminalHostFolder.ownEndRequest(directory, 7, "b") == null, "a taken request is gone");
-		} catch (failure:Dynamic) check(false, "end request files: " + Std.string(failure));
-		for (name in (try sys.FileSystem.readDirectory(directory) catch (_:Dynamic) []))
-			try sys.FileSystem.deleteFile(haxe.io.Path.join([directory, name])) catch (_:Dynamic) {}
-		try sys.FileSystem.deleteDirectory(directory) catch (_:Dynamic) {}
 	}
 
 	/** A Haxeon client and the worker it starts run on one toolchain: the hl.exe folder, compared as paths are. */

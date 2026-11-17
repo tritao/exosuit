@@ -13,17 +13,45 @@ python scripts/suit.py quit --keep-terminals   the polite quit: everything but t
 python scripts/suit.py help            all commands
 ```
 
+It is also the editors' control plane: `suitctl` (`scripts/suitctl.cmd`, or
+`python scripts/suit.py --ctl`) is the same program under a second name.
+
+```
+suitctl list                    the open windows: id, pid, context, workspace folders
+suitctl open <folder|file[:line[:col]]>   a folder opens as the workspace that holds it (or a new one); a file in a tab
+suitctl documents | save | focus | status
+suitctl project add|change <folder>
+suitctl quit --mode prompt|recover|save
+suitctl call <method> '<json params>'     any control method, e.g. exosuit.ui.snapshot
+suitctl watch [event...]       print the events asked for, one JSON line each
+```
+
 ## How processes are known
 
-- **Registration.** A process registers by writing `<pid>.json` into
-  `registry/` in suit's home, atomically:
-  - the editor, when it starts, with the workspace roots it uses
-  - the workspace manager and the workspace daemon, once they are ready, with
-    their root, state directory and generation
-
-  Registration never blocks, and it never fails the process. If suit is not
-  running, the record waits for it. The record format is in
-  `src/suit/SuitRecord.hx`; the client is `src/suit/SuitClient.hx`.
+- **Editors link.** Each editor window holds one connection to the daemon
+  (`src/suit/SuitLink.hx`, `editor-attach` on suit's pipe), starting suit when
+  it is not running. Over it the window reports where it is (`exosuit.state`:
+  its focused context, workspaces and roots); suit pushes the machine's
+  workspaces and windows (`exosuit.machine.changed`) whenever they change, and
+  asks the window to quit (`exosuit.quit`). The daemon's list of linked editors
+  is `suit/src/suit/EditorDirectory.hx`; a window whose link closes is gone.
+  Editors write no registry record.
+- **Services.** suit starts a workspace's service when an editor asks for it
+  (`workspace.open` on the editor's link) or a paired device needs it: one
+  process per running workspace (`hl <agent> --workspace ID --folder F...`).
+  The service connects once it listens (`service-attach` with its workspace,
+  pipe, pid, generation, root and build: `src/suit/SuitServiceLink.hx`) and
+  holds the connection; suit answers `workspace.open` with that pipe, and
+  `machine` lists it as that workspace's service until the connection closes
+  (`suit/src/suit/SuitServices.hx`). A service of another build is asked to
+  stop after its running agent turn and started again.
+- **Registration.** For stopping and listing, the workspace service, once it
+  is ready, also writes `<pid>.json` into
+  `registry/` in suit's home, atomically, with their root, state directory and
+  generation; terminal hosts write one too. Registration never blocks, and it
+  never fails the process. If suit is not running, the record waits for it.
+  The record format is in `src/suit/SuitRecord.hx`; the client is
+  `src/suit/SuitClient.hx`.
 - **Validation.** suit trusts a record only while the pid's start time is no
   later than the time the record was written. A record for a pid that has
   since been reused is ignored, and so is a record for a process that has
@@ -38,20 +66,18 @@ python scripts/suit.py help            all commands
   second before the start time (`SuitClock.registeredAfterStart`).
 - **Scanning.** Unless `EXOSUIT_SUIT_SCAN=0` is set, suit also reads the
   command lines of `hl`, `exosuit` and `exosuit-agent` processes, and from
-  each one its `EXOSUIT_SUIT`, `EXOSUIT_SUIT_HOME`, state (`PRAGTICAL_PORTABLE`,
-  `XDG_STATE_HOME`, `EXOSUIT_AGENT_STATE_HOME`) and `PATH` variables. It
-  recognizes editors, workspace managers and daemons, Haxeon compiler workers,
+  each one its `EXOSUIT_SUIT_HOME` and `PATH` variables. It
+  recognizes editors, workspace services, Haxeon compiler workers,
   and live sessions and live hosts.
 - **Ownership is positive.** A process is exosuit's only when it registered,
   or when suit *adopts* it (`SuitLineage.adoptionOwner`). Adoption needs all
   of these:
   - it is of a kind exosuit starts itself (`SuitKinds.spawnedByExosuit`): a
-    workspace manager or daemon, a compiler worker, a live session or host;
+    workspace service, a compiler worker, a live session or host;
   - its environment registers with this suit (`SuitLineage.registersWith`,
-    the one place this policy lives): its mode by the rule below is not off,
-    and its suit home, resolved (`EXOSUIT_SUIT_HOME`, else the default home),
-    is this suit's resolved home. An environment suit cannot read (`PATH`
-    missing) does not count;
+    the one place this policy lives): its suit home, resolved
+    (`EXOSUIT_SUIT_HOME`, else the default home), is this suit's resolved home.
+    An environment suit cannot read (`PATH` missing) does not count;
   - its parent chain reaches a registered process through processes of those
     kinds only, each started no earlier than its parent.
 
@@ -60,25 +86,22 @@ python scripts/suit.py help            all commands
   adopted process (`adopted: true`, `owner`: the ancestor), so it stays
   exosuit's after that ancestor exits. Everything else suit finds by scanning,
   such as a compiler worker of a terminal build or another agent's, or a
-  test's workspace manager, is listed as *Not started by exosuit*. It is never
+  test's workspace service, is listed as *Not started by exosuit*. It is never
   orphaned and never included in `kill --orphans`, `kill --all`, Terminate
   all, or Quit; `suit kill <pid>` still stops it when asked by pid.
 - **Reading has no side effects.** `suit list`, `suit watch`, `suit menu` and
   `kill --dry-run` only read. The daemon's inventory alone deletes stale
   records and writes adoption records.
 - **Orphans.** Each kind has one rule (`SuitKinds.orphanRule`):
-  - A workspace manager or daemon belongs to every registered editor that
-    uses its root, whichever editor started it. It is orphaned when none
-    does, unless suit hosts that workspace for remote access
-    (`SuitRelayHosts.active`: a host record, and relay settings that are not
-    paused). suit starts and keeps those services itself, so while hosting
-    is on they are listed under Other and Terminate orphaned leaves them.
+  - A workspace service belongs to every linked editor that
+    uses its workspace or root, whichever editor started it. It is orphaned when none
+    does.
   - Compiler workers are resident by design, so they are orphaned only when
     no exosuit editor and no exosuit live session is running.
   - Anything else is orphaned when the process it belongs to is gone: its
     recorded owner, or else its parent.
 
-Process listing, start times, termination and "close your windows" are in
+Process listing, start times and termination are in
 `native-packages/processes` (processkit). Every call that acts on a process
 takes a pid and a start time, and does nothing unless the start time matches
 exactly. A process whose start time is unknown is never acted on. On
@@ -87,9 +110,7 @@ Windows, `processkit_started` reports a process it may not open as
 the environment variables it is asked for from the processes whose command
 lines it reads (the process's PEB on Windows, `/proc/<pid>/environ` on
 Linux). Windows shows the current environment, Linux the one the process
-started with; the adoption rule re-applies the temp-folder rule to the state
-variables, so a process that set `EXOSUIT_SUIT=off` on itself at startup is
-judged alike on both. A block that is not double-NUL terminated (a read torn
+started with. A block that is not double-NUL terminated (a read torn
 by the process changing it) reads as unreadable. A 32-bit processkit reads
 no environments, since it cannot follow a 64-bit process's PEB; there every
 environment is unreadable, so suit adopts nothing (registered processes and
@@ -99,13 +120,14 @@ stops still work).
 
 Every stop is graceful first:
 
-- **Workspace manager.** suit writes `stop-request.json` for the manager's
-  generation. The manager stops its daemon, removes its endpoint and releases
-  its lock, as it does for a restart, but it does not start again.
-- **Workspace daemon.** It is stopped through its manager.
-- **Editor.** suit asks it to close its windows, so the editor can save or
-  prompt. An editor that is still open after 10 s is reported and left
-  running. It is never killed while it might have unsaved work.
+- **Workspace service.** suit sends `stop` over the service's link. The
+  service stops its agent processes, closes its storage and releases its lock.
+- **Editor.** suit asks the window to quit over its link (`exosuit.quit`).
+  Quit asks with `recover`: the window closes at once and keeps unsaved text
+  in its recovery store for the next start. Terminating one editor asks with
+  `prompt`: the window asks about unsaved work as its own close does. An
+  editor that is still open after 10 s is reported and left running. It is
+  never killed while it might have unsaved work.
 
 suit is the final arbiter: its full Quit (`suit quit`, tray "Quit Exosuit and
 end everything") ends everything exosuit started, terminal hosts included, and
@@ -120,10 +142,9 @@ before a rebuild or a switch of checkout: hosts run from a runtime copy in the
 state folder, not from the checkout.
 
 Quit, Terminate and `suit kill` stop exosuit's own processes: editors,
-workspace managers and daemons, compiler workers, live sessions and hosts,
-terminal hosts.
-Terminals end the way closing them in the app ends them: the manager's
-graceful stop makes the daemon close its PTYs and ConPTY sessions. suit never
+workspace services, compiler workers, live sessions and hosts, terminal hosts.
+Terminals in terminal hosts outlive a service's stop; the full Quit ends their
+hosts. suit never
 kills a process tree wholesale, so a program the user started from a terminal
 that detached itself from it survives, as it would if the user closed that
 terminal.
@@ -132,8 +153,8 @@ Once the grace period ends (3 s for services), suit kills the target if it
 still runs, and then sweeps: it kills the target's descendants of kinds
 exosuit starts itself (`SuitKinds.spawnedByExosuit`), reached through such
 processes only (`SuitLineage.exosuitDescendants`), and never one whose
-environment says it belongs elsewhere (`EXOSUIT_SUIT=off`, another suit's
-home); an unreadable environment does not exclude. The sweep covers the
+environment says it belongs elsewhere (another suit's home); an unreadable
+environment does not exclude. The sweep covers the
 descendants captured before anything was stopped and whatever a fresh
 snapshot finds under the target or under them. Killing the target first means
 it cannot start a child after the sweep's last snapshot; the sweep repeats
@@ -161,8 +182,8 @@ alive while its workspace service is stopped. suit treats it as its own kind, `t
   processes" and `suit kill --all` end it. The polite quit (`suit quit --keep-terminals`, tray "Quit, keep terminals
   running (N)") leaves it running and says how many terminals stay.
 - `suit terminals` lists hosts; `suit terminals end --all` or `end <workspace>` (id, root or folder name), "End all
-  terminals (N)" in the tray, a host's own submenu and `suit kill <pid>` end them: suit writes `end-request.json` into
-  the host's folder, the host ends its program and itself, and suit kills it after 3 seconds if it has not.
+  terminals (N)" in the tray, a host's own submenu and `suit kill <pid>` end them: suit kills the host and its
+  program.
 - Removing a workspace (`suit workspace delete`) ends its hosts.
 
 ## What is connected from outside
@@ -172,13 +193,13 @@ lists them and can cut them off:
 
 - `suit remote` (and `--json`) shows remote access (on or off, relay origin, connected, live sessions) and each paired
   device: name when it gave one, when it was paired (`pairedAt` in `machine-devices.json`, kept for devices paired
-  from this build on), connected now or not, and the workspaces it may use. `suit relay list` still shows the
-  per-workspace relay hosting.
+  from this build on), connected now or not, and the workspaces it may use. No workspace service dials a relay: this is all the
+  remote access there is.
 - `suit remote disconnect <device>` ends a device's live session now (the pairing stays, so the device may dial
   again); `suit remote revoke <device>` revokes its pairing (cut off for good); `suit remote off` turns remote access
   off, ending every remote session and the relay connection. The tray has the same under "Paired devices (N)", with
   "Turn remote access off".
-- The full Quit ends every remote session, the machine's relay connection and the workspaces' relay links at once,
+- The full Quit ends every remote session and the machine's relay connection at once,
   not only when the daemon exits. Remote access stays configured and is back when suit next starts. The polite quit
   leaves them.
 - A phone cannot be made to quit its app. suit cuts it off (its session and the relay connection end, or its pairing
@@ -193,73 +214,73 @@ The tray menu is built from a fresh scan each time it opens:
 - processes grouped by editor (with that editor's workspaces), then Haxeon,
   then Other, then Orphaned, then Not started by exosuit. Each process shows its kind, workspace and
   uptime, and has a submenu with Terminate.
-- Remote access: each hosting workspace with its relay state, Stop hosting,
-  Stop all hosting, and Open Remote Access…
+- Remote access: Paired devices (N), each with Disconnect now and Revoke pairing, and Turn remote access off
 - Terminate orphaned processes, Terminate all background processes (editors
   keep running, terminal hosts end; both cover only exosuit's processes), End all terminals (N) and per workspace,
   Open process viewer… (a console running `suit watch`), Quit Exosuit and end everything (N terminals), and, when
   terminals run, Quit, keep terminals running (N)
 
-Two commands show the menu without clicking. `suit menu` prints it as text.
-`suit tray-check` creates the icon, builds the native menu and removes both.
+`suit menu` prints the menu as text without clicking.
 
 ## Daemon
 
 - **One per user.** It takes an exclusive file lock in its home. The home is
   owner-only, using the private-directory and lock primitives the workspace
-  manager uses. Starting suit again is always safe, because a second copy
+  service uses. Starting suit again is always safe, because a second copy
   exits at once.
 - **Endpoint.** The CLI talks to it on `\\.\pipe\exosuit-suit-<user>`, or on
   `suit.sock` in its home outside Windows. Setting `EXOSUIT_SUIT_HOME` moves
   the registry, the lock and the endpoint, which is how tests stay isolated
   from the user's suit.
-- **Started by.** The editor and the background workspace manager start it,
-  detached. `EXOSUIT_SUIT_AUTOSTART=0` prevents only this; registration still
-  happens.
+- **Started by.** The editor starts it, detached. `EXOSUIT_SUIT_AUTOSTART=0` prevents only this; links and
+  registration still try that home.
+- **The machine.** suit keeps the machine's workspaces in memory
+  (`machine.json` in its home) and answers `machine` from there, with the
+  services that reported themselves and the windows that linked.
 - **Idle cost.** It sleeps in the NativeKit event wait and rescans every 10 s
   for the tooltip. It exits after `EXOSUIT_SUIT_IDLE_SECONDS` (default 120)
   with nothing to track, so tests and editors that come and go never leave it
   behind.
 
+## Control plane
+
+docs/design/suitctl/TDD-exosuit-ctl.md is the design. In short:
+
+- **One channel.** Programs send `{op: "control", version: 1, method, params, target}` on suit's pipe.
+  suit answers `control.hello`, `control.ping`, `instance.status` and `exosuit.instances` itself
+  and forwards every other method over the window's link (SuitLink), so there is no second channel.
+  ControlRouter routes: `target.instance_id`, else the window whose workspaces hold `target.path`
+  (deepest root), else the most recently used window.
+- **Pragtical compatible.** Every linked window also gets a Pragtical control protocol v1 pipe
+  (`\\.\pipe\exosuit-suitctl-<user>-<window>`) and a descriptor in `<home>/runtime/instances`,
+  so `pragtical --ctl` with `PRAGTICAL_USERDIR` set to suit's home finds it (PragticalPipes,
+  PragticalCodec). NativeKit's listener stops when a client closes before it is accepted
+  (docs/haxeon-compiler-bugs.md); suit starts it again, but until NativeKit is fixed only
+  `pragtical --ctl list` is reliable.
+- **Events are opt-in.** A connection that sends `exosuit.events.subscribe {names}` gets those
+  events and nothing else; windows are told which events anyone wants (`exosuit.events.want`).
+- **Driving a window.** `exosuit.ui.*` input goes into the window's own event queue (SyntheticInput),
+  never the OS's, and the user's own recent input holds it back (`busy`). While a program drives a
+  window its dialogs wait for `exosuit.dialog.answer`. Calls that change or drive a window are logged
+  to `<home>/control.log` (the last 500 to 1000), and the tray tooltip says which windows are driven.
+- **Launch forwarding.** `exosuit <folder|file>` hands its paths to an open window through suit
+  and exits; with no window, or with options that need a window of its own, it opens one.
+
 ## Tests and unattended runs
 
-`EXOSUIT_SUIT` decides what an exosuit process does with suit:
-
-- `on`: register with the user's suit (or `EXOSUIT_SUIT_HOME`), and start it.
-- `isolated`: register only with the suit at `EXOSUIT_SUIT_HOME`, and start
-  that one. Without `EXOSUIT_SUIT_HOME` this is `off`.
-- `off`, or any other value: neither register nor start suit.
-- unset: `on`, unless the process keeps its state in the system temp folder
-  (`TEMP`/`TMP` on Windows, `TMPDIR` or `/tmp` elsewhere): its
-  `PRAGTICAL_PORTABLE`, `XDG_STATE_HOME` or `EXOSUIT_AGENT_STATE_HOME`, or a
-  workspace manager's `--state-dir`. Then it is `off` (`SuitClient.modeOf`).
-
-`SuitClient.mode` only answers. Each process settles its mode once at
-startup, before it spawns anything (`SuitClient.resolve`, called by the
-editor, the workspace manager and the workspace daemon). When the mode is
-off only because the state folder is temporary, `resolve` logs `suit
-disabled: state folder is temporary (set EXOSUIT_SUIT=on to enable)`, sets
-`EXOSUIT_SUIT=off` in its own environment so every child it spawns starts
-with it, and an editor window shows that message as a notice once per
-session. Registration, the daemon start and relay hosting all use the
-resolved mode (`SuitClient.current`).
-
-The temp-folder rule is the central fix for tests run by hand: every test
-keeps its state in a disposable temp directory (the suites require a
-disposable `PRAGTICAL_PORTABLE`), and a user's editor never does, so a test
-script run outside the suites and the guard still stays out of the user's
-suit. An explicit `EXOSUIT_SUIT` always wins. A real editor can land there
-too, for example a portable build unzipped under `%TEMP%` or `/tmp`; the log
-line and the notice say so, and `EXOSUIT_SUIT=on` turns suit back on.
-
-`off` is also set in a few central places, and everything they start
-inherits it: the run guard (`docs/benchmarks/perf-harness/run-guarded.ps1`),
-the suites (`scripts/test.sh`, `scripts/ci.sh`) and the manager tests'
-environment (`manager_environment` in `scripts/agent_test_runtime.py`).
-`scripts/test-suit.py` sets `isolated` with its own home, so it exercises the
-real registration path without touching the user's registry. It runs suit's
-unit tests (`suit/tests`) first; they check the ownership rules over made-up
-process snapshots.
+suit is always on: every editor links to it and every service reports to it.
+Tests and unattended runs stay out of the user's suit by giving it a home of
+their own (`EXOSUIT_SUIT_HOME`), usually with `EXOSUIT_SUIT_AUTOSTART=0` so
+nothing starts that suit. This is set in a few central places, and everything
+they start inherits it: the run guard
+(`docs/benchmarks/perf-harness/run-guarded.ps1`, a temporary home unless the
+caller set one), the suites (`scripts/test.sh`, `scripts/ci.sh`,
+`scripts/test-windows.ps1`) and the service tests' environment
+(`isolated_suit` in `scripts/test_driver.py`). `scripts/test-suit.py`
+runs suit itself in its own home, with editor stand-ins that link as editors
+do, so it exercises the real link and registration paths without touching the
+user's suit. It runs suit's unit tests (`suit/tests`) first; they check the
+ownership rules over made-up process snapshots.
 
 ## Library path
 
@@ -276,11 +297,12 @@ inherited value.
 - **A HashLink program built like the agent host.** It reuses NativeKit, the
   local RPC transport and the runtime's lock primitives, and the tray is one
   small NativeKit API (`nk_tray_*`).
-- **Registration is a file drop, not a pipe call.** It cannot block, it works
-  while suit is down or restarting, and it needs no client code in the
-  processes that register. The pipe carries only control requests: status,
-  quit and stop.
-- **`list`, `kill` and `relay` run in the CLI process.** They work without
+- **Editors and services connect; other processes drop a file.** An editor
+  needs to hear from suit (the machine, a quit) and suit needs to know at once
+  when a window or a service goes, so both hold a connection. Registration of
+  the processes suit only stops is a file drop: it cannot block and works while
+  suit is down or restarting.
+- **`list` and `kill` run in the CLI process.** They work without
   the daemon, and the daemon rescans on its next tick.
 - **Compiler workers and live sessions are not registered.** Haxeon is shared
   with other work, so suit finds them by scanning instead of changing the

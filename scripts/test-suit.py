@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """suit end to end, isolated from the user's session.
 
-Every suit call runs with EXOSUIT_SUIT=isolated and its own EXOSUIT_SUIT_HOME, so its own registry and
-control endpoint. Most tests also set EXOSUIT_SUIT_SCAN=0, so suit sees only the processes this test
-registers. The ownership test scans, so it lists the user's processes too, but it only reads that listing,
-checks with --dry-run that bulk kills would touch none of them, and kills only its own processes by pid.
+Every suit call runs with its own EXOSUIT_SUIT_HOME, so its own registry and control endpoint. Most tests also set
+EXOSUIT_SUIT_SCAN=0, so suit sees only the processes this test registers. The ownership test scans, so it lists the
+user's processes too, but it only reads that listing, checks with --dry-run that bulk kills would touch none of them,
+and kills only its own processes by pid.
+
+Editors are stand-ins that link to the daemon as a real editor does (FAKE_EDITOR: `editor-attach` over the pipe, the
+pushed events read, `exosuit.quit` answered by exiting or left unanswered as by a window kept open over unsaved work).
 
 Covers: registration and pid-reuse checks (including old whole-second records), orphan detection, workspaces
-shared by editors or kept by suit's relay hosting, positive ownership (adoption only of exosuit kinds exosuit
-started itself, never through a terminal, never of EXOSUIT_SUIT=off; scanned processes kept out of bulk
-kills), listing without side effects, stops that end a service's or an agent provider's whole tree (an agent's child
+shared by editors, positive ownership (adoption only of exosuit kinds exosuit
+started itself, never through a terminal, never of another suit home; scanned processes kept out of bulk
+kills), the editor link (attach, `exosuit.machine.changed` pushed on changes, quit over the link), services that report
+themselves (`service-attach`), stops that end a service's or an agent provider's whole tree (an agent's child
 and grandchild are listed under it and end with it; a terminal host below a service, and what runs in it, survive
 Quit; what starts during the grace period does not), terminal hosts (listed, never
 orphaned, ended by the full Quit, `kill --all` and `terminals end`, kept by `quit --keep-terminals` with the
-daemon staying up until the last one ends), relay listing and stop, the daemon's control
-endpoint (status, quit, stop), suit's unit tests, and, with --real-manager, a real workspace manager that
-registers itself and stops cooperatively through stop-request.json, and EXOSUIT_SUIT=off, isolated and unset-
-with-temporary-state keeping a real manager out of the default registry.
+daemon staying up until the last one ends), the daemon's control
+endpoint (status, quit, stop), suit's unit tests, with --real-service a real workspace service suit starts on
+`workspace.open` and stops cooperatively over its service link, and with --editor two real editor windows that suit quits over
+their links, each keeping its unsaved text for the next start.
 """
 from __future__ import annotations
 
@@ -32,9 +36,8 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from suit import library_path, library_variable  # noqa: E402  (one library-path rule, shared with suit.py)
+from test_driver import HAXEON_ROOT as HAXEON, HL, agent_homes, kill_tree, process_runs, wait_until  # noqa: E402
 
-HAXEON = Path(os.environ.get("HAXEON_ROOT", ROOT / "haxeon"))
-HL = HAXEON / ".tools" / "hashlink" / ("hl.exe" if os.name == "nt" else "hl")
 SUIT = ROOT / "suit" / "build" / "host" / "main.hl"
 SLEEPER = [sys.executable, "-c", "import time; time.sleep(300)"]
 # Starts each command in argv[1] (a JSON list) as its child, then sleeps. An item may be
@@ -43,17 +46,60 @@ _START = ("[subprocess.Popen(c['command'] if isinstance(c, dict) else c, stdin=s
           "stderr=subprocess.DEVNULL, env=dict(os.environ, **(c.get('env', {}) if isinstance(c, dict) else {}))).pid "
           "for c in json.loads(sys.argv[1])]")
 SPAWNER = [sys.executable, "-c", f"import json, os, subprocess, sys, time; {_START}; time.sleep(300)"]
-# Like SPAWNER, but starts them after 1.5 s, inside suit's 3 s grace period for a workspace manager, and writes
+# Like SPAWNER, but starts them after 1.5 s, inside suit's 3 s grace period for a workspace service, and writes
 # their pids (comma separated) to argv[2].
 LATE_PARENT = [sys.executable, "-c",
                f"import json, os, subprocess, sys, time; time.sleep(1.5); pids = {_START}; "
                "open(sys.argv[2], 'w').write(','.join(map(str, pids))); time.sleep(300)"]
+# Like LATE_PARENT, but first reports itself as workspace argv[4]'s service to the daemon at argv[3] (`service-attach`)
+# and ignores suit's {op: "stop"}, so suit waits out the grace period before it kills it.
+LATE_SERVICE = [sys.executable, "-c", "\n".join([
+    "import json, os, subprocess, sys, time",
+    "pipe = open(sys.argv[3], 'r+b', buffering=0)",
+    "data = json.dumps({'op': 'service-attach', 'workspace': sys.argv[4], 'endpoint': r'\\\\.\\pipe\\exosuit-test-late', 'pid': os.getpid()}).encode()",
+    "pipe.write(b'HMPK\\x01\\x00' + len(data).to_bytes(4, 'big') + data)",
+    "time.sleep(1.5)",
+    f"pids = {_START}",
+    "open(sys.argv[2], 'w').write(','.join(map(str, pids)))",
+    "time.sleep(300)",
+])]
 # A fake Haxeon compiler worker: suit's own read-only `watch`, whose command line looks like a worker's.
 WORKER = [str(HL), str(SUIT), "watch", "--fake=/haxeon/compiler/suit-test-worker.hl"]
+# An editor stand-in: starts the commands in argv[5] (a JSON list, as SPAWNER), links to the daemon at argv[1] with the
+# state in argv[2], writes argv[4] once linked and appends every event it is pushed to it as a JSON line. It answers
+# `exosuit.quit` by exiting when argv[3] is "1", and leaves it unanswered otherwise (a window kept open).
+FAKE_EDITOR = [sys.executable, "-c", "\n".join([
+    "import json, os, subprocess, sys",
+    f"{_START.replace('json.loads(sys.argv[1])', 'json.loads(sys.argv[5])')}",
+    "pipe = open(sys.argv[1], 'r+b', buffering=0)",
+    "def send(value):",
+    "    data = json.dumps(value).encode()",
+    "    pipe.write(b'HMPK\\x01\\x00' + len(data).to_bytes(4, 'big') + data)",
+    "def read(count):",
+    "    data = b''",
+    "    while len(data) < count:",
+    "        part = pipe.read(count - len(data))",
+    "        if not part: sys.exit(0)",
+    "        data += part",
+    "    return data",
+    "def receive():",
+    "    return json.loads(read(int.from_bytes(read(10)[6:10], 'big')))",
+    "send(dict(json.loads(sys.argv[2]), op='editor-attach', version=1, instance_id=f'w{os.getpid()}-1', pid=os.getpid()))",
+    "assert receive().get('ok') is True",
+    "log = open(sys.argv[4], 'a')",
+    "log.write('linked\\n'); log.flush()",
+    "while True:",
+    "    message = receive()",
+    "    if message.get('kind') == 'event':",
+    "        log.write(json.dumps(message) + '\\n'); log.flush()",
+    "    if message.get('kind') == 'request' and message.get('method') == 'exosuit.quit' and sys.argv[3] == '1':",
+    "        send({'version': 1, 'kind': 'response', 'id': message['id'], 'result': {'closing': True}})",
+    "        sys.exit(0)",
+])]
 
 
 def suit_library_path() -> str:
-    """suit's library path, plus the agent's native packages for the real manager and editor tests."""
+    """suit's library path, plus the agent's native packages for the real service and editor tests."""
     agent_native = ROOT / "agent/build/host/native"
     extra = sorted(str(path) for path in agent_native.iterdir() if path.is_dir()) if agent_native.is_dir() else []
     return os.pathsep.join([library_path(SUIT, HL, HAXEON), *extra, os.environ.get(library_variable(), "")])
@@ -63,12 +109,17 @@ class Fixture:
     def __init__(self, directory: Path) -> None:
         self.home = directory / "suit-home"
         self.registry = self.home / "registry"
-        # isolated: anything started with this environment registers here, never in the user's registry.
-        self.environment = dict(os.environ, EXOSUIT_SUIT="isolated", EXOSUIT_SUIT_HOME=str(self.home),
-                                EXOSUIT_SUIT_SCAN="0", EXOSUIT_SUIT_TRAY="0", EXOSUIT_SUIT_AUTOSTART="0",
-                                EXOSUIT_SUIT_IDLE_SECONDS="30", EXOSUIT_SUIT_LAUNCHER=str(SUIT))
+        # isolated: anything started with this environment registers here, never in the user's registry, and keeps its
+        # state, Claude Code's and Codex's configuration included, under `directory`, never in the user's. No warm spare:
+        # the tests count the processes suit lists, and a linked editor would add one.
+        self.environment = dict(os.environ, EXOSUIT_SUIT_HOME=str(self.home),
+                                EXOSUIT_SUIT_SCAN="0", EXOSUIT_SUIT_TRAY="0", EXOSUIT_SUIT_AUTOSTART="0", EXOSUIT_SUIT_SPARE="0",
+                                EXOSUIT_SUIT_IDLE_SECONDS="30", EXOSUIT_SUIT_LAUNCHER=str(SUIT),
+                                EXOSUIT_AGENT_STATE_HOME=str(directory / "agent-state"), PRAGTICAL_PORTABLE=str(directory / "portable"),
+                                **agent_homes(directory / "homes"))
         self.environment[library_variable()] = suit_library_path()
         self.children: list[subprocess.Popen] = []
+        self.editors = 0
         # suit creates its home with an owner-only ACL; the test writes records into it afterwards.
         self.suit("status")
         assert self.registry.is_dir()
@@ -89,6 +140,31 @@ class Fixture:
         time.sleep(0.2)
         return process
 
+    def running(self) -> bool:
+        return json.loads(self.suit("status", "--json")).get("ok") is True
+
+    def endpoint(self) -> str:
+        return json.loads((self.home / "daemon.json").read_text())["endpoint"]
+
+    def editor(self, roots: list[str] | None = None, workspaces: list[str] | None = None, answers_quit: bool = True,
+               commands: list | None = None, environment: dict | None = None) -> subprocess.Popen:
+        """An editor stand-in linked to the daemon, which is started first (with `environment`) if it is not running."""
+        command, log = self.editor_command(roots, workspaces, answers_quit, commands, environment)
+        process = self.spawn(command, environment)
+        wait_until(lambda: log.exists() or not alive(process), 15, "the editor stand-in did not link")
+        assert alive(process), "the editor stand-in exited before it linked"
+        return process
+
+    def editor_command(self, roots: list[str] | None = None, workspaces: list[str] | None = None, answers_quit: bool = True,
+                       commands: list | None = None, environment: dict | None = None) -> tuple[list[str], Path]:
+        """The stand-in's command (to start it elsewhere, as below a terminal host) and the log it writes once linked."""
+        if not self.running():
+            assert "started" in run_suit(environment or self.environment, "start")
+        self.editors += 1
+        log = self.home.parent / f"editor-{self.editors}.log"
+        state = {"context": None, "workspaces": workspaces or [], "roots": roots or []}
+        return [*FAKE_EDITOR, self.endpoint(), json.dumps(state), "1" if answers_quit else "0", str(log), json.dumps(commands or [])], log
+
     def register(self, pid: int, kind: str, registered_at: float | None = None, version: int = 2,
                  **details: object) -> None:
         record = {"version": version, "pid": pid, "kind": kind,
@@ -97,13 +173,7 @@ class Fixture:
 
     def cleanup(self) -> None:
         for child in self.children:
-            if child.poll() is None:
-                child.kill()
-        for child in self.children:
-            try:
-                child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
+            kill_tree(child)
 
 
 def alive(process: subprocess.Popen) -> bool:
@@ -114,31 +184,11 @@ def find(listing: dict, pid: int) -> dict | None:
     return next((entry for entry in listing["processes"] if entry["pid"] == pid), None)
 
 
-def write_private(path: Path, text: str) -> None:
-    """Writes a file only this user can read, as suit requires of relay records and settings."""
-    path.write_text(text)
-    if os.name == "nt":
-        user = f"{os.environ['USERDOMAIN']}\\{os.environ['USERNAME']}"
-        subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:F"], check=True, capture_output=True)
-    else:
-        path.chmod(0o600)
-
-
-def wait_until(condition, timeout: float, message: str) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return
-        time.sleep(0.1)
-    raise AssertionError(message)
-
-
 def test_registry_and_termination(fixture: Fixture, directory: Path) -> None:
     root_a, root_b, root_c = directory / "alpha", directory / "beta", directory / "gamma"
     for root in (root_a, root_b, root_c):
         root.mkdir()
-    editor = fixture.spawn()
-    fixture.register(editor.pid, "editor", roots=[str(root_a), str(root_c)])
+    editor = fixture.editor(roots=[str(root_a), str(root_c)])
     owned = fixture.spawn()
     fixture.register(owned.pid, "workspace-host", root=str(root_a))
     orphan = fixture.spawn()
@@ -149,13 +199,8 @@ def test_registry_and_termination(fixture: Fixture, directory: Path) -> None:
     dead = fixture.spawn()
     dead.kill(); dead.wait()
     fixture.register(dead.pid, "workspace-host", root=str(root_b))
-    # A relay-hosting workspace: its daemon's published status, read from the state directory.
+    # A service with a state directory, of a root the editor also has.
     state = directory / "gamma-state"; state.mkdir()
-    (state / "relay-settings.json").write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
-    (state / "relay-status.json").write_text(json.dumps({
-        "version": 1, "configured": True, "connected": True, "origin": "http://127.0.0.1:1", "error": None,
-        "devices": [{"deviceId": "d" * 32, "connected": True, "revoked": False}], "pending": 1,
-        "updatedAt": time.time() * 1000}))
     hosted = fixture.spawn()
     fixture.register(hosted.pid, "workspace-host", root=str(root_c), stateDir=str(state))
 
@@ -179,19 +224,15 @@ def test_registry_and_termination(fixture: Fixture, directory: Path) -> None:
     assert find(listing, early.pid) is None, "a current record older than its process was kept"
     assert find(listing, reused.pid) is None, "pid reuse not detected"
     assert find(listing, dead.pid) is None, "stale record listed"
-    # Listing has no side effects: only the daemon prunes stale records.
-    assert (fixture.registry / f"{reused.pid}.json").exists() and (fixture.registry / f"{dead.pid}.json").exists(), \
-        "suit list deleted records"
+    # The daemon, which holds the editor's link, prunes stale records.
+    assert not (fixture.registry / f"{reused.pid}.json").exists() and not (fixture.registry / f"{dead.pid}.json").exists(), \
+        "the daemon kept stale records"
     for extra in (same_second, early):
         extra.kill(); extra.wait()
-        (fixture.registry / f"{extra.pid}.json").unlink()
+        (fixture.registry / f"{extra.pid}.json").unlink(missing_ok=True)
     assert "Exosuit: 1 editor, 4 background processes (1 orphaned)" == listing["summary"], listing["summary"]
     text = fixture.suit("list")
     assert "Orphaned" in text and "workspace-host" in text, text
-
-    relay = fixture.suit("relay", "list")
-    assert "gamma" in relay and "connected" in relay and "d" * 32 in relay and "1 pairing request" in relay, relay
-    assert "secret" not in relay
 
     # Only processes suit knows about may be killed by pid.
     refused = subprocess.run([str(HL), str(SUIT), "kill", str(os.getpid())], env=fixture.environment,
@@ -203,13 +244,8 @@ def test_registry_and_termination(fixture: Fixture, directory: Path) -> None:
     wait_until(lambda: not alive(orphan), 10, "orphan survived")
     assert alive(owned) and alive(editor) and alive(hosted), "kill --orphans touched owned processes"
 
-    output = fixture.suit("relay", "stop", "gamma")
-    assert f"{hosted.pid} workspace-host" in output, output
-    wait_until(lambda: not alive(hosted), 10, "relay host survived")
-    assert alive(owned), "relay stop touched another workspace"
-
     fixture.suit("kill", "--all")
-    wait_until(lambda: not alive(owned), 10, "background process survived kill --all")
+    wait_until(lambda: not alive(owned) and not alive(hosted), 10, "background process survived kill --all")
     assert alive(editor), "kill --all must keep editors"
 
 
@@ -225,13 +261,15 @@ def test_quit_spares_shell_programs(fixture: Fixture) -> None:
     scanning = dict(fixture.environment, EXOSUIT_SUIT_SCAN="1")
     shell = SPAWNER + [json.dumps([WORKER, SLEEPER])]
     # `python fake.hl --terminal-host DIR ...` reads as a terminal host (SuitClassifier.terminalDirectory).
-    fake_host = Path(tempfile.mkdtemp(prefix="suit-fake-host-")) / "terminal-host.hl"
+    fake_host = Path(tempfile.mkdtemp(prefix="suit-fake-host-", dir=fixture.home.parent)) / "terminal-host.hl"
     fake_host.write_text("\n".join(["import json, os, subprocess, sys, time", _START.replace("sys.argv[1]", "sys.argv[3]"),
                                     "time.sleep(300)", ""]))
     host_command = [sys.executable, str(fake_host), "--terminal-host", str(fake_host.parent), json.dumps([shell])]
-    # The host is started with suit off, so it is not this suit's: one its owned service starts would be adopted while it
-    # starts (SuitInventory.startedByService) and ended by the quit, and this test is about what runs in a host it keeps.
-    host = fixture.spawn(SPAWNER + [json.dumps([WORKER, {"command": host_command, "env": {"EXOSUIT_SUIT": "off"}}])], fixture.environment)
+    # The host is started for another suit home, so it is not this suit's: one its owned service starts would be adopted
+    # while it starts (SuitInventory.startedByService) and ended by the quit, and this test is about what runs in a host it
+    # keeps.
+    elsewhere = str(Path(tempfile.gettempdir()) / "suit-test-elsewhere")
+    host = fixture.spawn(SPAWNER + [json.dumps([WORKER, {"command": host_command, "env": {"EXOSUIT_SUIT_HOME": elsewhere}}])], fixture.environment)
     fixture.register(host.pid, "workspace-host", root=str(Path(tempfile.gettempdir()) / "suit-test-quit"))
     wait_until(lambda: len(child_processes(host.pid)) == 2, 30, "the fake daemon did not start its children")
     worker, terminal_host = by_name(child_processes(host.pid))
@@ -250,13 +288,13 @@ def test_quit_spares_shell_programs(fixture: Fixture) -> None:
         assert planned == {host.pid, worker}, f"kill --all would stop {planned}, not just this test's daemon and worker"
         assert "started" in run_suit(scanning, "start")
         assert "Quitting Exosuit" in run_suit(scanning, "quit")
-        wait_until(lambda: not alive(host) and not pid_alive(worker), 15, "quit left the daemon or its worker running")
+        wait_until(lambda: not alive(host) and not process_runs(worker), 15, "quit left the daemon or its worker running")
         time.sleep(1)
         for pid in survivors:
-            assert pid_alive(pid), f"quit killed {pid}, which runs in or is a terminal host"
+            assert process_runs(pid), f"quit killed {pid}, which runs in or is a terminal host"
     finally:
         for pid in [worker, *survivors]:
-            if pid_alive(pid):
+            if process_runs(pid):
                 kill_pid(pid)
 
 
@@ -275,26 +313,25 @@ def test_provider_tree(fixture: Fixture, directory: Path) -> None:
         assert "2 child processes" in fixture.suit("list"), fixture.suit("list")
         assert "started" in fixture.suit("start")
         assert "Quitting Exosuit" in fixture.suit("quit")
-        wait_until(lambda: not alive(provider) and not pid_alive(child) and not pid_alive(grandchild), 20,
+        wait_until(lambda: not alive(provider) and not process_runs(child) and not process_runs(grandchild), 20,
                    "the full quit left the provider's child or grandchild running")
     finally:
         for pid in (child, grandchild):
-            if pid_alive(pid):
+            if process_runs(pid):
                 kill_pid(pid)
 
 
 # A stand-in terminal host: `python terminal-host.hl --terminal-host DIR [commands]` reads as a host
-# (SuitClassifier.terminalDirectory). It starts each command of its JSON list (pids in DIR/children.txt) and ends when
-# DIR/end-request.json appears, leaving DIR/ended-by-request, as a real host takes suit's end request.
+# (SuitClassifier.terminalDirectory). It starts each command of its JSON list (pids in DIR/children.txt) and runs
+# until suit kills it, as suit ends a real host.
 _FAKE_HOST = "\n".join([
     "import json, os, subprocess, sys, time",
     "folder = sys.argv[2]",
     "commands = json.loads(sys.argv[3]) if len(sys.argv) > 3 else []",
     "pids = [subprocess.Popen(c, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid for c in commands]",
     "open(os.path.join(folder, 'children.txt'), 'w').write(','.join(map(str, pids)))",
-    "while not os.path.exists(os.path.join(folder, 'end-request.json')):",
+    "while True:",
     "    time.sleep(0.1)",
-    "open(os.path.join(folder, 'ended-by-request'), 'w').write('1')",
     ""])
 
 
@@ -346,7 +383,7 @@ def terminal_host_stand_ins(fixture: Fixture, directory: Path):
 def test_terminal_hosts(fixture: Fixture, directory: Path) -> None:
     """Terminal hosts are listed in their own group, never orphaned, part of `kill --all`, and ended per workspace.
 
-    Real hosts, their end request and their folders are covered by scripts/test-terminal-hosts.py.
+    Real hosts and their folders are covered by scripts/test-terminal-hosts.py.
     """
     root_a, root_b, first, second, service = terminal_host_stand_ins(fixture, directory)
     listing = fixture.listing()
@@ -388,8 +425,6 @@ def test_full_quit_ends_terminals(fixture: Fixture, directory: Path) -> None:
     said = fixture.suit("quit")
     assert "Quitting Exosuit: ending 3 process(es) (2 terminal(s) among them)" in said, said
     wait_until(lambda: not alive(service) and not alive(first) and not alive(second), 20, "the full quit left a process running")
-    for name in ("first", "second"):
-        assert (directory / "hosts" / name / "ended-by-request").exists(), f"the {name} host was killed, not ended through its end request"
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the full quit")
     assert fixture.listing()["processes"] == []
 
@@ -398,22 +433,20 @@ def test_full_quit_waits_for_editor_in_terminal(fixture: Fixture, directory: Pat
     """An editor runs in an Exosuit terminal (`python scripts/run.py` started there). The full quit leaves that terminal's
     host running while the editor is open (it may be asking to save), and ends it once the editor has exited."""
     folder = directory / "hosts" / "with-editor"
-    host = fake_terminal_host(fixture, folder, [SLEEPER])
+    command, log = fixture.editor_command(roots=[str(directory / "run")], answers_quit=False)
+    host = fake_terminal_host(fixture, folder, [command])
     editor = int((folder / "children.txt").read_text())
     try:
-        fixture.register(editor, "editor", roots=[str(directory / "run")])
+        wait_until(log.exists, 15, "the editor in the terminal did not link")
         fixture.register(host.pid, "terminal-host", root=str(directory / "run"), workspace="ws-run")
-        assert "started" in fixture.suit("start")
         fixture.suit("quit")
         time.sleep(4)
-        assert alive(host) and not (folder / "ended-by-request").exists(), \
-            "the full quit ended the terminal an editor runs in before the editor closed"
-        kill_pid(editor)  # the editor closes (its stand-in has no window to ask)
+        assert alive(host), "the full quit ended the terminal an editor runs in before the editor closed"
+        kill_pid(editor)  # the editor closes (its stand-in left the quit unanswered, as a window kept open would)
         wait_until(lambda: not alive(host), 30, "the full quit did not end the terminal host once its editor had exited")
-        assert (folder / "ended-by-request").exists(), "the host was killed, not ended through its end request"
         wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the full quit")
     finally:
-        if pid_alive(editor):
+        if process_runs(editor):
             kill_pid(editor)
 
 
@@ -457,23 +490,18 @@ def test_polite_quit_keeps_remote_access(fixture: Fixture, directory: Path) -> N
 
 
 def test_polite_quit_does_not_hunt_new_arrivals(fixture: Fixture, directory: Path) -> None:
-    """After `suit quit --keep-terminals` with a terminal host kept, a manager started afterwards (the user starting
+    """After `suit quit --keep-terminals` with a terminal host kept, a service started afterwards (the user starting
     Exosuit again, no editor registered yet) is left alone for longer than the quit's re-terminate rounds."""
     _, _, first, second, service = terminal_host_stand_ins(fixture, directory)
     assert "started" in fixture.suit("start")
     fixture.suit("quit", "--keep-terminals")
     wait_until(lambda: not alive(service), 15, "the polite quit left a background process")
     time.sleep(3)  # the quit's rounds are over
-    manager = fixture.spawn()
-    fixture.register(manager.pid, "workspace-manager", root=str(directory / "again"))
+    service = fixture.spawn()
+    fixture.register(service.pid, "workspace-host", root=str(directory / "again"))
     time.sleep(12)  # longer than the daemon's 10 s rescan, which is when a lingering quit would find it
-    assert alive(manager), "the daemon ended a workspace manager started after the polite quit"
+    assert alive(service), "the daemon ended a workspace service started after the polite quit"
     assert alive(first) and alive(second), "the polite quit ended a terminal host"
-
-
-def attach_through_pipe(fixture: Fixture) -> dict:
-    """A forged relay attach over the daemon's pipe (Windows); the reply, as a workspace service would read it."""
-    return request_through_pipe(fixture, {"op": "relay-attach", "version": 1, "pid": os.getpid()})
 
 
 def request_through_pipe(fixture: Fixture, request: dict) -> dict:
@@ -486,9 +514,9 @@ def request_through_pipe(fixture: Fixture, request: dict) -> dict:
         return json.loads(pipe.read(int.from_bytes(header[6:10], "big")))
 
 
-def test_full_quit_refuses_relay_attach(fixture: Fixture, directory: Path) -> None:
-    """With an editor kept open the daemon stays up after the full quit, but refuses relay attaches and has machine remote
-    access off until a new editor registers (the user started Exosuit again), which brings both back."""
+def test_full_quit_ends_remote_access(fixture: Fixture, directory: Path) -> None:
+    """With an editor kept open the daemon stays up after the full quit, but has remote access off until a new editor
+    links (the user started Exosuit again), which brings it back."""
     if os.name != "nt":
         return
     directory.mkdir(parents=True, exist_ok=True)
@@ -496,39 +524,33 @@ def test_full_quit_refuses_relay_attach(fixture: Fixture, directory: Path) -> No
     credentials.mkdir(exist_ok=True)
     # Remote access set up with a relay nobody listens on (configured, never connected), with a file credential store.
     fixture.environment.update(EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP="1", EXOSUIT_RELAY_TEST_CREDENTIALS_DIR=str(credentials))
-    editor = fixture.spawn()
-    fixture.register(editor.pid, "editor", root=str(directory / "kept"))
-    assert "started" in fixture.suit("start")
+    editor = fixture.editor(roots=[str(directory / "kept")], answers_quit=False)
     enabled = request_through_pipe(fixture, {"op": "remote-enable", "origin": "http://127.0.0.1:9"})
     assert enabled.get("ok") is True and enabled.get("enabled") is True, f"remote access was not set up: {enabled}"
     fixture.suit("quit")
     time.sleep(3)
     assert alive(editor), "the full quit ended an editor that was not asked to close"
-    reply = attach_through_pipe(fixture)
-    assert reply.get("error") == "suit_quitting", f"the relay attach was not refused by the quit: {reply}"
     status = request_through_pipe(fixture, {"op": "remote-status"})
     assert status.get("enabled") is False, f"the full quit left remote access on: {status}"
-    # A newly started editor cancels the quit; the attach then fails for its own reasons, not the quit's.
-    other = fixture.spawn()
-    fixture.register(other.pid, "editor", root=str(directory / "again"))
-    fixture.suit("status")  # the status request rescans
-    reply = attach_through_pipe(fixture)
-    assert reply.get("error") != "suit_quitting", f"a new editor did not cancel the quit: {reply}"
+    # A newly started editor cancels the quit.
+    fixture.editor(roots=[str(directory / "again")])
     status = request_through_pipe(fixture, {"op": "remote-status"})
     assert status.get("enabled") is True, f"cancelling the quit did not bring remote access back: {status}"
 
 
 # One stand-in per kind suit can be shown by registration alone (each a sleeper this test started).
-EVERY_KIND = ["editor", "workspace-manager", "workspace-host", "compiler-worker", "live-session", "live-host",
+EVERY_KIND = ["editor", "workspace-host", "compiler-worker", "live-session", "live-host",
               "terminal-host", "agent-provider", "language-server", "helper", "launcher", "other"]
 
 
 def start_every_kind(fixture: Fixture, directory: Path) -> dict[str, subprocess.Popen]:
     started = {}
     for kind in EVERY_KIND:
+        if kind == "editor":
+            started[kind] = fixture.editor(roots=[str(directory / "every")], workspaces=["ws-every"])
+            continue
         process = fixture.spawn()
-        fixture.register(process.pid, kind, root=str(directory / "every"), workspace="ws-every",
-                         **({"roots": [str(directory / "every")], "workspaces": ["ws-every"]} if kind == "editor" else {}))
+        fixture.register(process.pid, kind, root=str(directory / "every"), workspace="ws-every")
         started[kind] = process
     listing = json.loads(fixture.suit("list", "--all", "--json"))
     for kind in EVERY_KIND:
@@ -540,21 +562,13 @@ def start_every_kind(fixture: Fixture, directory: Path) -> dict[str, subprocess.
     return started
 
 
-def finish_with_editor(fixture: Fixture, editor: subprocess.Popen, expected: set[int]) -> None:
-    """The editor stand-in has no window to close, so it stays (never killed); the daemon keeps listing it. Close it."""
-    left = {entry["pid"] for entry in fixture.listing()["processes"]}
-    assert left == expected | {editor.pid}, f"after the quit {left} is left, expected {expected | {editor.pid}}"
-    assert "not running" not in fixture.suit("status"), "the daemon exited while something was left"
-    editor.kill(); editor.wait()
-
-
 def test_full_quit_ends_every_kind(fixture: Fixture, directory: Path) -> None:
-    """One of each kind, `suit quit`: nothing exosuit-related is left, then the daemon exits."""
+    """One of each kind, `suit quit`: the editor quits when asked over its link, nothing exosuit-related is left, then
+    the daemon exits."""
     assert "started" in fixture.suit("start")
     started = start_every_kind(fixture, directory)
     fixture.suit("quit")
-    wait_until(lambda: all(not alive(p) for kind, p in started.items() if kind != "editor"), 20, "the full quit left a process running")
-    finish_with_editor(fixture, started["editor"], set())
+    wait_until(lambda: all(not alive(p) for p in started.values()), 20, "the full quit left a process running")
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the full quit")
     assert fixture.listing()["processes"] == []
 
@@ -565,9 +579,8 @@ def test_polite_quit_leaves_only_terminals(fixture: Fixture, directory: Path) ->
     started = start_every_kind(fixture, directory)
     fixture.suit("quit", "--keep-terminals")
     host = started["terminal-host"]
-    wait_until(lambda: all(not alive(p) for kind, p in started.items() if kind not in ("editor", "terminal-host")), 20,
+    wait_until(lambda: all(not alive(p) for kind, p in started.items() if kind != "terminal-host"), 20,
                "the polite quit left a process running")
-    finish_with_editor(fixture, started["editor"], {host.pid})
     time.sleep(3)
     assert alive(host), "the polite quit ended the terminal host"
     assert {entry["pid"] for entry in fixture.listing()["processes"]} == {host.pid}
@@ -600,44 +613,33 @@ def by_name(children: dict[int, str]) -> tuple[int, int]:
     return hl[0], other[0]
 
 
-def registry_state(registry: Path) -> dict[str, str]:
-    return {path.name: path.read_text() for path in sorted(registry.glob("*.json"))}
-
-
 def test_shared_workspace(fixture: Fixture, directory: Path) -> None:
     """A workspace's services belong to every editor that uses its root, not to the one that started them."""
     root = directory / "shared"; root.mkdir(parents=True)
-    first, second = fixture.spawn(), fixture.spawn()
-    fixture.register(first.pid, "editor", roots=[str(root)])
-    fixture.register(second.pid, "editor", roots=[str(root)])
-    manager = fixture.spawn()
-    fixture.register(manager.pid, "workspace-manager", root=str(root))
+    first, second = fixture.editor(roots=[str(root)]), fixture.editor(roots=[str(root)])
     host = fixture.spawn()
     fixture.register(host.pid, "workspace-host", root=str(root))
     first.kill(); first.wait()
     listing = fixture.listing()
-    for service in (manager, host):
-        entry = find(listing, service.pid)
-        assert entry["orphaned"] is False and entry["group"] == f"Editor {second.pid}: shared", entry
+    entry = find(listing, host.pid)
+    assert entry["orphaned"] is False and entry["group"] == f"Editor {second.pid}: shared", entry
     assert "Nothing to terminate" in fixture.suit("kill", "--orphans", "--dry-run")
     second.kill(); second.wait()
     listing = fixture.listing()
-    assert all(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
+    assert find(listing, host.pid)["orphaned"], listing
     planned = fixture.suit("kill", "--orphans", "--dry-run")
-    assert f"{manager.pid} workspace-manager: would stop" in planned and f"{host.pid} workspace-host" in planned, planned
-    assert alive(manager) and alive(host), "--dry-run stopped something"
+    assert f"{host.pid} workspace-host: would stop" in planned, planned
+    assert alive(host), "--dry-run stopped something"
 
 
 def test_workspace_ids_with_several_editors(fixture: Fixture, directory: Path) -> None:
     """M19 Phase 8: a workspace's service (keyed by workspace id) stays up while any editor uses it, an editor
-    exiting stops nothing, and Quit stops the services when asked and leaves editors that have no window to close."""
-    one, two = fixture.spawn(), fixture.spawn()
-    fixture.register(one.pid, "editor", roots=[], workspaces=["w1"])
-    fixture.register(two.pid, "editor", roots=[], workspaces=["w1", "w2"])
+    exiting stops nothing, and Quit stops the services when asked and leaves editors that stay open."""
+    one, two = fixture.editor(workspaces=["w1"]), fixture.editor(workspaces=["w1", "w2"])
     services = {}
     for workspace in ("w1", "w2"):
         service = fixture.spawn()
-        fixture.register(service.pid, "workspace-manager", workspace=workspace, root=None)
+        fixture.register(service.pid, "workspace-host", workspace=workspace, root=None)
         services[workspace] = service
     listing = fixture.listing()
     assert not any(find(listing, s.pid)["orphaned"] for s in services.values()), listing
@@ -646,20 +648,17 @@ def test_workspace_ids_with_several_editors(fixture: Fixture, directory: Path) -
     assert find(listing, services["w1"].pid)["orphaned"] is False, "w1's service lost its editor while another editor uses w1"
     assert find(listing, services["w2"].pid)["orphaned"] is True, "w2's service is used by no running editor"
     planned = fixture.suit("kill", "--orphans", "--dry-run")
-    assert f"{services['w2'].pid} workspace-manager: would stop" in planned and str(services["w1"].pid) not in planned, planned
+    assert f"{services['w2'].pid} workspace-host: would stop" in planned and str(services["w1"].pid) not in planned, planned
     assert all(alive(s) for s in services.values()) and alive(one), "an editor exiting, or --dry-run, stopped something"
     one.kill(); one.wait()
     listing = fixture.listing()
     assert all(find(listing, s.pid)["orphaned"] for s in services.values()), listing
     assert all(alive(s) for s in services.values()), "services stop only when asked, not when the last editor exits"
-    # Quit with several editors: the services stop, the editors (fixture processes without a window) are left alone.
-    third, fourth = fixture.spawn(), fixture.spawn()
-    fixture.register(third.pid, "editor", roots=[], workspaces=["w1"])
-    fixture.register(fourth.pid, "editor", roots=[], workspaces=["w2"])
-    assert "started" in fixture.suit("start", timeout=60)
+    # Quit with several editors: the services stop, editors that stay open (the quit unanswered) are left alone.
+    third, fourth = fixture.editor(workspaces=["w1"], answers_quit=False), fixture.editor(workspaces=["w2"], answers_quit=False)
     assert "Quitting Exosuit" in fixture.suit("quit")
     wait_until(lambda: not any(alive(s) for s in services.values()), 15, "quit left a workspace service running")
-    assert alive(third) and alive(fourth), "quit killed an editor that was not asked to close"
+    assert alive(third) and alive(fourth), "quit killed an editor that stayed open"
     # The daemon exits only when nothing is left: it keeps listing the editors that stayed open.
     time.sleep(3)
     assert "not running" not in fixture.suit("status"), "the daemon exited while editors were still open"
@@ -668,65 +667,26 @@ def test_workspace_ids_with_several_editors(fixture: Fixture, directory: Path) -
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after the last editor closed")
 
 
-def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
-    """Services suit starts for a workspace it hosts are in use while hosting is on: not orphaned, and
-    Terminate orphaned leaves them. Paused hosting makes them ordinary orphans again."""
-    root = directory / "hosted"; root.mkdir(parents=True)
-    state = directory / "hosted-state"; state.mkdir()
-    settings = state / "relay-settings.json"
-    write_private(settings, json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
-    machine = "ab" * 16
-    hosts = fixture.home / "relay-hosts"; hosts.mkdir()
-    write_private(hosts / f"{machine}.json", json.dumps({
-        "version": 1, "root": str(root), "stateDir": str(state), "machineId": machine, "origin": "http://127.0.0.1:1",
-        "executable": str(HL), "launcher": str(SUIT)}))
-    manager, host = fixture.spawn(), fixture.spawn()
-    fixture.register(manager.pid, "workspace-manager", root=str(root), stateDir=str(state), generation="g1")
-    fixture.register(host.pid, "workspace-host", root=str(root), stateDir=str(state), owner=manager.pid)
-    # Another workspace's manager with no editor and no hosting stays an orphan.
-    other = fixture.spawn()
-    fixture.register(other.pid, "workspace-manager", root=str(directory / "other"), stateDir=str(directory / "other-state"))
-    listing = fixture.listing()
-    for service in (manager, host):
-        entry = find(listing, service.pid)
-        assert entry["orphaned"] is False and entry["group"] == "Other", entry
-    assert find(listing, other.pid)["orphaned"] is True, find(listing, other.pid)
-    output = fixture.suit("kill", "--orphans")
-    assert f"{other.pid} workspace-manager" in output and str(manager.pid) not in output and str(host.pid) not in output, output
-    wait_until(lambda: not alive(other), 10, "the unhosted orphan survived")
-    time.sleep(0.5)
-    assert alive(manager) and alive(host), "Terminate orphaned stopped a hosted workspace's services"
-    settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1", "hosting": "paused"}))
-    listing = fixture.listing()
-    assert all(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
-    # A state that moved into a workspace (M19 Phase 4) is never hosted, whatever settings it still has.
-    settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
-    listing = fixture.listing()
-    assert not any(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
-    write_private(state / "workspace.json", json.dumps({"version": 2, "root": str(root), "migratedTo": "workspace-" + "0" * 32}))
-    listing = fixture.listing()
-    assert all(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
-
-
 def test_late_child(fixture: Fixture, directory: Path) -> None:
     """What a service starts during the grace period dies: suit kills the target, then sweeps a fresh snapshot of its
     whole tree, so a worker and a program of another kind started then end with it."""
     directory.mkdir(parents=True, exist_ok=True)
     state = directory / "late-state"; state.mkdir()
     marker = directory / "late-children.pid"
-    # A fake workspace manager that ignores stop-request.json, so suit waits out the grace period.
-    manager = fixture.spawn(LATE_PARENT + [json.dumps([WORKER, SLEEPER]), str(marker)], fixture.environment)
-    fixture.register(manager.pid, "workspace-manager", root=str(directory / "late-root"), stateDir=str(state), generation="g1")
-    output = fixture.suit("kill", str(manager.pid))
-    assert f"{manager.pid} workspace-manager: killed" in output, output
-    assert json.loads((state / "stop-request.json").read_text()) == {"version": 1, "generation": "g1"}
+    # A fake workspace service, linked to the daemon, that ignores suit's stop, so suit waits out the grace period.
+    assert "started" in fixture.suit("start")
+    service = fixture.spawn(LATE_SERVICE + [json.dumps([WORKER, SLEEPER]), str(marker), fixture.endpoint(), "late"], fixture.environment)
+    fixture.register(service.pid, "workspace-host", root=str(directory / "late-root"), stateDir=str(state), generation="g1", workspace="late")
+    time.sleep(0.3)  # linked by now, and its children start only after 1.5 s: inside the grace period
+    output = fixture.suit("kill", str(service.pid))
+    assert f"{service.pid} workspace-host: killed" in output, output
     late_worker, late_program = (int(pid) for pid in marker.read_text().split(","))
     try:
-        wait_until(lambda: not pid_alive(late_worker), 10, "a worker started during the grace period survived")
-        wait_until(lambda: not pid_alive(late_program), 10, "a program the service started during the grace period survived")
+        wait_until(lambda: not process_runs(late_worker), 10, "a worker started during the grace period survived")
+        wait_until(lambda: not process_runs(late_program), 10, "a program the service started during the grace period survived")
     finally:
         for pid in (late_worker, late_program):
-            if pid_alive(pid):
+            if process_runs(pid):
                 kill_pid(pid)
 
 
@@ -738,8 +698,8 @@ def test_helper_markers(fixture: Fixture, directory: Path) -> None:
     state = directory / "helper-state"; state.mkdir()
     marker = directory / "helper-children.pid"
     helpers = [SLEEPER + ["root", "--exosuit-helper=claude-name-bridge"], SLEEPER + ["--exosuit-helper=profiler-bridge"], SLEEPER]
-    manager = fixture.spawn(LATE_PARENT + [json.dumps(helpers), str(marker)], fixture.environment)
-    fixture.register(manager.pid, "workspace-manager", root=str(directory / "helper-root"), stateDir=str(state), generation="g1")
+    service = fixture.spawn(LATE_PARENT + [json.dumps(helpers), str(marker)], fixture.environment)
+    fixture.register(service.pid, "workspace-host", root=str(directory / "helper-root"), stateDir=str(state), generation="g1")
     wait_until(lambda: marker.exists() and marker.read_text().count(",") == 2, 20, "the fake service did not start its helpers")
     name_bridge, profiler_bridge, stranger = (int(pid) for pid in marker.read_text().split(","))
     try:
@@ -747,13 +707,13 @@ def test_helper_markers(fixture: Fixture, directory: Path) -> None:
         helper_pids = {entry["pid"] for entry in listing["processes"] if entry.get("kind") == "helper"}
         assert {name_bridge, profiler_bridge} <= helper_pids, f"suit did not list the bridges as helpers: {listing['processes']}"
         assert stranger not in helper_pids, "suit took a program without the marker for a helper"
-        output = fixture.suit("kill", str(manager.pid))
-        assert f"{manager.pid} workspace-manager: killed" in output, output
-        wait_until(lambda: not pid_alive(name_bridge) and not pid_alive(profiler_bridge) and not pid_alive(stranger), 15,
+        output = fixture.suit("kill", str(service.pid))
+        assert f"{service.pid} workspace-host: killed" in output, output
+        wait_until(lambda: not process_runs(name_bridge) and not process_runs(profiler_bridge) and not process_runs(stranger), 15,
                    "ending the service left a bridge or another child running")
     finally:
         for pid in (name_bridge, profiler_bridge, stranger):
-            if pid_alive(pid):
+            if process_runs(pid):
                 kill_pid(pid)
 
 
@@ -803,10 +763,10 @@ def test_run_py_chain(fixture: Fixture, directory: Path, keep_terminals: bool) -
         stranger.kill(); stranger.wait()
         assert worker.pid in planned_kills(scanning, "--all"), "the worker is still shared after the other session ended"
         run_suit(scanning, "quit", *(["--keep-terminals"] if keep_terminals else []))
-        wait_until(lambda: not any(pid_alive(pid) for pid in ours), 20, "the quit left part of the run.py chain running")
+        wait_until(lambda: not any(process_runs(pid) for pid in ours), 20, "the quit left part of the run.py chain running")
     finally:
         for pid in (session_pid,):
-            if pid_alive(pid):
+            if process_runs(pid):
                 kill_pid(pid)
 
 
@@ -835,19 +795,19 @@ def test_terminal_build_shares_worker(fixture: Fixture, directory: Path) -> None
         for selection in ("--all", "--orphans"):
             assert worker.pid not in planned_kills(scanning, selection), f"kill {selection} would stop a worker a terminal build uses"
         run_suit(scanning, "quit", "--keep-terminals")
-        wait_until(lambda: not pid_alive(session_pid) and not alive(launcher), 20, "the polite quit left the run.py chain running")
+        wait_until(lambda: not process_runs(session_pid) and not alive(launcher), 20, "the polite quit left the run.py chain running")
         time.sleep(1)
-        assert alive(worker) and pid_alive(build), "the polite quit ended a worker a terminal build uses, or the build"
+        assert alive(worker) and process_runs(build), "the polite quit ended a worker a terminal build uses, or the build"
         # The build ends; the session that tied the worker to exosuit is gone, so no adoption lingers to orphan it.
         kill_pid(build)
-        wait_until(lambda: not pid_alive(build), 10, "the build stand-in did not end")
+        wait_until(lambda: not process_runs(build), 10, "the build stand-in did not end")
         entry = find(scanned_listing(scanning), worker.pid)
         assert entry is not None and entry["source"] == "scanned" and not entry["orphaned"], entry
         assert worker.pid not in planned_kills(scanning, "--orphans"), "the orphan sweep would stop a worker exosuit no longer uses"
         assert not (fixture.registry / f"{worker.pid}.json").exists(), "suit persisted a checkout worker's adoption"
     finally:
         for pid in (session_pid, build):
-            if pid is not None and pid_alive(pid):
+            if pid is not None and process_runs(pid):
                 kill_pid(pid)
 
 
@@ -866,28 +826,28 @@ def test_terminal_program_not_adopted(fixture: Fixture, directory: Path) -> None
         assert find(listing, program) is None, f"suit listed a terminal's program by its kind: {find(listing, program)}"
         assert planned_kills(scanning, "--all") == {host.pid}, "kill --all would stop a terminal's program directly"
     finally:
-        if pid_alive(program):
+        if process_runs(program):
             kill_pid(program)
 
 
 def test_ownership(fixture: Fixture, directory: Path) -> None:
     """Only processes exosuit started are its own; scanned strangers stay out of every bulk kill.
 
-    The fake editor starts a worker itself (adopted), a worker with EXOSUIT_SUIT=off (never adopted), and a
-    terminal shell that starts a worker (a build in the terminal: not adopted). Listing and --dry-run write
-    nothing; the daemon persists the adoption and prunes a stale record.
+    The fake editor starts a worker itself (adopted), a worker of another suit home (never adopted), and a terminal
+    shell that starts a worker (a build in the terminal: not adopted). The daemon persists the adoption and prunes a
+    stale record.
     """
     directory.mkdir(parents=True, exist_ok=True)
     scanning = dict(fixture.environment, EXOSUIT_SUIT_SCAN="1")
     # Workers register with this fixture's suit, as a worker the editor starts would.
     worker_environment = dict(fixture.environment, EXOSUIT_SUIT_SCAN="0")
     stranger = fixture.spawn(WORKER, worker_environment)
-    editor = fixture.spawn(SPAWNER + [json.dumps([
-        WORKER, {"command": WORKER, "env": {"EXOSUIT_SUIT": "off"}}, SPAWNER + [json.dumps([WORKER])]])], worker_environment)
-    fixture.register(editor.pid, "editor", roots=[])
     stale = fixture.spawn()
     stale.kill(); stale.wait()
     fixture.register(stale.pid, "workspace-host", root=str(directory / "stale-root"))
+    # The daemon scans, so it adopts and prunes.
+    editor = fixture.editor(commands=[WORKER, {"command": WORKER, "env": {"EXOSUIT_SUIT_HOME": str(directory / "elsewhere")}},
+                                      SPAWNER + [json.dumps([WORKER])]], environment=scanning)
     wait_until(lambda: len(child_processes(editor.pid)) == 3, 30, "the editor did not start its children")
     children = child_processes(editor.pid)
     shell = next(pid for pid, name in children.items() if not name.lower().startswith("hl"))
@@ -914,14 +874,7 @@ def test_ownership(fixture: Fixture, directory: Path) -> None:
         assert everything == {owned}, f"kill --all would stop {everything - {owned}} too"
         assert everything <= ours
 
-        # Listing and planning wrote nothing: no adoption record, and the stale record is still there.
-        before = registry_state(fixture.registry)
-        assert set(before) == {f"{editor.pid}.json", f"{stale.pid}.json"}, before
-        scanned_listing(scanning); fixture.suit("list"); planned_kills(scanning, "--orphans")
-        assert registry_state(fixture.registry) == before, "suit list or --dry-run changed the registry"
-
         # The daemon persists the adoption and prunes the stale record.
-        assert "started" in run_suit(scanning, "start")
         adoption = fixture.registry / f"{owned}.json"
         wait_until(lambda: adoption.is_file() and not (fixture.registry / f"{stale.pid}.json").exists(), 30,
                    "the daemon did not record the adoption or prune the stale record")
@@ -941,10 +894,10 @@ def test_ownership(fixture: Fixture, directory: Path) -> None:
         for pid in (owned, stranger.pid):
             output = run_suit(scanning, "kill", str(pid))
             assert f"{pid} compiler-worker: killed" in output, output
-        wait_until(lambda: not alive(stranger) and not pid_alive(owned), 10, "an explicitly killed worker survived")
+        wait_until(lambda: not alive(stranger) and not process_runs(owned), 10, "an explicitly killed worker survived")
     finally:
         for pid in [*workers, shell, in_terminal]:
-            if pid_alive(pid):
+            if process_runs(pid):
                 kill_pid(pid)
 
 
@@ -982,15 +935,6 @@ def child_pids(pid: int) -> list[int]:
     return list(child_processes(pid))
 
 
-def pid_alive(pid: int) -> bool:
-    if os.name == "nt":
-        output = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30).stdout
-        return str(pid) in output
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
 
 
 def test_daemon(fixture: Fixture) -> None:
@@ -998,16 +942,15 @@ def test_daemon(fixture: Fixture) -> None:
     assert "started" in fixture.suit("start", timeout=60)
     status = json.loads(fixture.suit("status", "--json"))
     assert status["ok"] is True and status["home"] == str(fixture.home), status
-    editor = fixture.spawn()
-    fixture.register(editor.pid, "editor", roots=[])
+    editor = fixture.editor(answers_quit=False)
     service = fixture.spawn()
     fixture.register(service.pid, "workspace-host", root=str(Path(tempfile.gettempdir()) / "suit-test-root"))
     assert "running" in fixture.suit("list")
     quit_output = fixture.suit("quit")
     assert "Quitting Exosuit" in quit_output, quit_output
     wait_until(lambda: not alive(service), 15, "quit left a background process")
-    # The fixture editor has no window to close, so suit leaves it running instead of killing it.
-    assert alive(editor), "quit killed an editor that was not asked to close"
+    # The editor stand-in stays open (it leaves the quit unanswered), so suit leaves it running instead of killing it.
+    assert alive(editor), "quit killed an editor that stayed open"
     time.sleep(3)
     assert "not running" not in fixture.suit("status"), "the daemon exited while an editor was still open"
     editor.kill(); editor.wait()
@@ -1076,129 +1019,132 @@ def test_machine(fixture: Fixture, directory: Path) -> None:
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not stop")
 
 
-def test_real_manager(fixture: Fixture, directory: Path) -> None:
+def test_real_service(fixture: Fixture, directory: Path) -> None:
+    """A real workspace service: suit starts it on `workspace.open`, lists it as the workspace's one process, answers a
+    second open with the same pipe, and `suit kill` stops it cooperatively over its service link."""
     sys.path.insert(0, str(ROOT / "scripts"))
-    from agent_test_runtime import manager_command, manager_environment, launcher_path
-    workspace = directory / "real-workspace"; workspace.mkdir()
-    state = directory / "real-state"
-    environment = dict(manager_environment(ROOT, launcher_path(ROOT)), **{
-        key: value for key, value in fixture.environment.items() if key.startswith("EXOSUIT_SUIT")})
-    subprocess.run([*manager_command(ROOT), str(workspace), "--state-dir", str(state), "--detach", "--idle-seconds", "60"],
-                   env=environment, check=True, timeout=100, capture_output=True)
+    from test_driver import launcher_path
+    folder = directory / "real-workspace"; folder.mkdir(parents=True)
+    state = directory / "agent-state"
+    fixture.environment.update(EXOSUIT_AGENT_STATE_HOME=str(state), EXOSUIT_AGENT_LAUNCHER=str(launcher_path(ROOT)))
+    assert "started" in fixture.suit("start")
+    created = json.loads(fixture.suit("workspace", "new", str(folder), "--name", "Real"))
+    pid = None
     try:
-        wait_until(lambda: {"workspace-manager", "workspace-host"} <= {entry["kind"] for entry in fixture.listing()["processes"]},
-                   30, "real manager and daemon did not register")
-        listing = fixture.listing()
-        manager = next(entry for entry in listing["processes"] if entry["kind"] == "workspace-manager")
-        host = next(entry for entry in listing["processes"] if entry["kind"] == "workspace-host")
-        assert manager["orphaned"] is True and manager["stateDir"], manager
-        output = fixture.suit("kill", str(manager["pid"]))
-        assert f"{manager['pid']} workspace-manager: stopped" in output, f"manager was not stopped cooperatively: {output}"
-        wait_until(lambda: not pid_alive(host["pid"]), 15, "workspace daemon survived its manager")
-        assert not (state / "endpoint.json").exists(), "manager did not clean up its endpoint"
+        opened = request_through_pipe(fixture, {"op": "workspace.open", "workspace": created["id"]})
+        assert opened.get("ok") is True and opened.get("endpoint") and opened.get("generation"), opened
+        again = request_through_pipe(fixture, {"op": "workspace.open", "workspace": created["id"]})
+        assert again.get("endpoint") == opened["endpoint"] and again.get("generation") == opened["generation"], again
+        services = [entry for entry in fixture.listing()["processes"] if entry["kind"] == "workspace-host"]
+        assert len(services) == 1 and Path(services[0]["stateDir"]).name == created["id"], f"not one service of {created['id']}: {services}"
+        pid = services[0]["pid"]
+        output = fixture.suit("kill", str(pid))
+        assert f"{pid} workspace-host: stopped" in output, f"the service was not stopped cooperatively: {output}"
+        wait_until(lambda: not process_runs(pid), 15, "the workspace service survived its stop")
+        log = (state / "workspaces" / created["id"] / "service.log").read_text()
+        assert "service stopped: suit asked it to stop" in log, log[-2000:]
         assert fixture.listing()["processes"] == []
     finally:
-        stop_manager_tree(state)
+        # Whatever service started, even before the listing named it (its service.log names each start's pid).
+        for log in state.glob("workspaces/*/service.log"):
+            for line in log.read_text(errors="replace").splitlines():
+                if "service starting: generation " in line and process_runs(int(line.rsplit(", pid ", 1)[1])):
+                    kill_pid(int(line.rsplit(", pid ", 1)[1]))
+        fixture.suit("stop")
 
 
-def stop_manager_tree(state: Path) -> None:
-    """After a failure, kills the manager this test started (named in its state directory) with its daemon."""
-    try:
-        pid = json.loads((state / "endpoint.json").read_text())["managerPid"]
-    except (OSError, ValueError, KeyError):
-        return
-    if not pid_alive(pid):
-        return
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=30)
-    else:
-        for child in child_pids(pid):
-            kill_pid(child)
-        kill_pid(pid)
+# A workspace service stand-in: reports itself to the daemon at argv[1] for workspace argv[2] (`service-attach`) and stays.
+FAKE_SERVICE = [sys.executable, "-c", "\n".join([
+    "import json, os, sys, time",
+    "pipe = open(sys.argv[1], 'r+b', buffering=0)",
+    "data = json.dumps({'op': 'service-attach', 'workspace': sys.argv[2], 'endpoint': r'\\\\.\\pipe\\exosuit-test-service', 'pid': os.getpid()}).encode()",
+    "pipe.write(b'HMPK\\x01\\x00' + len(data).to_bytes(4, 'big') + data)",
+    "time.sleep(300)",
+])]
 
 
-def test_suit_switch(fixture: Fixture, directory: Path) -> None:
-    """EXOSUIT_SUIT=off, isolated without a home, and unset with state in the temp folder (a test run by hand,
-    outside test.sh and the guard) keep a real manager out of the default registry and suit.
-
-    The default home is moved into the test directory, and a last run with EXOSUIT_SUIT=on (autostart off)
-    checks that the manager does register there, so the others cannot pass because nothing registers.
-    """
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from agent_test_runtime import manager_command, manager_environment, launcher_path
+def test_links(fixture: Fixture, directory: Path) -> None:
+    """suit pushes `exosuit.machine.changed` to a linked editor when a workspace is created and when a service reports
+    itself or goes; `machine` lists a service from its report alone, and drops it when its connection closes."""
     directory.mkdir(parents=True, exist_ok=True)
-    for index, mode in enumerate(("off", "isolated", "unset", "on")):
-        workspace = directory / f"switch-workspace-{index}"; workspace.mkdir()
-        state = directory / f"switch-state-{index}"
-        # The default home moves into the test directory, so a registration there cannot reach the user's suit.
-        default_parent = directory / f"default-{index}"
-        environment = manager_environment(ROOT, launcher_path(ROOT))
-        for key in [key for key in environment if key.startswith("EXOSUIT_SUIT")]:
-            del environment[key]
-        environment.update(LOCALAPPDATA=str(default_parent), XDG_STATE_HOME=str(default_parent),
-                           EXOSUIT_SUIT_LAUNCHER=str(SUIT))
-        if mode != "unset":
-            environment["EXOSUIT_SUIT"] = mode
-        assert Path(tempfile.gettempdir()) in state.parents, "the switch test's state must be disposable"
-        if mode == "on":
-            environment["EXOSUIT_SUIT_AUTOSTART"] = "0"
-        subprocess.run([*manager_command(ROOT), str(workspace), "--state-dir", str(state), "--detach", "--idle-seconds", "60"],
-                       env=environment, check=True, timeout=100, capture_output=True)
-        wait_until(lambda: (state / "endpoint.json").is_file(), 30, f"EXOSUIT_SUIT={mode}: the manager did not start")
-        endpoint = json.loads((state / "endpoint.json").read_text())
-        try:
-            time.sleep(1)  # registration and autostart happen as the manager becomes ready
-            suit_home = default_parent / "exosuit" / "suit"
-            if mode == "on":
-                record = suit_home / "registry" / f"{endpoint['managerPid']}.json"
-                # The daemon registers once it is ready, which can take a few seconds after endpoint.json.
-                wait_until(record.is_file, 15, f"EXOSUIT_SUIT=on: the manager did not register in the moved default home {suit_home}")
-                assert not (suit_home / "suit.lock").exists(), "EXOSUIT_SUIT_AUTOSTART=0 still started suit"
-            else:
-                assert not suit_home.exists(), f"EXOSUIT_SUIT={mode}: the manager registered or started suit in {suit_home}"
-        finally:
-            (state / "stop-request.json").write_text(json.dumps({"version": 1, "generation": endpoint["generation"]}))
-            try:
-                wait_until(lambda: not pid_alive(endpoint["managerPid"]), 20, "")
-            except AssertionError:
-                stop_manager_tree(state)
-                raise AssertionError(f"EXOSUIT_SUIT={mode}: the manager ignored stop-request.json")
+    folder = directory / "linked"; folder.mkdir()
+    command, log = fixture.editor_command()
+    fixture.spawn(command)
+    wait_until(log.exists, 15, "the editor stand-in did not link")
+    assert json.loads(fixture.suit("status", "--json"))["editors"] == 1
+
+    def pushed(condition) -> bool:
+        events = [json.loads(line) for line in log.read_text().splitlines()[1:]]
+        return any(event.get("event") == "exosuit.machine.changed" and condition(event["data"]["machine"]) for event in events)
+
+    created = json.loads(fixture.suit("workspace", "new", str(folder)))
+    assert created["name"] == "linked" and created["folders"] == [str(folder)], created
+    wait_until(lambda: pushed(lambda machine: any(w["id"] == created["id"] for w in machine["workspaces"])), 10,
+               "the editor was not pushed the new workspace")
+
+    def service() -> dict | None:
+        machine = json.loads(fixture.suit("machine", "--json"))
+        return next(w for w in machine["workspaces"] if w["id"] == created["id"]).get("service")
+
+    reporter = fixture.spawn([*FAKE_SERVICE, fixture.endpoint(), created["id"]])
+    wait_until(lambda: (service() or {}).get("pid") == reporter.pid, 10, "a service that reported itself is not listed")
+    assert service()["running"] is True and service()["endpoint"] == r"\\.\pipe\exosuit-test-service", service()
+    wait_until(lambda: pushed(lambda machine: any(w.get("service") for w in machine["workspaces"])), 10,
+               "the editor was not pushed the service")
+    reporter.kill(); reporter.wait()
+    wait_until(lambda: service() is None, 10, "a service whose connection closed is still listed")
 
 
 def test_editor(fixture: Fixture, directory: Path) -> None:
-    """A real editor registers, starts suit, and closes when suit quits Exosuit."""
+    """Two real editor windows link to suit, which the first starts. The first opens a loose folder, which becomes a
+    workspace named after it. Each types into an open file (window-local scripted input, never OS input). `suit quit`
+    asks each window over its link; each closes at once, keeping its unsaved text in its recovery store for the next start
+    (the tray's Quit), and suit exits once nothing is left."""
     directory.mkdir(parents=True, exist_ok=True)
-    workspace = directory / "editor-workspace"; workspace.mkdir()
+    folder = directory / "loose-folder"; folder.mkdir()
     graphical = ROOT / "graphical/build/host"
     native = sorted(path for path in (graphical / "native").iterdir() if path.is_dir())
-    environment = dict(fixture.environment, PRAGTICAL_PORTABLE=str(directory / "settings"),
-                       EXOSUIT_AGENT_STATE_HOME=str(directory / "agent-state"), XDG_STATE_HOME=str(directory / "state"),
+    environment = dict(fixture.environment, EXOSUIT_AGENT_STATE_HOME=str(directory / "agent-state"), XDG_STATE_HOME=str(directory / "state"),
                        EXOSUIT_AGENT_LAUNCHER=str(ROOT / "agent/build/host/main.hl"))
     environment.pop("EXOSUIT_SUIT_AUTOSTART")
     variable = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
     environment[variable] = os.pathsep.join([str(path) for path in native] + [environment[variable]])
-    log = (directory / "editor.log").open("w")
-    editor = subprocess.Popen([str(HL), str(graphical / "main.hl"), "--title=suit-test-editor", str(workspace)], cwd=ROOT,
-                              env=environment, stdout=log, stderr=subprocess.STDOUT)
-    fixture.children.append(editor)
-    wait_until(lambda: editor.poll() is not None or find(fixture.listing(), editor.pid) is not None, 60,
-               "the editor did not register")
-    assert editor.poll() is None, (directory / "editor.log").read_text()[-3000:]
-    entry = find(fixture.listing(), editor.pid)
-    assert entry["kind"] == "editor" and entry["registered"], entry
-    wait_until(lambda: json.loads(fixture.suit("status", "--json")).get("ok") is True, 30, "the editor did not start suit")
-    # The workspace service follows if the editor opens one for the folder; report rather than require it.
-    try:
-        wait_until(lambda: any(item["kind"] == "workspace-manager" for item in fixture.listing()["processes"]), 30, "")
-        services = [item for item in fixture.listing()["processes"] if item["kind"] != "editor"]
-        assert all(not item["orphaned"] for item in services), services
-        print(f"  editor started {len(services)} registered service(s), none orphaned")
-    except AssertionError as error:
-        if str(error):
-            raise
-        print("  (the editor started no workspace service for the folder)")
+    editors = []
+    for index in (1, 2):
+        note = directory / f"note-{index}.txt"
+        note.write_text("saved\n")
+        script = directory / f"input-{index}.json"
+        script.write_text(json.dumps({"version": 1, "events": [{"at": 3.0, "kind": "text", "text": f"unsaved-{index} "}]}))
+        paths = [str(folder), str(note)] if index == 1 else [str(note)]
+        settings = directory / f"settings-{index}"
+        log = (directory / f"editor-{index}.log").open("w")
+        editor = subprocess.Popen([str(HL), str(graphical / "main.hl"), f"--title=suit-test-editor-{index}", f"--input-script={script}", *paths],
+                                  cwd=ROOT, env=dict(environment, PRAGTICAL_PORTABLE=str(settings)), stdout=log, stderr=subprocess.STDOUT)
+        fixture.children.append(editor)
+        editors.append((editor, settings, f"unsaved-{index}", directory / f"editor-{index}.log"))
+    for editor, _, _, log_path in editors:
+        wait_until(lambda: editor.poll() is not None or fixture.running() and find(fixture.listing(), editor.pid) is not None, 60,
+                   "an editor did not link to suit")
+        assert editor.poll() is None, log_path.read_text()[-3000:]
+        assert find(fixture.listing(), editor.pid)["kind"] == "editor"
+
+    def named_workspace() -> dict | None:
+        machine = json.loads(fixture.suit("machine", "--json"))
+        return next((w for w in machine["workspaces"] if w["folders"] == [str(folder)]), None)
+
+    wait_until(lambda: named_workspace() is not None, 30, "opening a loose folder made no workspace")
+    assert named_workspace()["name"] == "loose-folder", named_workspace()
+    print(f"  the loose folder became workspace {named_workspace()['id']} named {named_workspace()['name']!r}")
+    time.sleep(6)  # the scripted text is typed 3 s after each window's first frame
+    started = time.monotonic()
     assert "Quitting Exosuit" in fixture.suit("quit")
-    wait_until(lambda: editor.poll() is not None, 30, "the editor did not close when suit quit Exosuit")
+    for editor, _, _, _ in editors:
+        wait_until(lambda: editor.poll() is not None, 30, "an editor did not close when suit quit Exosuit")
+    print(f"  both windows closed {time.monotonic() - started:.1f} s after `suit quit`")
+    for _, settings, text, _ in editors:
+        kept = [path for path in settings.rglob("*") if path.is_file() and text.encode() in path.read_bytes()]
+        assert kept, f"the window did not keep its unsaved text {text!r} under {settings}"
+        print(f"  {text!r} kept in {', '.join(str(path.relative_to(settings)) for path in kept)}")
     wait_until(lambda: fixture.listing()["processes"] == [], 30, "processes survived quit")
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "suit did not exit after quit")
 
@@ -1206,14 +1152,14 @@ def test_editor(fixture: Fixture, directory: Path) -> None:
 def run_unit_tests() -> None:
     """suit's ownership rules over made-up processes (suit/tests)."""
     result = subprocess.run([sys.executable, str(ROOT / "scripts" / "haxeon_cli.py"), "run", "--project",
-                             str(ROOT / "suit" / "tests" / "haxeon.json")], capture_output=True, text=True, timeout=600)
+                             str(ROOT / "suit" / "tests" / "haxeon.json")], capture_output=True, text=True, timeout=240)
     assert result.returncode == 0 and "PASS: suit unit tests" in result.stdout, f"suit unit tests failed:\n{result.stdout}{result.stderr}"
     print("PASS unit tests")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--real-manager", action="store_true", help="also run a real workspace manager (needs agent build)")
+    parser.add_argument("--real-service", action="store_true", help="also run a real workspace service (needs agent build)")
     parser.add_argument("--editor", action="store_true", help="also run a real editor window (needs graphical build)")
     parser.add_argument("--only", help="run only the tests whose name contains this text")
     options = parser.parse_args()
@@ -1233,11 +1179,10 @@ def main() -> int:
                  ("the CLI ends its own terminal last", lambda f: test_cli_ends_own_terminal_last(f, directory / "co")),
                  ("polite quit keeps remote access", lambda f: test_polite_quit_keeps_remote_access(f, directory / "pr")),
                  ("polite quit leaves new arrivals", lambda f: test_polite_quit_does_not_hunt_new_arrivals(f, directory / "pn")),
-                 ("full quit refuses relay attach", lambda f: test_full_quit_refuses_relay_attach(f, directory / "fr")),
+                 ("full quit ends remote access", lambda f: test_full_quit_ends_remote_access(f, directory / "fr")),
                  ("full quit ends every kind", lambda f: test_full_quit_ends_every_kind(f, directory / "ea")),
                  ("polite quit leaves only terminals", lambda f: test_polite_quit_leaves_only_terminals(f, directory / "ep")),
                  ("workspace ids with several editors", lambda f: test_workspace_ids_with_several_editors(f, directory / "i")),
-                 ("hosted workspace", lambda f: test_hosted_workspace(f, directory / "h")),
                  ("late child", lambda f: test_late_child(f, directory / "l")),
                  ("helper markers", lambda f: test_helper_markers(f, directory / "h")),
                  ("full quit ends the run.py chain", lambda f: test_run_py_chain(f, directory / "rq", False)),
@@ -1245,25 +1190,33 @@ def main() -> int:
                  ("a terminal build shares the worker", lambda f: test_terminal_build_shares_worker(f, directory / "rb")),
                  ("a terminal's program is not adopted", lambda f: test_terminal_program_not_adopted(f, directory / "rt")),
                  ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon),
+                 ("links", lambda f: test_links(f, directory / "k")),
                  ("machine", lambda f: test_machine(f, directory / "m"))]
-        if options.real_manager:
-            tests.append(("real manager", lambda f: test_real_manager(f, directory / "r")))
-            tests.append(("EXOSUIT_SUIT switch", lambda f: test_suit_switch(f, directory / "w")))
+        if options.real_service:
+            tests.append(("real service", lambda f: test_real_service(f, directory / "r")))
         if options.editor:
-            tests.append(("editor", lambda f: test_editor(f, directory / "e")))
+            tests.append(("two-editor-windows-quit", lambda f: test_editor(f, directory / "e")))
         for name, test in tests:
             if options.only and options.only not in name:
                 continue
             (directory / "a").mkdir(exist_ok=True); (directory / "r").mkdir(exist_ok=True)
             fixture_directory = Path(tempfile.mkdtemp(dir=temporary))
             fixture = Fixture(fixture_directory)
+            passed = False
             try:
                 test(fixture)
+                passed = True
                 print(f"PASS {name}")
             finally:
                 try:
+                    # A failed test may leave what suit started (a real service, an editor's): suit ends what it lists. The
+                    # fixture's suit does not scan, so it lists only what this test started.
+                    if not passed:
+                        subprocess.run([str(HL), str(SUIT), "kill", "--all"], env=fixture.environment, capture_output=True, timeout=30)
                     subprocess.run([str(HL), str(SUIT), "stop"], env=fixture.environment, capture_output=True, timeout=30)
-                except subprocess.TimeoutExpired:
+                    # The daemon holds suit.lock until it has exited; the folder goes after.
+                    wait_until(lambda: "not running" in fixture.suit("status"), 15, "the daemon did not stop")
+                except (subprocess.TimeoutExpired, AssertionError):
                     pass
                 fixture.cleanup()
     return 0

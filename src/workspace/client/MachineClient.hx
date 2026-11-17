@@ -1,79 +1,47 @@
 package workspace.client;
 
 import haxe.Json;
-import haxe.io.Bytes;
-import haxeon.platform.event.EventPump;
-import haxeon.rpc.RpcConnectResult;
 import suit.MachineCatalog;
 import suit.MachineCatalog.MachineService;
 import suit.MachineCatalog.MachineState;
 import suit.MachineCatalog.MachineWorkspace;
-import suit.SuitClient;
-import suit.SuitPaths;
+import suit.SuitLink;
 import suit.WindowFocus;
 import suit.WindowFocus.WindowFocuses;
 import workspace.PathKey;
-import workspace.transport.NativeRpcHub;
-import workspace.transport.NativeRpcTransport;
-
-private typedef MachineRequest = {
-	var message:Dynamic;
-	var answer:Null<(Null<Dynamic>, Null<String>) -> Void>;
-}
 
 /**
-	This machine and its workspaces, from suit's daemon (docs/architecture/0005-machines-and-workspaces.md). Requests
-	go one at a time over suit's control endpoint, each on its own connection, without blocking the caller: `poll`
-	moves them along. Starts suit when it does not answer, unless suit is off.
+	This machine and its workspaces, from suit (docs/architecture/0005-machines-and-workspaces.md), over the window's
+	suit link. suit pushes the machine whenever it changes: its workspaces, the service each one runs and where every
+	window is focused. Changes are requests on the same link; nothing here polls and nothing blocks the caller.
 **/
 class MachineClient {
-	static inline final TIMEOUT = 5000.0;
-	static inline final RETRY = 1000.0;
-	/** Remote access steps wait for the relay (a pairing invitation, an approval), which takes longer than a catalog edit. */
-	static inline final REMOTE_TIMEOUT = 20000.0;
-
-	final hub:NativeRpcHub;
-	final clock:Void->Float;
-	final queue:Array<MachineRequest> = [];
-	var current:Null<MachineRequest>;
-	var transport:Null<NativeRpcTransport>;
-	var failure:Null<String>;
-	var sent = false;
-	var deadline:Float = 0;
-	var started = false;
-	var retryAt:Float = 0;
-	/** The last `machine` reply as JSON, to tell a reply that changes nothing. */
-	var lastSignature:Null<String>;
+	final link:SuitLink;
 
 	public var machine(default, null):Null<MachineState>;
-	/** Where each editor window is focused, as suit last reported (M19 Phase 8); empty from an older suit. */
+	/** Where each editor window is focused, as suit last pushed it (M19 Phase 8). */
 	public var windows(default, null):Array<WindowFocus> = [];
-	/** Why the last request failed; null after one succeeds. */
+	/** Why the last push or request failed; null after one succeeds. */
 	public var error(default, null):Null<String>;
-	/** Changes whenever `machine` or `error` does. */
+	/** Changes whenever `machine`, `windows` or `error` does. */
 	public var revision(default, null):Int = 0;
-	/** False when suit is off: the editor then has no machine and works on open folders only. */
-	public final enabled:Bool;
-	/** Scratch folders suit made on request, until a listing reports them. */
+	/** Scratch folders suit made on request, until a push reports them. */
 	final scratches:Map<String, String> = [];
-	/** The service of each workspace suit reported one for (M19 Phase 6). */
+	/** The running service of each workspace, as suit last pushed them. */
 	final services:Map<String, MachineService> = [];
-	/** A service the editor started itself, until suit's listing names it: suit learns of a service some seconds after it is up. */
-	final provisional:Map<String, {service:MachineService, until:Float}> = [];
-	static inline final PROVISIONAL_MS = 20000.0;
+	/** Changes to the workspaces sent and not answered yet. */
+	var changing = 0;
 
-	public function new(events:EventPump, clock:Void->Float) {
-		hub = new NativeRpcHub(events);
-		this.clock = clock;
-		enabled = SuitClient.current() != Off;
-		if (enabled)
-			seedFromCatalog();
+	public function new(link:SuitLink) {
+		this.link = link;
+		seedFromCatalog();
+		link.onEvent = function(name, data) { if (name == "exosuit.machine.changed") pushed(data); };
 	}
 
 	/**
 		Starts from suit's saved catalog (the file suit keeps it in), so the window can open its last workspace and show the
-		tree before suit's first reply (0.45 s or more, seconds when suit must start first). The reply replaces it, and
-		with it adds the services, which the file does not hold. A missing or unreadable file leaves the machine unknown.
+		tree before suit's first push (0.45 s or more, seconds when suit must start first). The push replaces it, and with
+		it adds the services, which the file does not hold. A missing or unreadable file leaves the machine unknown.
 	**/
 	function seedFromCatalog():Void {
 		try {
@@ -88,21 +56,17 @@ class MachineClient {
 		}
 	}
 
-	public function refresh():Void {
-		// One queued refresh is enough; one already sent may predate the change this one asks about.
-		for (pending in queue)
-			if (pending.message.op == "machine")
-				return;
-		request({op: "machine"});
-	}
+	/** Moves the link along; call every frame. */
+	public function poll():Void
+		link.poll();
 
 	/** Creates a workspace with these folders, which may be none if it has a name; `done` gets it, or the error. */
 	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-create", name: name, folders: folders.copy()}, workspaceReply(done, false));
+		change("workspace-create", {name: name, folders: folders.copy()}, workspaceReply(done, false));
 
 	/** The workspace's scratch folder, which suit creates on first request; `done` gets its path, or the error. */
 	public function scratch(id:String, done:(Null<String>, Null<String>) -> Void):Void
-		request({op: "workspace-scratch", workspace: id}, function(reply, failure) {
+		change("workspace-scratch", {workspace: id}, function(reply, failure) {
 			var path:Null<String> = null;
 			if (reply != null) {
 				var value:Dynamic = Reflect.field(reply, "scratch");
@@ -115,65 +79,75 @@ class MachineClient {
 			done(path, failure);
 		});
 
+	/**
+		The running service of workspace `id`, which suit starts first when the workspace is idle (`workspace.open`):
+		`done` gets its pipe and identity, or why there is none. A ServiceOpener for the window's workspace clients.
+	**/
+	public function open(id:String, done:(Null<OpenedService>, Null<String>) -> Void):Void {
+		var begun = Sys.time();
+		ConnectTimeline.mark("suit-queued", id, "workspace.open");
+		link.call("workspace.open", {workspace: id}, function(reply, failure) {
+			ConnectTimeline.mark("suit-reply", id, "workspace.open" + (failure == null ? " ok " : " none ") + Std.int((Sys.time() - begun) * 1000) + " ms");
+			var endpoint:Dynamic = reply == null ? null : Reflect.field(reply, "endpoint");
+			var generation:Dynamic = reply == null ? null : Reflect.field(reply, "generation");
+			var root:Dynamic = reply == null ? null : Reflect.field(reply, "root");
+			if (failure == null && (!Std.isOfType(endpoint, String) || !Std.isOfType(generation, String) || !Std.isOfType(root, String)))
+				failure = "suit named no workspace service";
+			done(failure == null ? {endpoint: endpoint, generation: generation, root: root} : null, failure);
+		}, OPEN_TIMEOUT);
+	}
+
+	/** How long `open` waits for suit: longer than suit's own limit for a start, so suit's answer says why one failed. */
+	static inline final OPEN_TIMEOUT = 40.0;
+
 	public function rename(id:String, name:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-rename", workspace: id, name: name}, workspaceReply(done, false));
+		change("workspace-rename", {workspace: id, name: name}, workspaceReply(done, false));
 
 	public function delete(id:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-delete", workspace: id}, workspaceReply(done, true));
+		change("workspace-delete", {workspace: id}, workspaceReply(done, true));
 
 	public function addFolder(id:String, folder:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-add-folder", workspace: id, folder: folder}, workspaceReply(done, false));
+		change("workspace-add-folder", {workspace: id, folder: folder}, workspaceReply(done, false));
 
 	public function removeFolder(id:String, folder:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-remove-folder", workspace: id, folder: folder}, workspaceReply(done, false));
+		change("workspace-remove-folder", {workspace: id, folder: folder}, workspaceReply(done, false));
 
 	// ---- Remote access (ADR 0005 section 4): the machine's relay identity, paired devices and their workspaces.
-	// Each reply is suit's JSON as sent (docs/roadmap/19-machine-workspaces.md, Phase 9); `done` gets it or the error.
+	// Each reply is suit's JSON as sent (docs/RPC-VECTORS.md, "suit's machine reply"); `done` gets it or the error.
 
 	/** Whether remote access is set up, its relay and whether the machine socket is connected. */
 	public function remoteStatus(done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-status"}, done);
+		remote("remote-status", {}, done);
 
 	/** Sets up remote access with this relay (an https origin; a loopback http one only for a development Worker). */
 	public function remoteEnable(origin:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-enable", origin: origin}, done);
+		remote("remote-enable", {origin: origin}, done);
 
 	/** Stops using the relay and forgets its address, so `remoteEnable` can name another. */
 	public function remoteDisable(done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-disable"}, done);
+		remote("remote-disable", {}, done);
 
 	/** A one-time pairing invitation: `invitation` has the pairing URL. */
 	public function remoteInvite(ttlSeconds:Int, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-invite", ttl: ttlSeconds}, done);
+		remote("remote-invite", {ttl: ttlSeconds}, done);
 
 	/** Pending pairings, paired devices with the workspaces each is granted, and the machine's workspaces. */
 	public function remoteDevices(done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-devices"}, done);
+		remote("remote-devices", {}, done);
 
 	/** Approves a pending device with these workspaces: each `{workspace, preset}` or `{workspace, grants}`; none grants nothing yet. */
 	public function remoteApprove(deviceId:String, workspaces:Array<Dynamic>, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-approve", deviceId: deviceId, workspaces: workspaces}, done);
+		remote("remote-approve", {deviceId: deviceId, workspaces: workspaces}, done);
 
 	/** Replaces the workspaces a paired device is granted. */
 	public function remoteGrant(deviceId:String, workspaces:Array<Dynamic>, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-grant", deviceId: deviceId, workspaces: workspaces}, done);
+		remote("remote-grant", {deviceId: deviceId, workspaces: workspaces}, done);
 
 	public function remoteReject(deviceId:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-reject", deviceId: deviceId}, done);
+		remote("remote-reject", {deviceId: deviceId}, done);
 
 	public function remoteRevoke(deviceId:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		request({op: "remote-revoke", deviceId: deviceId}, done);
-
-	/** The workspace whose only folder is `folder`, if the machine has one. */
-	public function workspaceFor(folder:String):Null<MachineWorkspace> {
-		var state = machine;
-		if (state == null)
-			return null;
-		for (workspace in state.workspaces)
-			if (workspace.folders.length == 1 && PathKey.same(workspace.folders[0], folder))
-				return workspace;
-		return null;
-	}
+		remote("remote-revoke", {deviceId: deviceId}, done);
 
 	/** The workspace with this id, if the machine has one. */
 	public function workspaceById(id:String):Null<MachineWorkspace> {
@@ -202,14 +176,11 @@ class MachineClient {
 		return null;
 	}
 
-	/** The workspace's scratch folder if suit already made one, as a listing or a scratch request reported it. */
+	/** The workspace's scratch folder if suit already made one, as a push or a scratch request reported it. */
 	public function scratchOf(workspace:MachineWorkspace):Null<String>
 		return workspace.scratch != null ? workspace.scratch : scratches.get(workspace.id);
 
-	/**
-		The service a workspace's folder belongs to when workspaces have services of their own: null until the machine's
-		workspaces are known (check `machine`), and for a folder no workspace holds.
-	**/
+	/** The service a folder's workspace has: null until the machine's workspaces are known, and for a folder none holds. */
 	public function serviceTargetFor(folder:String):Null<WorkspaceServiceTarget> {
 		var workspace = workspaceHolding(folder);
 		return workspace == null ? null : serviceTarget(workspace);
@@ -218,15 +189,13 @@ class MachineClient {
 	public function serviceTarget(workspace:MachineWorkspace):WorkspaceServiceTarget
 		return WorkspaceServiceTarget.forWorkspace(workspace.id, workspace.folders, scratchOf(workspace));
 
-	/** A change to the workspaces is on its way. A pending `machine` refresh does not count: a change queues behind it. */
-	public function busy():Bool {
-		if (current != null && current.message.op != "machine")
-			return true;
-		for (request in queue)
-			if (request.message.op != "machine")
-				return true;
-		return false;
-	}
+	/** A change to the workspaces is on its way. */
+	public function busy():Bool
+		return changing > 0;
+
+	/** The service suit last reported for workspace `id`: null when it reported none. */
+	public function serviceOf(id:String):Null<MachineService>
+		return services.get(id);
 
 	/** `removed`: the request deletes the workspace, otherwise the reply's workspace replaces what is known of it. */
 	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>, removed:Bool):(Null<Dynamic>, Null<String>) -> Void
@@ -241,7 +210,7 @@ class MachineClient {
 				done(workspace, failure);
 		};
 
-	/** Keeps the listing current between refreshes: the service a workspace's folders belong to follows its folders. */
+	/** Keeps the listing current until suit's push arrives: the service a workspace's folders belong to follows its folders. */
 	function know(workspace:MachineWorkspace, removed:Bool):Void {
 		var state = machine;
 		if (state == null)
@@ -260,133 +229,47 @@ class MachineClient {
 		revision++;
 	}
 
-	function request(message:Dynamic, ?done:(Null<Dynamic>, Null<String>) -> Void):Void {
-		if (!enabled) {
-			if (done != null)
-				done(null, "suit is off (EXOSUIT_SUIT=off), so this machine has no workspaces");
-			return;
-		}
-		ConnectTimeline.mark("suit-queued", null, Std.string(message.op));
-		queue.push({message: message, answer: done});
+	function change(op:String, params:Dynamic, done:(Null<Dynamic>, Null<String>) -> Void):Void {
+		changing++;
+		ConnectTimeline.mark("suit-queued", null, op);
+		var begun = Sys.time();
+		link.call(op, params, function(reply, failure) {
+			changing--;
+			ConnectTimeline.mark("suit-reply", null, op + (failure == null ? " ok " : " none ") + Std.int((Sys.time() - begun) * 1000) + " ms");
+			if (failure == null && reply != null && Reflect.hasField(reply, "machine"))
+				failure = readMachine(Reflect.field(reply, "machine"));
+			if (failure == null && error != null) {
+				error = null;
+				revision++;
+			}
+			done(failure == null ? reply : null, failure);
+		});
 	}
 
-	/** Moves requests along; call every frame. */
-	public function poll():Void {
-		var now = clock();
-		if (current == null) {
-			if (queue.length == 0 || now < retryAt)
-				return;
-			begin(queue[0], now);
-		}
-		var request = current;
-		if (request == null)
-			return;
-		if (failure == null && now >= deadline)
-			failure = "suit did not answer";
-		var stream = transport;
-		if (failure == null && stream != null) {
-			if (!stream.isOpen())
-				failure = "suit closed the connection";
-			else {
-				if (!sent)
-					sent = stream.send(Bytes.ofString(Json.stringify(request.message)));
-				var received:Null<Bytes> = null;
-				try received = stream.receive() catch (error:Dynamic) failure = Std.string(error);
-				if (received != null) {
-					var reply:Dynamic = null;
-					try reply = Json.parse(received.toString()) catch (_:Dynamic) {}
-					finish(reply);
-					return;
-				}
-			}
-		}
-		if (failure != null) {
-			// suit starts on demand: the editor asks once, then retries connecting until the deadline.
-			if (!started) {
-				started = true;
-				SuitClient.ensureDaemon();
-				deadline = now + TIMEOUT;
-			}
-			if (transport == null && now + RETRY < deadline) {
-				current = null;
-				retryAt = now + RETRY;
-				return;
-			}
-			finish(null);
-		}
+	function remote(op:String, params:Dynamic, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		link.call(op, params, done, SuitLink.REMOTE_TIMEOUT);
+
+	/** suit pushed the machine: its workspaces with their services, and the windows' focus. */
+	function pushed(data:Dynamic):Void {
+		var failure = readMachine(data == null ? null : Reflect.field(data, "machine"));
+		if (failure == null)
+			windows = WindowFocuses.decode(data);
+		error = failure;
+		revision++;
 	}
 
-	function begin(request:MachineRequest, now:Float):Void {
-		current = request;
-		ConnectTimeline.mark("suit-begin", null, Std.string(request.message.op));
-		failure = null;
-		sent = false;
-		transport = null;
-		if (deadline <= now)
-			deadline = now + (Std.string(request.message.op).indexOf("remote-") == 0 ? REMOTE_TIMEOUT : TIMEOUT);
-		try {
-			hub.connect(NativeRpcHub.local(SuitPaths.endpoint()), function(result:RpcConnectResult) {
-				switch result {
-					case Opened(opened):
-						if (current == request && transport == null)
-							transport = cast opened;
-						else
-							opened.close();
-					default:
-						if (current == request && failure == null)
-							failure = "suit is not running";
-				}
-			});
-		} catch (error:Dynamic) {
-			failure = Std.string(error);
-		}
+	/** Reads a machine listing as suit sends it; returns why it is unusable, or null. */
+	function readMachine(listing:Dynamic):Null<String> {
+		if (listing == null)
+			return "suit sent no machine";
+		try machine = MachineCatalog.decode(Json.stringify({version: MachineCatalog.VERSION, id: listing.id,
+			name: listing.name, workspaces: listing.workspaces})) catch (error:Dynamic) return Std.string(error);
+		readServices(listing.workspaces);
+		revision++;
+		return null;
 	}
 
-	function finish(reply:Null<Dynamic>):Void {
-		var request = current;
-		var problem:Null<String> = null;
-		ConnectTimeline.mark("suit-reply", null, (request == null ? "" : Std.string(request.message.op)) + (reply == null ? " none" : " ok"));
-		if (reply == null)
-			problem = failure != null ? failure : "suit did not answer";
-		else if (reply.ok != true)
-			problem = Reflect.field(reply, "error") == null ? "suit refused the request" : Std.string(reply.error);
-		close();
-		if (request != null)
-			queue.remove(request);
-		current = null;
-		deadline = 0;
-		var signature:Null<String> = null;
-		var before = error;
-		if (reply != null && reply.ok == true && Reflect.hasField(reply, "machine")) {
-			try machine = MachineCatalog.decode(Json.stringify({version: MachineCatalog.VERSION, id: reply.machine.id,
-				name: reply.machine.name, workspaces: reply.machine.workspaces})) catch (error:Dynamic) problem = Std.string(error);
-			if (problem == null) {
-				readServices(reply.machine.workspaces);
-				// Only a `machine` reply lists windows; the replies to changes carry the machine alone.
-				if (Reflect.hasField(reply, "windows"))
-					windows = WindowFocuses.decode(reply);
-				signature = Json.stringify(reply.machine) + Json.stringify(windows);
-			}
-		}
-		if (request != null && request.message.op == "machine" || problem == null)
-			error = problem;
-		// A reply that says what the last one did, with the same error, changes nothing: no revision, so nothing re-syncs.
-		var unchanged = signature != null && signature == lastSignature && error == before;
-		lastSignature = signature;
-		if (!unchanged)
-			revision++;
-		if (request != null) {
-			var callback:Null<(Null<Dynamic>, Null<String>) -> Void> = request.answer;
-			// A failing callback must not take the editor's frame loop down with it.
-			if (callback != null)
-				try callback(problem == null ? reply : null, problem) catch (thrown:Dynamic) {
-					error = Std.string(thrown);
-					revision++;
-				}
-		}
-	}
-
-	/** The services suit reports in a `machine` reply; one that is malformed counts as none. */
+	/** The services suit reports in a listing; one that is malformed counts as none. */
 	function readServices(entries:Dynamic):Void {
 		services.clear();
 		if (!Std.isOfType(entries, Array))
@@ -398,54 +281,8 @@ class MachineClient {
 			var service:Null<MachineService> = null;
 			try service = MachineCatalog.decodeService(entry) catch (_:Dynamic) {}
 			// The window connects to what suit reports, so only an endpoint of the agent's own shape counts.
-			if (service != null && !WorkspaceConnections.validEndpoint(service.endpoint, Sys.systemName() == "Windows"))
-				service = null;
-			if (service != null)
+			if (service != null && service.running && WorkspaceLink.validEndpoint(service.endpoint, Sys.systemName() == "Windows"))
 				services.set(id, service);
 		}
-	}
-
-	/** The service suit last reported for workspace `id`: null when it reported none. */
-	public function serviceOf(id:String):Null<MachineService> {
-		var listed = services.get(id);
-		if (listed != null && listed.running) {
-			provisional.remove(id);
-			return listed;
-		}
-		var guess = provisional.get(id);
-		if (guess == null)
-			return null;
-		if (clock() >= guess.until) {
-			provisional.remove(id);
-			return null;
-		}
-		return guess.service;
-	}
-
-	/**
-		Records a service this editor just started, which suit's listing does not name yet; `serviceOf` reports it until suit does or a
-		short while passes. The endpoint must have the agent's own shape.
-	**/
-	public function noteService(id:String, endpoint:String, pid:Int):Void {
-		var listed = services.get(id);
-		if (listed != null && listed.running || !WorkspaceConnections.validEndpoint(endpoint, Sys.systemName() == "Windows"))
-			return;
-		provisional.set(id, {service: {endpoint: endpoint, pid: pid, running: true}, until: clock() + PROVISIONAL_MS});
-		ConnectTimeline.mark("service-noted", id);
-		revision++;
-	}
-
-	function close():Void {
-		var stream = transport;
-		transport = null;
-		if (stream != null)
-			stream.close();
-	}
-
-	public function dispose():Void {
-		close();
-		queue.resize(0);
-		current = null;
-		hub.dispose();
 	}
 }

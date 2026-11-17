@@ -175,7 +175,6 @@ static void test_identity(int self) {
     /* Wrong or unknown start times must leave this process alone; reaching the next line proves it. */
     require(processkit_terminate(self, 0) == PROCESSKIT_UNKNOWN_START, "terminate refuses an unknown start time");
     require(processkit_terminate(self, started - 1) == PROCESSKIT_NOT_FOUND, "terminate refuses a reused pid");
-    require(processkit_request_close(self, 0) == PROCESSKIT_UNKNOWN_START, "request_close refuses an unknown start time");
 }
 
 /* The child's environment holds only what was asked for, from the variables it was started with. */

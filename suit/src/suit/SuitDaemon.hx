@@ -9,16 +9,16 @@ import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKitTypes;
 import sys.FileSystem;
 import suit.SuitInventory.SuitProcess;
+import suit.control.ControlRouter;
+import suit.control.PragticalPipes;
 import suit.remote.MachineRemote;
 import suit.remote.MachineRemote.DeferredReply;
-import suit.relay.SuitRelayHosting;
-import suit.relay.SuitRelayHosting.SuitRelayStopPlan;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
 typedef SuitLockHandle = hl.Abstract<"realtime_file_lock">;
 
-/** The single-instance lock: the exclusive file lock the workspace manager also uses. Null when another process holds it. */
+/** The single-instance lock: the exclusive file lock a workspace service also uses. Null when another process holds it. */
 @:hlNative("haxeon_runtime", "__host_file_lock_acquire")
 extern function acquireLock(path:String):Null<SuitLockHandle>;
 
@@ -26,9 +26,12 @@ extern function acquireLock(path:String):Null<SuitLockHandle>;
 extern function releaseLock(lock:SuitLockHandle):Void;
 
 /**
-	The per-user daemon: one per user (an exclusive lock in suit's home), a control endpoint for the CLI,
-	and on Windows the tray icon. It also holds the relay machine socket of every hosted workspace
-	(`suit.relay.SuitRelayHosting`).
+	The per-user daemon: one per user (an exclusive lock in suit's home), a control endpoint for the CLI, the link of
+	every editor window (EditorDirectory) and the report of every running workspace service (SuitServices), and on
+	Windows the tray icon. It answers `machine` from memory and pushes `exosuit.machine.changed` to every window when the
+	workspaces, their services or the windows' focus change. It is the control plane: the `control` op (ControlRouter)
+	and a Pragtical control protocol pipe per window (PragticalPipes) reach every window over its link. With remote
+	access on it holds the machine's relay socket and its paired devices' sessions (MachineRemote).
 
 	The tray menu does not stop this loop: NativeKit runs the popup on its own thread (`SuitTray.show`).
 
@@ -44,11 +47,22 @@ class SuitDaemon {
 	final runtime:Runtime;
 	final hub:NativeRpcHub;
 	final clients:Array<NativeRpcTransport> = [];
+	final directory:EditorDirectory = new EditorDirectory();
+	final services:SuitServices;
+	final router:ControlRouter;
+	final pragtical:PragticalPipes;
+	/** Bumped by every request that changes the machine's workspaces. */
+	var catalogRevision:Int = 0;
+	/** What the windows were last pushed: the catalog's, the services' and the directory's revisions. */
+	var pushed:String = "";
 	final jobs:Array<SuitTerminator> = [];
 	var tray:Null<SuitTray> = null;
 	var inventory:SuitInventory;
 	var refreshedAt:Float = 0;
 	var idleSince:Float;
+	var mainListener:Null<OwnedListenerHandle> = null;
+	/** suit's pipe listener stopped and is started again on the next loop (`listen`). */
+	var listenFailed = false;
 	/**
 		Set by a quit. "full": end everything exosuit started, terminal hosts included; "polite": everything but terminal
 		hosts. Either way the daemon exits only once a fresh inventory holds nothing of exosuit's. Background processes
@@ -62,6 +76,8 @@ class SuitDaemon {
 		whole quit state: the user started Exosuit again.
 	**/
 	var quitting:Null<String> = null;
+	/** `EXOSUIT_SUIT_SPARE=0`: no warm spare (to measure an open without one, or for a test that counts processes). */
+	var spareOff = false;
 	var quitPending:Bool = false;
 	var quitEditors:Array<Int> = [];
 	/** The compiler workers a quit spared as shared with a build exosuit did not start, when it began. */
@@ -70,19 +86,15 @@ class SuitDaemon {
 	var quitHeldHosts:Array<{pid:Int, started:Float}> = [];
 	var quitRounds:Int = 0;
 	var quitCheckAt:Float = 0;
-	/** True from a full quit until a new editor registers: the relay link of a restarted workspace service is refused. */
-	var relayRefused:Bool = false;
 	final refusedAttaches:Array<{transport:NativeRpcTransport, until:Float}> = [];
 	static inline var QUIT_ROUNDS:Int = 3;
 	/** When set, the loop ends at this time; the delay lets the reply to a stop or quit request flush. */
 	var stopAt:Float = -1;
 	var menuRequested:Bool = false;
 	final idleSeconds:Float;
-	final relay:SuitRelayHosting;
 	final remote:MachineRemote;
 	/** Clients waiting for a pairing step to finish: they send nothing until their reply arrives. */
 	final waiting:Array<{client:NativeRpcTransport, reply:DeferredReply}> = [];
-	var shownRelay:String = "";
 	var catalog:Null<MachineCatalog> = null;
 	/** Started at login: stays up with nothing to track, so the tray icon stays. */
 	final resident:Bool;
@@ -115,9 +127,11 @@ class SuitDaemon {
 		resident = login;
 		var configured = Std.parseFloat(Sys.getEnv("EXOSUIT_SUIT_IDLE_SECONDS"));
 		idleSeconds = Math.isNaN(configured) || configured < 1 ? 120 : configured;
+		spareOff = Sys.getEnv("EXOSUIT_SUIT_SPARE") == "0";
 		idleSince = Sys.time();
 		runtime = Runtime.start();
-		hub = new NativeRpcHub(runtime.events);
+		// Every editor window and every running service holds a connection: more than a hub's default.
+		hub = new NativeRpcHub(runtime.events, 256, 4, SuitLink.MAX_MESSAGE_BYTES);
 		var listenError = listen();
 		if (listenError != null) {
 			// The first pipe instance is exclusive: another process holding the name is never shared with.
@@ -125,10 +139,27 @@ class SuitDaemon {
 			runtime.dispose();
 			throw "suit's control endpoint " + SuitPaths.endpoint() + " is held by another process; suit will not share it (" + listenError + ")";
 		}
-		relay = new SuitRelayHosting(runtime.events, hub);
-		remote = new MachineRemote(runtime.events, hub, machine);
+		router = new ControlRouter(directory, function() return machine().json(serviceOf), workspaceFolders);
+		pragtical = new PragticalPipes(runtime.events, router);
+		directory.onEvent = router.event;
+		directory.onLinked = function(editor, attached) {
+			pragtical.linked(editor, attached);
+			router.linked(editor, attached);
+		};
+		router.onEvent = pragtical.event;
+		services = new SuitServices(function(id) {
+			for (entry in machine().state.workspaces)
+				if (entry.id == id)
+					return entry;
+			return null;
+		}, function(id) {
+			// A scratch folder made now changes the machine: the windows are pushed it.
+			catalogRevision++;
+			return machine().scratch(id);
+		});
+		remote = new MachineRemote(runtime.events, hub, machine, services);
 		runtime.events.listen(onEvent);
-		inventory = new SuitInventory(true);
+		inventory = new SuitInventory(true, directory.editors());
 		refreshedAt = Sys.time();
 		sys.io.AtomicFile.write(Path.join([SuitPaths.home(), "daemon.json"]),
 			Json.stringify({version: 1, pid: Sys.getPid(), endpoint: SuitPaths.endpoint()}) + "\n");
@@ -138,9 +169,18 @@ class SuitDaemon {
 		}
 	}
 
+	/**
+		Listens on suit's pipe. NativeKit's listener stops for good when a client connects and closes before it accepts
+		(docs/haxeon-compiler-bugs.md), so a stopped listener is started again by the loop.
+	**/
 	function listen():Null<String> {
 		try {
-			hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+			if (mainListener != null)
+				try hub.forget(mainListener) catch (_:Dynamic) {}
+			mainListener = null;
+			listenFailed = false;
+			mainListener = hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport),
+				function() listenFailed = true);
 		} catch (error:Dynamic) {
 			return Std.string(error);
 		}
@@ -149,7 +189,8 @@ class SuitDaemon {
 
 	function loop():Void {
 		while (stopAt < 0 || Sys.time() < stopAt) {
-			runtime.events.wait(jobs.length > 0 || clients.length > 0 || relay.busy() || remote.busy() ? 0.1 : 1.0);
+			// A service start turns the loop every 10 ms: its report is answered to the editor that waits on it at once.
+			runtime.events.wait(services.busy() ? 0.01 : jobs.length > 0 || clients.length > 0 || remote.busy() ? 0.1 : 1.0);
 			for (_ in 0...128)
 				if (!runtime.events.poll())
 					break;
@@ -160,21 +201,23 @@ class SuitDaemon {
 				showMenu();
 			}
 			serveClients();
+			// Services first: a start that finished answers its editor in this turn's directory poll.
+			services.keepSpare(directory.editors().length > 0 && quitting == null && !spareOff);
+			if (listenFailed)
+				listen();
+			router.poll();
+			pragtical.poll();
+			services.poll();
+			directory.poll(function(request) return handle(request, 0));
+			pushMachine();
 			var refusedIndex = refusedAttaches.length;
 			while (refusedIndex-- > 0)
 				if (Sys.time() >= refusedAttaches[refusedIndex].until || !refusedAttaches[refusedIndex].transport.isOpen()) {
 					refusedAttaches[refusedIndex].transport.close();
 					refusedAttaches.splice(refusedIndex, 1);
 				}
-			relay.poll();
 			remote.poll();
 			SuitLogin.poll();
-			var relayRevision = relay.revision();
-			if (relayRevision != shownRelay) {
-				// A remote client came or went: update the tooltip now, not on the next rescan.
-				shownRelay = relayRevision;
-				updateTooltip();
-			}
 			var index = jobs.length;
 			while (index-- > 0)
 				if (jobs[index].tick()) {
@@ -185,29 +228,39 @@ class SuitDaemon {
 				refresh();
 			if (quitting != null && quitPending && jobs.length == 0 && stopAt < 0 && Sys.time() >= quitCheckAt)
 				afterQuitJobs();
-			if (inventory.owned().length > 0 || clients.length > 0 || jobs.length > 0 || relay.hostingCount() > 0 || remote.hosting() || resident)
+			if (inventory.owned().length > 0 || clients.length > 0 || directory.editors().length > 0 || router.subscriberCount() > 0 || services.count() > 0 || jobs.length > 0 || remote.hosting() || resident)
 				idleSince = Sys.time();
 			else if (Sys.time() - idleSince >= idleSeconds)
 				break;
 		}
 	}
 
+	/** Tells every window what changed: the machine's workspaces with their services, and where each window is focused. */
+	function pushMachine():Void {
+		var key = catalogRevision + ":" + services.revision + ":" + directory.revision;
+		if (key == pushed)
+			return;
+		pushed = key;
+		if (directory.editors().length == 0 && router.subscriberCount() == 0)
+			return;
+		try {
+			var changed = {machine: machine().json(serviceOf), windows: directory.windows()};
+			directory.push("exosuit.machine.changed", changed);
+			router.publish("exosuit.machine.changed", changed, null);
+		} catch (_:Dynamic) {}
+	}
+
 	function refresh():Void {
-		inventory = new SuitInventory(true);
+		inventory = new SuitInventory(true, directory.editors());
 		refreshedAt = Sys.time();
 		checkQuitState();
 		updateTooltip();
 	}
 
-	/** After a scan: a new editor ends any quit state; a finished quit exits once nothing owned is left. */
+	/** After a scan: a finished quit exits once nothing owned is left. (A new editor ends the quit when it links.) */
 	function checkQuitState():Void {
-		if (quitting == null && !relayRefused)
+		if (quitting == null)
 			return;
-		for (editor in inventory.editors())
-			if (quitEditors.indexOf(editor.pid) < 0) {
-				cancelQuit();
-				return;
-			}
 		if (quitting == "full" && jobs.length == 0)
 			endReleasedHosts();
 		if (quitting != null && !quitPending && stopAt < 0 && inventory.owned().length == 0)
@@ -216,11 +269,11 @@ class SuitDaemon {
 
 	/**
 		Nothing owned is left after a quit. The full quit ends with the daemon. The polite quit does only when nothing else
-		keeps the daemon up: started at login, remote access on, or a workspace hosted. Otherwise its state is dropped and
+		keeps the daemon up: started at login, or remote access on. Otherwise its state is dropped and
 		the daemon carries on as usual (a phone using this machine hours after the kept terminals ended keeps its access).
 	**/
 	function quitDone():Void {
-		if (quitting == "polite" && (resident || remote.hosting() || relay.hostingCount() > 0)) {
+		if (quitting == "polite" && (resident || remote.hosting())) {
 			quitting = null;
 			quitPending = false;
 			quitEditors = [];
@@ -252,6 +305,10 @@ class SuitDaemon {
 		terminate(released);
 	}
 
+	/** Whether the quit under way asked the editor of process `pid` to close. */
+	function quitAsked(pid:Null<Int>):Bool
+		return pid != null && quitEditors.indexOf(pid) >= 0;
+
 	/** The user started Exosuit again: nothing of the quit applies to what runs from now on, and remote access is back. */
 	function cancelQuit():Void {
 		quitting = null;
@@ -259,13 +316,15 @@ class SuitDaemon {
 		quitEditors = [];
 		quitHeldHosts = [];
 		quitSharedWorkers = [];
-		relayRefused = false;
 		remote.resumeAfterQuit();
 	}
 
 	function tooltip():String {
-		var hosting = relay.summary();
-		return hosting.length == 0 ? inventory.summary() : inventory.summary() + "\n" + hosting;
+		var lines = [inventory.summary()];
+		for (line in [router.drivenSummary()])
+			if (line.length > 0)
+				lines.push(line);
+		return lines.join("\n");
 	}
 
 	function updateTooltip():Void {
@@ -287,9 +346,14 @@ class SuitDaemon {
 		}
 	}
 
-	function terminate(processes:Array<SuitProcess>):Void {
+	/**
+		Ends `processes`. An editor among them is asked over its link to quit in `mode` (`prompt` or `recover`), a workspace
+		service over its link to stop.
+	**/
+	function terminate(processes:Array<SuitProcess>, mode:String = "prompt"):Void {
 		if (processes.length > 0)
-			jobs.push(new SuitTerminator(inventory, processes));
+			jobs.push(new SuitTerminator(inventory, processes, function(process) return process.kind == SuitKind.Editor
+				? directory.quit(process.pid, mode, function(_, _) {}) : services.stop(process.pid)));
 	}
 
 	function showMenu():Void {
@@ -297,27 +361,15 @@ class SuitDaemon {
 		if (current == null)
 			return;
 		current.show(function(menu) SuitMenuModel.build(menu, inventory, {
-			terminate: terminate, openViewer: openViewer, quit: quitEverything, quitKeepingTerminals: quitKeepingTerminals,
+			terminate: function(processes) terminate(processes), openViewer: openViewer, quit: quitEverything, quitKeepingTerminals: quitKeepingTerminals,
 			remote: {
 				devices: function() return remote.handle({op: "remote-devices"}), enabled: remote.hosting,
 				disconnect: function(id:String) { remote.disconnectDevice(id); },
 				revoke: function(id:String) { remote.handle({op: "remote-revoke", deviceId: id}); },
 				off: function() { remote.handle({op: "remote-disable"}); }
 			},
-			hosting: {
-				hosts: relay.views, stopHosting: function(root) stopHosting(root), resumeHosting: function(root) relay.resume(root),
-				disconnect: function(client) relay.disconnect(client),
-				retry: function(machineId) relay.retry(machineId), dismiss: function(machineId) relay.dismiss(machineId),
-				loginEnabled: SuitLogin.cached, toggleLogin: SuitLogin.toggleInBackground
-			}
+			loginEnabled: SuitLogin.cached, toggleLogin: SuitLogin.toggleInBackground
 		}));
-	}
-
-	/** Stop hosting: pause it in relay-settings.json (so nothing restarts it) and stop the workspace service. */
-	function stopHosting(root:Null<String>):SuitRelayStopPlan {
-		var plan = SuitRelayHosting.stop(inventory, root, relay);
-		terminate(plan.terminate);
-		return plan;
 	}
 
 	/** The full Quit: ends everything exosuit started, terminal hosts included, editors asked to close first, then exits. */
@@ -339,14 +391,12 @@ class SuitDaemon {
 		quitSharedWorkers = [for (worker in inventory.shared()) {pid: worker.pid, started: worker.started}];
 		quitRounds = 1;
 		quitCheckAt = 0;
-		terminate(SuitActions.quit(inventory, keepTerminals));
-		// The full quit cuts off everything connected from outside now: every remote device session, the machine's relay
-		// connection and the workspaces' relay links. They would end with the daemon, which may stay up for an editor.
-		if (!keepTerminals) {
+		// Editors keep their unsaved work for the next start (hot exit) and close at once (TDD Q4: the tray quits with recover).
+		terminate(SuitActions.quit(inventory, keepTerminals), "recover");
+		// The full quit cuts off everything connected from outside now: every remote device session and the machine's relay
+		// connection. They would end with the daemon, which may stay up for an editor.
+		if (!keepTerminals)
 			remote.cutOff();
-			relay.dispose();
-			relayRefused = true;
-		}
 	}
 
 	/** A quit's jobs are done: exit when nothing is left, else run another round or carry on as usual. */
@@ -365,7 +415,7 @@ class SuitDaemon {
 		if (again.length > 0 && quitRounds < QUIT_ROUNDS) {
 			// Something reappeared (a service an editor restarted while closing, a host a service started): end it too.
 			quitRounds++;
-			terminate(again);
+			terminate(again, "recover");
 			return;
 		}
 		if (inventory.owned().length == 0) {
@@ -422,21 +472,26 @@ class SuitDaemon {
 				continue;
 			var request:Dynamic = null;
 			try request = Json.parse(message.toString()) catch (_:Dynamic) {}
-			if (SuitRelayHosting.isAttach(request)) {
-				if (relayRefused) {
-					// The full quit ended remote access: a restarted workspace service does not get it back.
-					client.send(Bytes.ofString(Json.stringify({ok: false, error: "suit_quitting"})));
-					refusedAttaches.push({transport: client, until: Sys.time() + 2}); // closed later, so the reply is read first
-					clients.splice(index, 1);
-					continue;
-				}
-				// A hosting daemon's relay link: from here on it carries relay frames, not control requests.
+			var op = SuitRecords.stringField(request, "op");
+			if (op == "editor-attach" || op == "service-attach" || op == "service-spare") {
+				// From here on the connection belongs to the editor's link, the service's report or the spare's link.
 				clients.splice(index, 1);
-				relay.attach(client, request);
+				var accepted = op == "editor-attach" ? directory.attach(client, request)
+					: op == "service-spare" ? services.linkSpare(client, request) : services.attach(client, request);
+				if (!accepted)
+					refusedAttaches.push({transport: client, until: Sys.time() + 2}); // closed later, so the reply is read first
+				else if (op == "editor-attach" && quitting != null && !quitAsked(SuitRecords.intField(request, "pid")))
+					cancelQuit(); // A window the quit did not ask to close: the user started Exosuit again.
+				continue;
+			}
+			if (ControlRouter.isSubscription(request)) {
+				// From here on the connection carries the events it asked for (TDD Q18: events are opt-in).
+				clients.splice(index, 1);
+				router.subscribe(client, request);
 				continue;
 			}
 			var reply:Dynamic;
-			try reply = handle(request) catch (error:Dynamic) reply = {ok: false, error: Std.string(error)};
+			try reply = handle(request, client.peerProcess()) catch (error:Dynamic) reply = {ok: false, error: Std.string(error)};
 			if (Std.isOfType(reply, DeferredReply)) {
 				waiting.push({client: client, reply: cast reply});
 				continue;
@@ -445,15 +500,18 @@ class SuitDaemon {
 		}
 	}
 
-	function handle(request:Dynamic):Dynamic {
-		var op = suit.SuitRecord.SuitRecords.stringField(request, "op");
+	/** One request of suit's main pipe or of a window's link; `peer` is the process that sent it (0 for a window's). */
+	function handle(request:Dynamic, peer:Int):Dynamic {
+		var op = SuitRecords.stringField(request, "op");
+		if (op != null && (StringTools.startsWith(op, "workspace-") || op == "machine-rename"))
+			catalogRevision++; // the windows are pushed the machine once this request is done
 		switch op {
 			case "status":
 				refresh();
 				return {
 					ok: true, pid: Sys.getPid(), home: SuitPaths.home(), summary: inventory.summary(), tray: tray != null,
-					editors: inventory.editors().length, background: inventory.background().length,
-					orphaned: inventory.orphans().length, terminals: inventory.terminals().length, terminating: jobs.length, hosting: relay.hostingCount(),
+					editors: directory.editors().length, services: services.count(), background: inventory.background().length,
+					orphaned: inventory.orphans().length, terminals: inventory.terminals().length, terminating: jobs.length,
 					tooltip: tooltip(), connections: clients.length, idleFor: Sys.time() - idleSince
 				};
 			case "refresh":
@@ -469,38 +527,36 @@ class SuitDaemon {
 			case "stop":
 				stopAt = Sys.time() + 0.3;
 				return {ok: true};
-			case "relay-stop":
-				refresh();
-				var plan = stopHosting(SuitRecords.stringField(request, "workspace"));
-				return {ok: true, roots: plan.roots, terminating: plan.terminate.length};
-			case "relay-pause":
-				// Pause without stopping the services: their daemons see the pause and exit on their own.
-				refresh();
-				return {ok: true, roots: SuitRelayHosting.stop(inventory, SuitRecords.stringField(request, "workspace"), relay).roots};
-			case "test-menu":
-				// Tests only: open the tray menu as a click does (adding the icon if needed), or close it by
-				// removing the icon, so a test can check that the daemon keeps working while it is open.
-				if (Sys.getEnv("EXOSUIT_SUIT_HOME") == null || Sys.getEnv("EXOSUIT_SUIT_TEST_MENU") != "1")
-					return {ok: false, error: "unknown request"};
-				if (Reflect.field(request, "close") == true) {
-					if (tray != null)
-						tray.dispose();
-					tray = null;
-					return {ok: true};
-				}
-				if (tray == null)
-					tray = new SuitTray(tooltip(), findIcon());
-				menuRequested = true;
+			case "workspace.open":
+				// The workspace's service, started first when none runs: the editor connects to the pipe in the reply.
+				var opening = new DeferredReply();
+				services.open(SuitRecords.stringField(request, "workspace"), function(service, failure) opening.resolve(service == null
+					? {ok: false, error: failure}
+					: {ok: true, endpoint: service.endpoint, generation: service.generation, root: service.root}));
+				return opening;
+			case "service-stop":
+				var pid = SuitRecords.intField(request, "pid");
+				if (pid == null || !services.stop(pid))
+					return {ok: false, error: "no workspace service of process " + pid + " is linked to suit"};
 				return {ok: true};
 			case "machine":
 				// `windows`: where each editor window is focused, for the Workbench's "open in another window" (M19 Phase 8).
-				return {ok: true, machine: machine().json(services), windows: SuitInventory.liveWindows()};
+				return {ok: true, machine: machine().json(serviceOf), windows: directory.windows()};
+			case "editors":
+				return {ok: true, editors: directory.editors()};
+			case "control":
+				return router.handle(request, peer);
+			case "editor-quit":
+				var pid = SuitRecords.intField(request, "pid"), mode = SuitRecords.stringField(request, "mode");
+				if (pid == null || !directory.quit(pid, mode == null ? "prompt" : mode, function(_, _) {}))
+					return {ok: false, error: "no editor window of process " + pid + " is linked to suit"};
+				return {ok: true};
 			case "machine-rename":
 				machine().renameMachine(SuitRecords.stringField(request, "name"));
-				return {ok: true, machine: machine().json(services)};
+				return {ok: true, machine: machine().json(serviceOf)};
 			case "workspace-create":
 				var created = machine().create(SuitRecords.stringField(request, "name"), requestFolders(request));
-				return {ok: true, workspace: created, machine: machine().json(services)};
+				return {ok: true, workspace: created, machine: machine().json(serviceOf)};
 			case "workspace-scratch":
 				var id = SuitRecords.stringField(request, "workspace");
 				var scratch = machine().scratch(id);
@@ -508,10 +564,10 @@ class SuitDaemon {
 				for (entry in machine().state.workspaces)
 					if (entry.id == id)
 						workspace = MachineCatalog.copy(entry);
-				return {ok: true, scratch: scratch, workspace: workspace, machine: machine().json(services)};
+				return {ok: true, scratch: scratch, workspace: workspace, machine: machine().json(serviceOf)};
 			case "workspace-rename":
 				var renamed = machine().rename(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "name"));
-				return {ok: true, workspace: renamed, machine: machine().json(services)};
+				return {ok: true, workspace: renamed, machine: machine().json(serviceOf)};
 			case "workspace-delete":
 				machine().delete(SuitRecords.stringField(request, "workspace"));
 				// Its terminals have nothing to come back to: end their hosts, with or without a running service.
@@ -519,23 +575,16 @@ class SuitDaemon {
 				var deleted = SuitRecords.stringField(request, "workspace");
 				terminate([for (host in inventory.terminals()) if (deleted != null && host.workspace == deleted) host]);
 				remote.workspaceDeleted(SuitRecords.stringField(request, "workspace"));
-				return {ok: true, machine: machine().json(services)};
+				return {ok: true, machine: machine().json(serviceOf)};
 			case "workspace-add-folder":
 				var added = machine().addFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
-				return {ok: true, workspace: added, machine: machine().json(services)};
+				return {ok: true, workspace: added, machine: machine().json(serviceOf)};
 			case "workspace-remove-folder":
 				var removed = machine().removeFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
-				return {ok: true, workspace: removed, machine: machine().json(services)};
-			case "login-toggle":
-				// As the tray's checkbox does: in the background, answered at once.
-				SuitLogin.toggleInBackground();
-				return {ok: true};
+				return {ok: true, workspace: removed, machine: machine().json(serviceOf)};
 			default:
 				var remoteReply = remote.handle(request);
-				if (remoteReply != null)
-					return remoteReply;
-				var relayReply = relay.handle(request);
-				return relayReply != null ? relayReply : {ok: false, error: "unknown request"};
+				return remoteReply != null ? remoteReply : {ok: false, error: "unknown request"};
 		}
 	}
 
@@ -546,9 +595,18 @@ class SuitDaemon {
 		return catalog;
 	}
 
-	/** The running service of a workspace, as a `machine` reply reports it. */
-	function services(workspace:MachineCatalog.MachineWorkspace):Null<MachineCatalog.MachineService>
-		return SuitInventory.serviceFor(inventory.owned(), workspace.id);
+	/** A workspace's folders; none for an id the machine does not list. */
+	function workspaceFolders(id:String):Array<String> {
+		try for (entry in machine().state.workspaces)
+			if (entry.id == id)
+				return entry.folders.copy()
+		catch (_:Dynamic) {}
+		return [];
+	}
+
+	/** The running service of a workspace, as it reported itself (SuitServices). */
+	function serviceOf(workspace:MachineCatalog.MachineWorkspace):Null<MachineCatalog.MachineService>
+		return services.serviceOf(workspace.id);
 
 	/** A `workspace-create` request's folders: `folders` (possibly empty), or the older single `folder`. */
 	static function requestFolders(request:Dynamic):Array<String> {
@@ -589,8 +647,10 @@ class SuitDaemon {
 		tray = null;
 		for (client in clients)
 			client.close();
+		pragtical.dispose();
+		directory.dispose();
+		services.dispose();
 		remote.dispose();
-		relay.dispose();
 		hub.dispose();
 		runtime.dispose();
 	}

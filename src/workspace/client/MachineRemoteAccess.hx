@@ -104,7 +104,7 @@ class MachineRemoteAccess implements MachineRemoteView {
 		return failure;
 
 	public function refresh(force:Bool):Void {
-		if (!machine.enabled || refreshing || !force && Sys.time() < nextRefresh)
+		if (refreshing || !force && Sys.time() < nextRefresh)
 			return;
 		refreshing = true;
 		nextRefresh = Sys.time() + REFRESH_SECONDS;

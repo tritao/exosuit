@@ -17,9 +17,12 @@ param(
 	[string]$WorkingDirectory = (Get-Location).Path
 )
 $ErrorActionPreference = 'Stop'
-# Guarded runs are unattended: what they start neither registers with the user's suit nor starts it.
-# test-suit.py sets EXOSUIT_SUIT=isolated with its own EXOSUIT_SUIT_HOME to exercise suit itself.
-if (-not $env:EXOSUIT_SUIT) { $env:EXOSUIT_SUIT = 'off' }
+# Guarded runs are unattended: what they start talks only to a suit in a home of its own, and does not start it.
+# A caller that sets EXOSUIT_SUIT_HOME (test-suit.py, the GUI fixture, wt-run.ps1) keeps its own.
+if (-not $env:EXOSUIT_SUIT_HOME) {
+	$env:EXOSUIT_SUIT_HOME = Join-Path ([IO.Path]::GetTempPath()) ('exosuit-guard-suit-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+	if (-not $env:EXOSUIT_SUIT_AUTOSTART) { $env:EXOSUIT_SUIT_AUTOSTART = '0' }
+}
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $arguments = if ($ArgLine) { @($ArgLine) } else { @() }
 $result = Invoke-Guarded -FilePath $Exe -ArgumentList $arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds $TimeoutSeconds -LogPath $Log

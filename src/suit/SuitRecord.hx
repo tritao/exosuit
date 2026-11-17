@@ -31,25 +31,11 @@ typedef SuitRecord = {
 	/** The format the record was written in: before 2, registeredAt was whole seconds (see SuitClock). */
 	var version:Int;
 
-	/** An editor's workspace roots. */
-	var roots:Array<String>;
-
-	/** The ids of the workspaces an editor uses, whose services are keyed by id. */
-	var workspaces:Array<String>;
-
 	/** A workspace service's root, state directory, generation and workspace id (from its SuitWorkspace). */
 	var root:Null<String>;
 	var workspace:Null<String>;
 	var stateDir:Null<String>;
 	var generation:Null<String>;
-
-	/**
-		An editor window's id and focused context (`machine/workspace/group`, ContextKey), so other windows can show
-		"open in another window" (M19 Phase 8). Null for other kinds, and for an editor that has not focused one.
-		Additive: a reader that does not know the fields ignores them.
-	**/
-	var window:Null<String>;
-	var context:Null<String>;
 
 	/** The registered process this one belongs to; set for adopted processes. */
 	var owner:Null<Int>;
@@ -73,14 +59,10 @@ class SuitRecords {
 			kind: kind,
 			registeredAt: SuitClock.now(),
 			version: VERSION,
-			roots: [],
-			workspaces: [],
 			root: null,
 			workspace: null,
 			stateDir: null,
 			generation: null,
-			window: null,
-			context: null,
 			owner: null,
 			adopted: false
 		};
@@ -96,14 +78,10 @@ class SuitRecords {
 			pid: record.pid,
 			kind: (record.kind : String),
 			registeredAt: record.registeredAt,
-			roots: record.roots,
-			workspaces: record.workspaces,
 			root: record.root,
 			workspace: record.workspace,
 			stateDir: record.stateDir,
 			generation: record.generation,
-			window: record.window,
-			context: record.context,
 			owner: record.owner,
 			adopted: record.adopted
 		};
@@ -129,27 +107,13 @@ class SuitRecords {
 			kind: SuitKind.SuitKinds.parse(stringField(document, "kind")),
 			registeredAt: registeredAt,
 			version: version == null ? 1 : version,
-			roots: strings(document, "roots"),
-			workspaces: strings(document, "workspaces"),
 			root: stringField(document, "root"),
 			workspace: stringField(document, "workspace"),
 			stateDir: stringField(document, "stateDir"),
 			generation: stringField(document, "generation"),
-			window: stringField(document, "window"),
-			context: stringField(document, "context"),
 			owner: intField(document, "owner"),
 			adopted: Reflect.field(document, "adopted") == true
 		};
-	}
-
-	static function strings(document:Dynamic, field:String):Array<String> {
-		var result:Array<String> = [];
-		var listed:Dynamic = Reflect.field(document, field);
-		if (Std.isOfType(listed, Array))
-			for (value in (listed : Array<Dynamic>))
-				if (Std.isOfType(value, String))
-					result.push(value);
-		return result;
 	}
 
 	public static function stringField(value:Dynamic, field:String):Null<String> {

@@ -555,34 +555,6 @@ int processkit_terminate(int pid, double started) {
     return ended ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
 }
 
-typedef struct processkit_close_request {
-    DWORD pid;
-    int posted;
-} processkit_close_request;
-
-static BOOL CALLBACK close_window(HWND window, LPARAM parameter) {
-    processkit_close_request *request = (processkit_close_request *)parameter;
-    DWORD owner = 0;
-    GetWindowThreadProcessId(window, &owner);
-    if (owner == request->pid && IsWindowVisible(window) && !GetWindow(window, GW_OWNER)) {
-        if (PostMessageW(window, WM_CLOSE, 0, 0))
-            request->posted++;
-    }
-    return TRUE;
-}
-
-int processkit_request_close(int pid, double started) {
-    HANDLE handle = NULL;
-    int status = open_identified(pid, started, 0, &handle);
-    if (status != PROCESSKIT_OK)
-        return status;
-    // The handle is held while posting, so the windows found belong to this process and not a pid reuser.
-    processkit_close_request request = {(DWORD)pid, 0};
-    EnumWindows(close_window, (LPARAM)&request);
-    CloseHandle(handle);
-    return request.posted > 0 ? PROCESSKIT_OK : PROCESSKIT_NOT_FOUND;
-}
-
 int processkit_current_pid(void) { return (int)GetCurrentProcessId(); }
 
 #elif defined(__linux__)
@@ -799,7 +771,6 @@ static int signal_identified(int pid, double started, int signal_number) {
 
 int processkit_terminate(int pid, double started) { return signal_identified(pid, started, SIGKILL); }
 
-int processkit_request_close(int pid, double started) { return signal_identified(pid, started, SIGTERM); }
 
 int processkit_current_pid(void) { return (int)getpid(); }
 
@@ -837,7 +808,6 @@ static int signal_identified(int pid, double started, int signal_number) {
 
 int processkit_terminate(int pid, double started) { return signal_identified(pid, started, SIGKILL); }
 
-int processkit_request_close(int pid, double started) { return signal_identified(pid, started, SIGTERM); }
 
 int processkit_current_pid(void) { return (int)getpid(); }
 
@@ -859,7 +829,6 @@ double processkit_started(int pid) { return pid > 0 && kill((pid_t)pid, 0) == 0 
 
 int processkit_terminate(int pid, double started) { return processkit_identify(pid, started); }
 
-int processkit_request_close(int pid, double started) { return processkit_identify(pid, started); }
 
 int processkit_current_pid(void) { return (int)getpid(); }
 

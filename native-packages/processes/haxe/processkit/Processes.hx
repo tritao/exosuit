@@ -90,10 +90,6 @@ class Processes {
 	public static function terminate(pid:Int, started:Float):Int
 		return ProcessKit.processkit_terminate(pid, started);
 
-	/** Asks for a graceful close (WM_CLOSE to its windows on Windows, SIGTERM elsewhere). */
-	public static function requestClose(pid:Int, started:Float):Int
-		return ProcessKit.processkit_request_close(pid, started);
-
 	/** The value of `name` in an environment read by `list`, or null when the process did not have it. */
 	public static function variable(info:ProcessInfo, name:String):Null<String> {
 		var foldCase = Sys.systemName() == "Windows";

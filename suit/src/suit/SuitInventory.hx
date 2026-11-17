@@ -5,9 +5,7 @@ import haxe.io.Path;
 import processkit.Processes;
 import suit.SuitGroup;
 import suit.SuitKind;
-import suit.MachineCatalog.MachineService;
 import suit.SuitRecord.SuitRecords;
-import suit.WindowFocus;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -29,9 +27,6 @@ typedef SuitProcess = {
 	var workspaces:Array<String>;
 	var stateDir:Null<String>;
 	var generation:Null<String>;
-	/** An editor window's id and focused context (SuitRecord); null for anything else. */
-	var window:Null<String>;
-	var context:Null<String>;
 	var owner:Null<Int>;
 	var commandLine:String;
 	var orphaned:Bool;
@@ -42,38 +37,26 @@ typedef SuitProcess = {
 	**/
 	var shared:Bool;
 	var group:SuitGroup;
-	var relay:Null<SuitRelayStatus>;
 	/** A terminal host's folder, terminal and workspace (TerminalHostFolder); null for anything else. */
 	var terminal:Null<suit.TerminalHostFolder.TerminalHostInfo>;
 }
 
-/** Relay hosting state a workspace daemon publishes in its state directory; device ids only, never keys. */
-typedef SuitRelayStatus = {
-	var configured:Bool;
-	var connected:Bool;
-	var origin:Null<String>;
-	var error:Null<String>;
-	var devices:Array<{deviceId:String, connected:Bool, revoked:Bool}>;
-	var pending:Int;
-	var updatedAt:Float;
-}
-
 /**
-	Builds the picture suit shows: registered processes (validated against their start time) plus, unless
-	`EXOSUIT_SUIT_SCAN=0`, exosuit-related processes found by scanning command lines.
+	Builds the picture suit shows: the editors linked to suit (EditorDirectory), registered processes (validated against
+	their start time) plus, unless `EXOSUIT_SUIT_SCAN=0`, exosuit-related processes found by scanning command lines.
 
-	Ownership is positive, never guessed from a command line. A process is exosuit's when it registered
-	itself, or when SuitLineage ties it to a registered process: it is of a kind exosuit starts, its
+	Ownership is positive, never guessed from a command line. A process is exosuit's when it is a linked editor or
+	registered itself, or when SuitLineage ties it to a registered process: it is of a kind exosuit starts, its
 	environment registers with this suit, and its parent chain reaches the registered process through
 	exosuit kinds only. Anything else found by scanning (a build run in an exosuit terminal, a compiler
-	worker another tool started, a test's workspace manager) is listed as not started by exosuit and left
+	worker another tool started, a test's workspace service) is listed as not started by exosuit and left
 	out of every bulk stop.
 
 	Reading has no side effects. Only an inventory built with `maintain` (the daemon's) deletes stale
 	records and writes adoption records, which keep an adopted process exosuit's after its ancestor exits.
 
-	Orphans follow each kind's SuitOrphanRule: a workspace service is orphaned when no registered editor
-	uses its root, a compiler worker when no editor or live session runs and no build exosuit did not start uses it
+	Orphans follow each kind's SuitOrphanRule: a workspace service is orphaned when no linked editor
+	uses its workspace, a compiler worker when no editor or live session runs and no build exosuit did not start uses it
 	(`shared`, which also keeps it out of every bulk stop), and anything else when the process it belongs to is gone.
 
 	Terminal hosts are the exception to both rules. A host is detached from the service that started it and
@@ -104,7 +87,8 @@ class SuitInventory {
 	/** The toolchains of Haxeon clients exosuit did not start (foreignToolchainClients), filled by classify. */
 	var buildsOutsideExosuit:Map<String, Bool> = new Map();
 
-	public function new(maintain:Bool = false) {
+	/** `editors`: the editor windows linked to suit; editors have no registry records. */
+	public function new(maintain:Bool = false, ?editors:Array<suit.LinkedEditor>) {
 		self = Sys.getPid();
 		this.maintain = maintain;
 		scanning = Sys.getEnv("EXOSUIT_SUIT_SCAN") != "0";
@@ -114,6 +98,8 @@ class SuitInventory {
 		for (info in snapshot)
 			byPid.set(info.pid, info);
 		lineage = new SuitLineage(snapshot, SuitPaths.home());
+		if (editors != null)
+			addEditors(editors);
 		readRegistry();
 		if (scanning && listed) {
 			scan();
@@ -128,42 +114,6 @@ class SuitInventory {
 
 	public function editors():Array<SuitProcess>
 		return [for (process in processes) if (process.source != Scanned && process.kind == SuitKind.Editor) process];
-
-	static inline final WINDOWS_CACHE_SECONDS = 0.25;
-	static var windowsCache:Null<Array<WindowFocus>> = null;
-	static var windowsCachedAt:Float = 0;
-
-	/**
-		The focused context of each running editor window (M19 Phase 8), for a `machine` reply. Read straight from the
-		registry, not from a scan: a focus must reach the other windows within a refresh or two, and a scan is seconds old.
-		Records of processes that are gone are skipped here and pruned by the next scan. Stops reading at
-		WindowFocuses.LIMIT records, and answers from the last read for a quarter second (several windows poll at once).
-	**/
-	public static function liveWindows():Array<WindowFocus> {
-		if (windowsCache != null && Sys.time() - windowsCachedAt < WINDOWS_CACHE_SECONDS)
-			return windowsCache;
-		var result:Array<WindowFocus> = [];
-		windowsCache = result;
-		windowsCachedAt = Sys.time();
-		var directory = SuitPaths.registry();
-		if (!FileSystem.exists(directory))
-			return result;
-		for (name in FileSystem.readDirectory(directory)) {
-			if (result.length >= WindowFocuses.LIMIT)
-				break;
-			if (!StringTools.endsWith(name, ".json"))
-				continue;
-			var record = SuitRecords.read(Path.join([directory, name]));
-			if (record == null || record.kind != SuitKind.Editor || record.window == null || record.context == null)
-				continue;
-			var started = Processes.started(record.pid);
-			if (started < 0 || started > 0 && !SuitClock.registeredAfterStart(started, record.registeredAt, record.version))
-				continue;
-			result.push({window: record.window, pid: record.pid, context: record.context});
-		}
-		result.sort(function(left, right) return Reflect.compare(left.window, right.window));
-		return result;
-	}
 
 	/** exosuit's processes other than editors, terminal hosts included: what "all background processes", `kill --all` and the full Quit stop. */
 	public function background():Array<SuitProcess>
@@ -193,20 +143,6 @@ class SuitInventory {
 			if (process.pid == pid)
 				return process;
 		return null;
-	}
-
-	/** Workspaces with relay hosting configured, one entry per root (the manager when both are listed). */
-	public function hosted():Array<SuitProcess> {
-		var seen = new Map<String, Bool>();
-		var result:Array<SuitProcess> = [];
-		for (kind in [SuitKind.WorkspaceManager, SuitKind.WorkspaceHost])
-			for (process in processes)
-				if (process.kind == kind && process.relay != null && process.relay.configured && process.root != null
-					&& !seen.exists(rootKey(process.root))) {
-					seen.set(rootKey(process.root), true);
-					result.push(process);
-				}
-		return result;
 	}
 
 	/** One-line summary used for the tray title and tooltip. */
@@ -302,6 +238,19 @@ class SuitInventory {
 		return started < 0 ? null : {pid: pid, parent: 0, started: started, name: "", commandLine: "", environment: ""};
 	}
 
+	function addEditors(editors:Array<suit.LinkedEditor>):Void {
+		for (editor in editors) {
+			var info = lookup(editor.pid);
+			if (info == null || find(info.pid) != null)
+				continue;
+			processes.push({
+				pid: info.pid, started: info.started, parent: info.parent, kind: SuitKind.Editor, source: Registered, root: null,
+				roots: editor.roots.copy(), workspace: null, workspaces: editor.workspaces.copy(), stateDir: null, generation: null,
+				owner: null, commandLine: info.commandLine, orphaned: false, shared: false, group: OtherGroup, terminal: null
+			});
+		}
+	}
+
 	function readRegistry():Void {
 		var directory = SuitPaths.registry();
 		if (!FileSystem.exists(directory))
@@ -330,19 +279,16 @@ class SuitInventory {
 				kind: record.kind,
 				source: record.adopted ? Adopted : Registered,
 				root: record.root,
-				roots: record.roots,
+				roots: [],
 				workspace: record.workspace,
-				workspaces: record.workspaces,
+				workspaces: [],
 				stateDir: record.stateDir,
 				generation: record.generation,
-				window: record.window,
-				context: record.context,
 				owner: record.owner,
 				commandLine: info.commandLine,
 				orphaned: false,
 				shared: false,
 				group: OtherGroup,
-				relay: null,
 				terminal: null
 			});
 		}
@@ -377,8 +323,8 @@ class SuitInventory {
 			var owner = lineage.adoptionOwner(info, owned);
 			// A host has no exosuit parent to be adopted under: it proves itself by its folder (ownsTerminalHost).
 			var ownHost = found.kind == SuitKind.TerminalHost && found.terminalDir != null
-				&& (ownsTerminalHost(info, found.stateDir, suit.TerminalHostFolder.read(found.terminalDir).pid, SuitPaths.home())
-					|| startedByService(info, found.stateDir));
+				&& (ownsTerminalHost(info, suit.TerminalHostFolder.read(found.terminalDir).pid, SuitPaths.home())
+					|| startedByService(info));
 			var process:SuitProcess = {
 				pid: info.pid,
 				started: info.started,
@@ -391,14 +337,11 @@ class SuitInventory {
 				workspaces: [],
 				stateDir: found.stateDir,
 				generation: found.generation,
-				window: null,
-				context: null,
 				owner: owner,
 				commandLine: info.commandLine,
 				orphaned: false,
 				shared: false,
 				group: OtherGroup,
-				relay: null,
 				terminal: null
 			};
 			processes.push(process);
@@ -434,7 +377,7 @@ class SuitInventory {
 			}
 		var home = SuitPaths.home();
 		function registers(info:ProcessInfo):Bool
-			return info.environment.length > 0 && SuitLineage.registersWith(info, null, home);
+			return info.environment.length > 0 && SuitLineage.registersWith(info, home);
 		var sessions:Array<{root:String, started:Float}> = [];
 		for (info in snapshot) {
 			if (info.pid == self || info.commandLine.length == 0)
@@ -497,8 +440,8 @@ class SuitInventory {
 		if (process == null) {
 			process = {
 				pid: info.pid, started: info.started, parent: info.parent, kind: kind, source: Adopted, root: null, roots: [],
-				workspace: null, workspaces: [], stateDir: null, generation: null, window: null, context: null, owner: owner,
-				commandLine: info.commandLine, orphaned: false, shared: false, group: OtherGroup, relay: null, terminal: null
+				workspace: null, workspaces: [], stateDir: null, generation: null, owner: owner,
+				commandLine: info.commandLine, orphaned: false, shared: false, group: OtherGroup, terminal: null
 			};
 			processes.push(process);
 		} else {
@@ -515,16 +458,16 @@ class SuitInventory {
 		with the suit at `ownHome` (so a test's host under another home, or with suit off, is not), and the
 		`host.json` in the folder it was started for names its own pid (`recordedPid`), which only the host writes.
 	**/
-	public static function ownsTerminalHost(info:ProcessInfo, stateDir:Null<String>, recordedPid:Null<Int>, ownHome:String):Bool
-		return recordedPid != null && recordedPid == info.pid && info.environment.length > 0 && SuitLineage.registersWith(info, stateDir, ownHome);
+	public static function ownsTerminalHost(info:ProcessInfo, recordedPid:Null<Int>, ownHome:String):Bool
+		return recordedPid != null && recordedPid == info.pid && info.environment.length > 0 && SuitLineage.registersWith(info, ownHome);
 
 	/**
 		Whether a terminal host that has not registered nor written its `host.json` yet (still starting) was started by a
 		workspace service this suit owns: its parent is that service (started before it) and its environment registers
 		with this suit. Without this a host starting during a full Quit is in no list and survives it.
 	**/
-	function startedByService(info:ProcessInfo, stateDir:Null<String>):Bool {
-		if (info.environment.length == 0 || !SuitLineage.registersWith(info, stateDir, SuitPaths.home()))
+	function startedByService(info:ProcessInfo):Bool {
+		if (info.environment.length == 0 || !SuitLineage.registersWith(info, SuitPaths.home()))
 			return false;
 		var parent = byPid.get(info.parent);
 		if (parent == null || !SuitClock.startedBefore(parent.started, info.started))
@@ -554,11 +497,6 @@ class SuitInventory {
 		var editorPids = new Map<Int, SuitProcess>();
 		var claimed = new Map<String, SuitProcess>();
 		var haxeonInUse = false;
-		var hostedWorkspaces = new Map<String, Bool>();
-		for (host in suit.relay.SuitRelayHosts.active()) {
-			hostedWorkspaces.set("state:" + rootKey(host.stateDir), true);
-			hostedWorkspaces.set("root:" + rootKey(host.root), true);
-		}
 		for (process in processes) {
 			if (process.source == Scanned)
 				continue;
@@ -578,8 +516,6 @@ class SuitInventory {
 		buildsOutsideExosuit = foreignToolchainClients();
 		for (process in processes) {
 			process.shared = process.source != Scanned && usedByBuild(process);
-			if (SuitKinds.isWorkspaceService(process.kind) && process.stateDir != null)
-				process.relay = readRelay(process.stateDir);
 			if (process.kind == SuitKind.TerminalHost)
 				describeTerminal(process);
 			if (process.source == Scanned) {
@@ -596,7 +532,7 @@ class SuitInventory {
 					holder = SuitKinds.headsOwnGroup(process.kind) ? process : null;
 				case NoEditorUsesRoot:
 					holder = claimant(process, claimed);
-					process.orphaned = holder == null && !keptByHosting(process, hostedWorkspaces);
+					process.orphaned = holder == null;
 				case NoHaxeonUser:
 					// A worker a build outside exosuit is using is in use, whatever exosuit runs.
 					process.orphaned = !haxeonInUse && !process.shared;
@@ -683,17 +619,6 @@ class SuitInventory {
 		return name.length > 0 ? name : normalized;
 	}
 
-	/**
-		True for a workspace service of a workspace suit hosts (SuitRelayHosts.active): suit starts and
-		keeps those services itself while hosting is on, so they are in use without an editor. A service is
-		matched by its state directory, or by its root when it names no state directory.
-	**/
-	static function keptByHosting(process:SuitProcess, hostedWorkspaces:Map<String, Bool>):Bool {
-		if (process.stateDir != null)
-			return hostedWorkspaces.exists("state:" + rootKey(process.stateDir));
-		return process.root != null && hostedWorkspaces.exists("root:" + rootKey(process.root));
-	}
-
 	/** The editor that uses a workspace service's workspace: by id when the service is keyed by one, else by its root. */
 	static function claimant(process:SuitProcess, claimed:Map<String, SuitProcess>):Null<SuitProcess> {
 		var workspace = process.workspace;
@@ -719,85 +644,6 @@ class SuitInventory {
 			return false;
 		var info = lookup(pid);
 		return info != null && SuitClock.startedBefore(info.started, childStarted);
-	}
-
-	/**
-		The running service of a workspace, for a `machine` reply: a workspace service process keyed by this id that its
-		state folder's endpoint.json names: by the manager's pid, else by generation for a manager. A leftover endpoint.json from a crashed
-		or earlier service names a process that is not running, so it matches nothing. The newest matching process wins.
-	**/
-	public static function serviceFor(processes:Array<SuitProcess>, workspace:String):Null<MachineService> {
-		var candidates = [for (process in processes) if (process.workspace == workspace && process.stateDir != null && SuitKinds.isWorkspaceService(process.kind)) process];
-		candidates.sort(function(a, b) return a.started < b.started ? 1 : a.started > b.started ? -1 : 0);
-		// One read of each state folder's endpoint.json, however many processes name it.
-		var endpoints = new Map<String, Null<{socket:String, managerPid:Int, generation:Null<String>}>>();
-		function endpointOf(stateDir:String):Null<{socket:String, managerPid:Int, generation:Null<String>}> {
-			if (!endpoints.exists(stateDir)) endpoints.set(stateDir, readEndpoint(stateDir));
-			return endpoints.get(stateDir);
-		}
-		// The process the file names by pid is the service; a generation match counts only for a manager (a child that
-		// shares the generation is not the service).
-		for (process in candidates) {
-			var stateDir = process.stateDir;
-			var endpoint = stateDir == null ? null : endpointOf(stateDir);
-			if (endpoint != null && endpoint.managerPid == process.pid) return {endpoint: endpoint.socket, pid: process.pid, running: true};
-		}
-		for (process in candidates) {
-			var stateDir = process.stateDir, generation = process.generation;
-			var endpoint = stateDir == null ? null : endpointOf(stateDir);
-			if (endpoint != null && generation != null && endpoint.generation == generation && process.commandLine.indexOf("--manager") >= 0)
-				return {endpoint: endpoint.socket, pid: process.pid, running: true};
-		}
-		return null;
-	}
-
-
-	/** The socket, manager pid and generation of a state folder's `endpoint.json`, or null. */
-	public static function readEndpoint(stateDir:String):Null<{socket:String, managerPid:Int, generation:Null<String>}> {
-		var path = Path.join([stateDir, "endpoint.json"]);
-		try {
-			var metadata = FileSystem.exists(path) ? FileSystem.metadata(path) : null;
-			if (metadata == null || metadata.size >= 16384) return null;
-			var value:Dynamic = Json.parse(File.getContent(path));
-			var socket = SuitRecords.stringField(value, "socket"), pid = SuitRecords.intField(value, "managerPid");
-			if (socket == null || socket.length == 0 || pid == null) return null;
-			return {socket: socket, managerPid: pid, generation: SuitRecords.stringField(value, "generation")};
-		} catch (_:Dynamic) {}
-		return null;
-	}
-
-	/** Reads `relay-status.json`, which a hosting workspace daemon rewrites while it runs. */
-	public static function readRelay(stateDir:String):Null<SuitRelayStatus> {
-		// A daemon can also host because EXOSUIT_RELAY_ORIGIN was set in its environment; its status file says so.
-		var configured = FileSystem.exists(Path.join([stateDir, "relay-settings.json"]));
-		var path = Path.join([stateDir, "relay-status.json"]);
-		var status:Dynamic = null;
-		try {
-			var metadata = FileSystem.exists(path) ? FileSystem.metadata(path) : null;
-			if (metadata != null && metadata.size < 262144)
-				status = Json.parse(File.getContent(path));
-		} catch (_:Dynamic) {}
-		if (status == null)
-			return configured ? {configured: true, connected: false, origin: null, error: null, devices: [], pending: 0, updatedAt: 0} : null;
-		var devices:Array<{deviceId:String, connected:Bool, revoked:Bool}> = [];
-		var listed:Dynamic = Reflect.field(status, "devices");
-		if (Std.isOfType(listed, Array))
-			for (device in (listed : Array<Dynamic>)) {
-				var id = SuitRecords.stringField(device, "deviceId");
-				if (id != null)
-					devices.push({deviceId: id, connected: Reflect.field(device, "connected") == true, revoked: Reflect.field(device, "revoked") == true});
-			}
-		var pending = SuitRecords.intField(status, "pending");
-		var updatedAt = SuitRecords.floatField(status, "updatedAt");
-		return {
-			configured: configured || Reflect.field(status, "configured") == true,
-			connected: Reflect.field(status, "connected") == true,
-			origin: SuitRecords.stringField(status, "origin"),
-			error: SuitRecords.stringField(status, "error"),
-			devices: devices,
-			pending: pending == null ? 0 : pending,
-			updatedAt: updatedAt == null ? 0 : updatedAt
-		};
 	}
 
 	/** Deletes a stale or junk record; only the daemon's inventory does. */
