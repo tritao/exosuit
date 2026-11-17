@@ -1,6 +1,7 @@
 """G04, port against baseline: what shows only on hover, focus or a right click, and screenshots of it (U9's visual
 parity: a tooltip, a context menu, the side bar's header actions).
 
+  layout     the Editor layout is chosen first (Files in the side bar).
   header     the pointer moves onto the side bar's Files tree: its header actions (New File, New Folder, Refresh,
              Collapse All) show; it moves to the editor: they go (T19: hover alone causes no root build upstream, so
              the port asks for one when their visibility flips).
@@ -35,6 +36,12 @@ def run(gui):
     gui.element("a2.txt", role="4", timeout=15)
     open_file(gui, "a1.txt")
     gui.wait("a1.txt in a tab", lambda s: "a1.txt" in tabs(s["state"]), 15)
+    # The Agents layout (the default) keeps Files in the right panel, whose tree has neither header actions nor a context
+    # menu on the baseline; the Editor layout shows the side bar's Files view, which has both.
+    click(gui, gui.element("Layout", role="1"))
+    click(gui, gui.element("Editor Layout", role="16"))
+    gui.wait("the side bar's Files view with its tabs", lambda s: gui.find(s, "Source Control", role="1") and gui.find(s, "a2.txt", role="4"), 10)
+    time.sleep(1)
     tab = next(e for e in gui.find(gui.snapshot(), pattern=r"a1\.txt$") if e["role"] == "18" or (e["role"] != "4" and e["y"] < 120))
     away = {"x": tab["x"] + 200, "y": tab["y"] + tab["h"] + 200}
     time.sleep(1)
