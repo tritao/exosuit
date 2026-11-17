@@ -2895,7 +2895,8 @@ private typedef ScmMarkerTarget = {
 /**
 	The side bar, whose header actions show while the pointer is over it or the keyboard is in it
 	(`SidebarHost.headerActionsVisible`, read while building). Hover and focus alone change only how nodes look, which
-	haxeon updates without a build, so entering, leaving, focusing and blurring the side bar ask for one.
+	haxeon updates without a build, so when entering, leaving, focusing or blurring changes whether they show, the side
+	bar asks for one.
 **/
 private class SidebarHoverRebuild implements View {
 	final host:haxeon.ui.widgets.sidebar.SidebarHost;
@@ -2908,7 +2909,12 @@ private class SidebarHoverRebuild implements View {
 
 	public function build(context:haxeon.ui.core.BuildContext):RenderNode {
 		var node = host.build(context);
-		var changed = function(_:UiEvent) rebuild();
+		var visible = host.headerActionsVisible;
+		if (visible == null) return node;
+		var shown = visible(node);
+		var changed = function(_:UiEvent) {
+			if (visible(node) != shown) { shown = !shown; rebuild(); }
+		};
 		node.on(UiEventKind.HoverEnter, changed, haxeon.ui.core.UiEventPhase.Target);
 		node.on(UiEventKind.HoverLeave, changed, haxeon.ui.core.UiEventPhase.Target);
 		node.on(UiEventKind.Focus, changed, haxeon.ui.core.UiEventPhase.Capture);
