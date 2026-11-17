@@ -86,6 +86,36 @@ repro folders named below are under `.port/out/` in the port worktree (not in gi
 - **Cause:** not known; probably shared cached state between requests of different entries.
 - **Status:** open, no repro.
 
+### `Array.remove` and `indexOf` in a generic instance over an array type: "Unknown IR call __array_remove_any"
+
+- **Symptom:** `activeJobs.remove(cast job)` (`activeJobs:Array<ScmJob<Dynamic>>`) in the generic `finish<T>` and
+  `newJob<T>` of `src/scm/RpcScmSource.hx` fails only where the instance has `T = Array<ScmBranch>` (tests/workspace-scm):
+  `IR verification failed for $generic:scm.RpcScmSource.finish[layout]<Array<class:scm.ScmBranch<>>>: Unknown IR call
+  "__array_remove_any"`; `indexOf` gives `__array_index_of_any` the same way. The app's own build does not reach that
+  instance.
+- **Repro:** put back `activeJobs.remove(cast job)` in RpcScmSource and compile tests/workspace-scm.
+- **Cause:** not known; the array-equality helper for an element type that is itself an instance of a generic class
+  over an array is not generated.
+- **Workaround:** a `forgetJob` loop with `splice` (RpcScmSource).
+- **Status:** open, no minimal repro.
+
+### UIKit: a positioned Tooltip inside a TrackedScope that runs alone: "Layout node IDs must be unique"
+
+- **Symptom:** a `TrackedScope` whose body holds a Tooltip with a placement (its tip node is `overlay`, lifted by the
+  window's `TooltipOverlayHost`) throws `Layout node IDs must be unique` at the next submit as soon as the scope runs
+  alone (no root build): after a signal it read was written between frames, and after a State its body read was
+  written in `onResolved`. Seen once as "A render scope body must produce its reserved, unparented root". The same tree
+  built at the root runs. Also, `ScopeRootBoundary.transferNodeFields` does not carry a caller-set
+  `commandShortcutFilter` to the root a re-run builds, and caller closures that captured the old root read its stale
+  geometry.
+- **Repro:** `F3/repro` (`main.hl plain|scope|signal`: plain passes, scope and signal throw); in the app,
+  tests/terminal-context-menu at 2da8ddb2 (the whole TerminalPane in its scope with the control strip's status
+  Tooltip).
+- **Workaround:** keep Tooltips and caller-decorated nodes out of a scope that re-runs alone: the terminal's scope
+  covers its rows only (b6853624), and the status bar (a TabTooltip on every slot) is not scoped, so caret, selection
+  and text changes still rebuild the root.
+- **Status:** open.
+
 ### An edit to AutomationProbe.hx makes its hlNative extern "not return on every path"
 
 - **Symptom:** seen 2026-11-16 on haxeon fa128931e (exosuit main a457e3dc): adding one line to
