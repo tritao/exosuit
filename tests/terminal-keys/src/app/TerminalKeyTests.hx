@@ -106,6 +106,17 @@ class TerminalKeyTests {
 		backend.replies = "";
 		fixture.key(UiKey.Backspace, control | shift);
 		require(backend.replies.indexOf("\x1b[8;14;127;1;8;1_") < 0, "Ctrl+Shift+Backspace was taken for Ctrl+Backspace");
+		emulator.feedString("\x1b[?9001l");
+		// Plain Backspace is DEL in every keyboard mode: BS would be read as Ctrl+Backspace and delete a word. Kitty's
+		// disambiguate mode (Claude Code turns it on) keeps the legacy byte; report-all-keys mode sends CSI 127 ; 1 u.
+		for (mode in [{flags: "\x1b[<u", bytes: "\x7f"}, {flags: "\x1b[>1u", bytes: "\x7f"}, {flags: "\x1b[>8u", bytes: "\x1b[127;1u"}]) {
+			emulator.feedString(mode.flags);
+			backend.replies = "";
+			fixture.key(UiKey.Backspace, 0);
+			require(backend.replies == mode.bytes,
+				"Backspace after " + show(mode.flags) + " reached the PTY as " + show(backend.replies) + ", expected " + show(mode.bytes));
+		}
+		emulator.feedString("\x1b[<u\x1b[<u");
 		fixture.dispose();
 	}
 

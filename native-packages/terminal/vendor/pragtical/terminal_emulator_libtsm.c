@@ -577,6 +577,9 @@ terminal_emulator_t* terminal_emulator_new(
   }
   tsm_vte_set_osc_cb(terminal->vte, osc_callback, terminal);
   tsm_vte_set_mouse_cb(terminal->vte, mouse_callback, terminal);
+  /* Backspace is DEL (0x7f), as xterm and Windows Terminal send it; BS (0x08)
+   * is Ctrl+Backspace (word delete) to ConPTY and readline. */
+  tsm_vte_set_backspace_sends_delete(terminal->vte, true);
   return (terminal_emulator_t*)terminal;
 }
 
