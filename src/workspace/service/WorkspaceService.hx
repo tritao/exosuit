@@ -5,10 +5,10 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspacePersistence;
 
 private typedef StoredOperation = {var request:RenameGroup; var outcome:RenameResult;}
-private typedef Observer = {var connection:RpcConnection; var watching:Bool; var granted:Bool;}
+private typedef Observer = {var connection:RpcConnection; var granted:Bool;}
 
 /** Bounded single-event-loop catalog. State and operation outcomes share one epoch.
- * Optional persistence commits state and outcomes before responding/publishing. */
+ * Optional persistence commits state and outcomes before responding. Clients learn of changes from the catalog watch. */
 class WorkspaceService {
 	public final id:String;
 	public final epoch:String;
@@ -22,15 +22,13 @@ class WorkspaceService {
 
 	final groups:Map<String, WorkspaceGroup> = [];
 	final operations:Map<String, StoredOperation> = [];
-	final history:Array<WorkspaceEvent> = [];
 	final observers:Array<Observer> = [];
-	final historyLimit:Int;
 	final operationLimit:Int;
 	final clientLimit:Int;
 	var operationCount:Int = 0;
 	var sequence:Int = 0;
 
-	public function new(id:String, epoch:String, initial:Array<WorkspaceGroup>, historyLimit:Int = 32, operationLimit:Int = 256, clientLimit:Int = 16,
+	public function new(id:String, epoch:String, initial:Array<WorkspaceGroup>, operationLimit:Int = 256, clientLimit:Int = 16,
 			?persistence:WorkspacePersistence, ?resolveDirectory:String->Null<String>) {
 		this.resolveDirectory = resolveDirectory;
 		this.persistence = persistence;
@@ -39,12 +37,11 @@ class WorkspaceService {
 			epoch = stored.snapshot.epoch;
 			initial = stored.snapshot.groups;
 		}
-		if (!validId(id) || !validId(epoch) || initial == null || initial.length > 32 || historyLimit < 1 || historyLimit > 32 || operationLimit < 1
+		if (!validId(id) || !validId(epoch) || initial == null || initial.length > 32 || operationLimit < 1
 			|| clientLimit < 1)
 			throw "Invalid workspace service limits";
 		this.id = id;
 		this.epoch = epoch;
-		this.historyLimit = historyLimit;
 		this.operationLimit = operationLimit;
 		this.clientLimit = clientLimit;
 		for (group in initial) {
@@ -61,9 +58,7 @@ class WorkspaceService {
 	function restore(stored:WorkspaceStoredState):Void {
 		if (stored.snapshot.cursor < 0
 			|| stored.operations == null
-			|| stored.events == null
 			|| stored.operations.length > operationLimit
-			|| stored.events.length > historyLimit
 			|| stored.operations.length != stored.snapshot.cursor)
 			throw "Invalid persisted workspace bounds";
 		var latest:Map<String, WorkspaceGroup> = [];
@@ -108,18 +103,6 @@ class WorkspaceService {
 		}
 		sequence = stored.snapshot.cursor;
 		operationCount = stored.operations.length;
-		expected = sequence - stored.events.length + 1;
-		if (stored.events.length != (sequence < historyLimit ? sequence : historyLimit))
-			throw "Invalid persisted event retention";
-		for (event in stored.events) {
-			if (event == null || event.group == null || event.epoch != epoch || event.sequence != expected)
-				throw "Invalid persisted event sequence";
-			var outcome = stored.operations[expected - 1].outcome;
-			if (!sameGroup(event.group, outcome.group) || (event.deleted == true) != (outcome.deleted == true))
-				throw "Invalid persisted event sequence";
-			history.push(event);
-			expected++;
-		}
 	}
 
 	/**
@@ -163,10 +146,9 @@ class WorkspaceService {
 		prune();
 		if (observers.length >= clientLimit)
 			throw "Workspace client limit";
-		var observer:Observer = {connection: connection, watching: false, granted: true};
+		var observer:Observer = {connection: connection, granted: true};
 		observers.push(observer);
 		var read = capabilities.indexOf(WorkspaceProtocol.READ) >= 0;
-		var events = capabilities.indexOf(WorkspaceProtocol.EVENTS) >= 0;
 		var write = capabilities.indexOf(WorkspaceProtocol.WRITE) >= 0;
 		connection.register(WorkspaceProtocol.QUERY, function(request, context) {
 			if (storageFailed) {
@@ -187,46 +169,17 @@ class WorkspaceService {
 			}
 			context.respond(snapshot());
 		});
-		connection.register(WorkspaceProtocol.WATCH, function(request, context) {
+		function mutate(request:RenameGroup, context:haxeon.rpc.RpcContext<RenameResult>):Void {
 			if (storageFailed) {
 				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
 				return;
 			}
-			if (!observer.granted || !read || !events) {
-				context.fail({code: "unauthorized", message: "Watch denied", ambiguous: false});
-				return;
-			}
-			if (request == null || request.workspace != id || request.epoch == null || request.cursor < 0) {
-				context.fail({code: "invalid_request", message: "Invalid watch", ambiguous: false});
-				return;
-			}
-			// Establish live delivery before the caller fetches a snapshot.
-			observer.watching = true;
-			var floor = history.length == 0 ? sequence : history[0].sequence - 1;
-			var reset = request.epoch != epoch || request.cursor < floor || request.cursor > sequence;
-			var replay:Array<WorkspaceEvent> = [];
-			if (!reset)
-				for (event in history)
-					if (event.sequence > request.cursor)
-						replay.push(event);
-			context.respond({
-				epoch: epoch,
-				cursor: sequence,
-				reset: reset,
-				events: replay
-			});
-		});
-		function mutate(request:RenameGroup, context:haxeon.rpc.RpcContext<RenameResult>, tree:Bool):Void {
-			if (storageFailed) {
-				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
-				return;
-			}
-			if (!observer.granted || !write || (tree && capabilities.indexOf(WorkspaceProtocol.TREE) < 0)) {
-				context.fail({code: "unauthorized", message: "Rename denied", ambiguous: false});
+			if (!observer.granted || !write || capabilities.indexOf(WorkspaceProtocol.TREE) < 0) {
+				context.fail({code: "unauthorized", message: "Group change denied", ambiguous: false});
 				return;
 			}
 			if (request == null || !validId(request.workspace) || !validId(request.epoch)) {
-				context.fail({code: "invalid_request", message: "Invalid rename identity", ambiguous: false});
+				context.fail({code: "invalid_request", message: "Invalid group change identity", ambiguous: false});
 				return;
 			}
 			if (request.workspace != id || request.epoch != epoch) {
@@ -234,13 +187,13 @@ class WorkspaceService {
 				return;
 			}
 			if (!validId(request.operation) || !validId(request.group) || !validName(request.name) || request.expectedRevision < (request.action == "create" ? 0 : 1)
-				|| (tree ? request.action != "create" && request.action != "update" && request.action != "delete" : request.action != null || request.parent != null || request.cwd != null || request.order != null)) {
-				context.fail({code: "invalid_request", message: "Invalid rename", ambiguous: false});
+				|| request.action != "create" && request.action != "update" && request.action != "delete") {
+				context.fail({code: "invalid_request", message: "Invalid group change", ambiguous: false});
 				return;
 			}
 			var prior = operations.get(request.operation);
 			if (prior != null) {
-				if (WorkspaceProtocol.RENAME.encodeRequest(prior.request).compare(WorkspaceProtocol.RENAME.encodeRequest(request)) != 0) {
+				if (WorkspaceProtocol.GROUP.encodeRequest(prior.request).compare(WorkspaceProtocol.GROUP.encodeRequest(request)) != 0) {
 					context.fail({code: "operation_conflict", message: "Operation id reused", ambiguous: false});
 					return;
 				}
@@ -280,7 +233,7 @@ class WorkspaceService {
 			if (request.action == "create" && snapshot().groups.length >= 32) {
 				context.fail({code: "group_limit", message: "Workspace group limit", ambiguous: false}); return;
 			}
-			var cwd:Null<String> = tree ? request.cwd : (group == null ? null : group.cwd);
+			var cwd:Null<String> = request.cwd;
 			// Store the machine's canonical spelling (separators, case, symlinks) of a newly chosen directory.
 			// A group that keeps its directory can still be renamed or moved after that directory disappears.
 			var chosen = cwd == null ? "" : cwd, resolve = resolveDirectory;
@@ -294,8 +247,8 @@ class WorkspaceService {
 			var updated:WorkspaceGroup = {
 				id: request.group, name: request.name,
 				cwd: cwd,
-				parent: tree ? request.parent : (group == null ? null : group.parent),
-				order: tree ? WorkspaceProtocol.order(request.order) : (group == null ? 0 : WorkspaceProtocol.order(group.order)),
+				parent: request.parent,
+				order: WorkspaceProtocol.order(request.order),
 				revision: (group == null ? 0 : group.revision) + 1
 			};
 			if (!validHierarchy(updated.id, updated.parent) || WorkspaceProtocol.order(updated.order) < 0 || WorkspaceProtocol.order(updated.order) > WorkspaceProtocol.MAX_ORDER
@@ -308,17 +261,16 @@ class WorkspaceService {
 				sequence: sequence + 1,
 				group: updated, deleted: request.action == "delete" ? true : null
 			};
-			var event:WorkspaceEvent = {epoch: epoch, sequence: outcome.sequence, group: updated, deleted: outcome.deleted};
 			if (persistence != null) {
 				try
-					persistence.commit(request, outcome, event)
+					persistence.commit(request, outcome)
 				catch (_:Dynamic) {
 					storageFailed = true;
 					context.fail({code: "storage_failed", message: "Workspace commit failed; reopen storage to reconcile", ambiguous: true});
 					return;
 				}
 			}
-			// Durable commit precedes every in-memory update, reply and event.
+			// Durable commit precedes every in-memory update and reply.
 
 			if (outcome.deleted == true) { groups.remove(updated.id); removedGroups.set(updated.id, true); }
 			else groups.set(updated.id, updated);
@@ -328,37 +280,12 @@ class WorkspaceService {
 				request: WorkspaceProtocol.copyMutation(request),
 				outcome: outcome
 			});
-			history.push(event);
-			if (history.length > historyLimit)
-				history.shift();
-			// Queue the outcome before events; slow peers are closed by the RPC bounds.
 			context.respond(WorkspaceProtocol.copyOutcome(outcome));
 			prune();
-			for (watcher in observers)
-				if (watcher.watching && watcher.granted)
-					watcher.connection.notify(WorkspaceProtocol.CHANGED, event, WorkspaceProtocol.encodeEvent);
 		}
-		connection.register(WorkspaceProtocol.RENAME, function(r, c) mutate(r, c, false));
-		connection.register(WorkspaceProtocol.GROUP, function(r, c) mutate(r, c, true));
-		connection.register(WorkspaceProtocol.OPERATION, function(request, context) {
-			if (storageFailed) {
-				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
-				return;
-			}
-			if (!observer.granted || !read) {
-				context.fail({code: "unauthorized", message: "Outcome lookup denied", ambiguous: false});
-				return;
-			}
-			if (request == null || request.workspace != id || !validId(request.epoch) || !validId(request.operation)) {
-				context.fail({code: "invalid_request", message: "Invalid operation query", ambiguous: false});
-				return;
-			}
-			var stored = request.epoch == epoch ? operations.get(request.operation) : null;
-			context.respond({known: stored != null, outcome: stored == null ? null : WorkspaceProtocol.copyOutcome(stored.outcome)});
-		});
+		connection.register(WorkspaceProtocol.GROUP, mutate);
 		return function() {
 			observer.granted = false;
-			observer.watching = false;
 			connection.close("authorization_revoked");
 			prune();
 		};

@@ -14,6 +14,16 @@ class UiEditorTabs {
 		return changed;
 	}
 
+	/** The sessions of the workspace at `root` that have a tab. */
+	public static function agentResources(panes:Array<UiEditorPane>, root:String):Array<String> {
+		var ids = [];
+		for (pane in panes) for (item in pane.items) {
+			var tab = agent(item);
+			if (tab != null && tab.workspaceRoot == root) ids.push(tab.resource);
+		}
+		return ids;
+	}
+
 	public static function document(tab:UiEditorTab):Null<UiDocumentView>
 		return switch tab {
 			case Document(view): view;

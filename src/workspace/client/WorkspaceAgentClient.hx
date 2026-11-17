@@ -18,6 +18,8 @@ interface WorkspaceAgentClient {
 	public function agents():Null<AgentCatalog>;
 	public function agentError():Null<String>;
 	public function refreshAgents():Void;
+	/** The sessions shown in tabs: only their views are read, and kept current. */
+	public function showAgents(ids:Array<String>):Void;
 	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void,
 		?defaults:AgentSessionDefaults):Void;
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void;

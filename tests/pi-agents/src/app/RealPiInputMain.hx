@@ -14,8 +14,8 @@ class RealPiInputMain {
  static function main():Void {
   var args=Sys.args(),root=args[0],binary=args[1],clock=function() return Sys.time()*1000;
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root),seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
-  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
-  function build():workspace.provider.WorkspaceAgentService return new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,binary)], store);
+  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),root);
+  function build():workspace.provider.WorkspaceAgentService return new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,binary)]), store);
   var provider=build(),pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var value:Null<AgentView>=null,code="";

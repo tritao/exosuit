@@ -55,6 +55,7 @@ class FakeAgent implements WorkspaceAgentClient {
 	public function agents():Null<AgentCatalog> return {instance:"fixture", root:catalogRoot, records:[record], status:"ready"};
 	public function agentError():Null<String> return null;
 	public function refreshAgents():Void {}
+	public function showAgents(ids:Array<String>):Void {}
 	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void, ?defaults:AgentSessionDefaults):Void {}
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void {}
 	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>, ?order:Int):Void {

@@ -41,26 +41,6 @@ import haxeon.wire.MessagePack;
 	@:id(3) var groups:Array<WorkspaceGroup>;
 }
 
-@:wire typedef WorkspaceEvent = {
-	@:id(1) var epoch:String;
-	@:id(2) var sequence:Int;
-	@:id(3) var group:WorkspaceGroup;
-	@:optional @:id(4) var deleted:Null<Bool>;
-}
-
-@:wire typedef WorkspaceWatch = {
-	@:id(1) var workspace:String;
-	@:id(2) var epoch:String;
-	@:id(3) var cursor:Int;
-}
-
-@:wire typedef WorkspaceReplay = {
-	@:id(1) var epoch:String;
-	@:id(2) var cursor:Int;
-	@:id(3) var reset:Bool;
-	@:id(4) var events:Array<WorkspaceEvent>;
-}
-
 @:wire typedef RenameGroup = {
 	@:id(1) var workspace:String;
 	@:id(2) var epoch:String;
@@ -82,17 +62,6 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(5) var deleted:Null<Bool>;
 }
 
-@:wire typedef OperationQuery = {
-	@:id(1) var workspace:String;
-	@:id(2) var epoch:String;
-	@:id(3) var operation:String;
-}
-
-@:wire typedef OperationResult = {
-	@:id(1) var known:Bool;
-	@:id(2) var outcome:Null<RenameResult>;
-}
-
 @:wire typedef WorkspaceIdentity = {
 	@:id(1) var workspace:String;
 	@:id(2) var root:String;
@@ -102,7 +71,6 @@ import haxeon.wire.MessagePack;
 /** Permanent ids for the first workspace service methods; never reuse ids. */
 class WorkspaceProtocol {
 	public static inline final READ = "workspace.read";
-	public static inline final EVENTS = "workspace.events";
 	public static inline final TREE = "workspace.groups.tree";
 	public static inline final REMOVE = "workspace.groups.remove";
 	public static inline final WRITE = "workspace.groups.write";
@@ -132,30 +100,20 @@ class WorkspaceProtocol {
 	/** The parent a group record takes to sit in `destination`: none (top level) for the workspace root. */
 	public static function parentFor(destination:String):Null<String>
 		return isRoot(destination) ? null : destination;
-	public static inline final CHANGED = 200;
 	public static final QUERY = new RpcMethod<WorkspaceQuery, WorkspaceSnapshot>(100, function(value:WorkspaceQuery) return MessagePack.encode(value),
 		function(bytes:Bytes):WorkspaceQuery return MessagePack.decode(bytes), function(value:WorkspaceSnapshot) return MessagePack.encode(value),
 		function(bytes:Bytes):WorkspaceSnapshot return MessagePack.decode(bytes));
-	public static final WATCH = new RpcMethod<WorkspaceWatch, WorkspaceReplay>(101, function(value:WorkspaceWatch) return MessagePack.encode(value),
-		function(bytes:Bytes):WorkspaceWatch return MessagePack.decode(bytes), function(value:WorkspaceReplay) return MessagePack.encode(value),
-		function(bytes:Bytes):WorkspaceReplay return MessagePack.decode(bytes));
-	public static final RENAME = new RpcMethod<RenameGroup, RenameResult>(102, function(value:RenameGroup) return MessagePack.encode(value),
+	/**
+		Creates, changes or deletes a group. Retired ids: 101 (a replayed group event watch; clients follow the catalog watch,
+		WorkspaceCatalogProtocol), 102 (a rename-only form), 103 (an outcome lookup), and notification 200 (its events).
+	**/
+	public static final GROUP = new RpcMethod<RenameGroup, RenameResult>(105, function(value:RenameGroup) return MessagePack.encode(value),
 		function(bytes:Bytes):RenameGroup return MessagePack.decode(bytes), function(value:RenameResult) return MessagePack.encode(value),
 		function(bytes:Bytes):RenameResult return MessagePack.decode(bytes));
-	public static final GROUP = new RpcMethod<RenameGroup, RenameResult>(105, RENAME.encodeRequest, RENAME.decodeRequest, RENAME.encodeResponse, RENAME.decodeResponse);
-	public static final OPERATION = new RpcMethod<OperationQuery, OperationResult>(103, function(value:OperationQuery) return MessagePack.encode(value),
-		function(bytes:Bytes):OperationQuery return MessagePack.decode(bytes), function(value:OperationResult) return MessagePack.encode(value),
-		function(bytes:Bytes):OperationResult return MessagePack.decode(bytes));
 
 	public static final IDENTITY = new RpcMethod<WorkspaceQuery, WorkspaceIdentity>(104, function(value:WorkspaceQuery) return MessagePack.encode(value),
 		function(bytes:Bytes):WorkspaceQuery return MessagePack.decode(bytes), function(value:WorkspaceIdentity) return MessagePack.encode(value),
 		function(bytes:Bytes):WorkspaceIdentity return MessagePack.decode(bytes));
-
-	public static function encodeEvent(value:WorkspaceEvent):Bytes
-		return MessagePack.encode(value);
-
-	public static function decodeEvent(bytes:Bytes):WorkspaceEvent
-		return MessagePack.decode(bytes);
 
 	public static function order(value:Null<Int>):Int return value == null ? 0 : value;
 

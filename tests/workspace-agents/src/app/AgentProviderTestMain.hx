@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceAgentProtocol;
@@ -11,6 +12,13 @@ import process.ProcessManager;
 import platform.Platform;
 
 class AgentProviderTestMain {
+	/** A client's connection to a service that grants agent reading and control. */
+	static function agentEndpoint(connection:haxeon.rpc.RpcConnection):TestEndpoint {
+		var endpoint = new TestEndpoint(connection);
+		endpoint.root = "C:/work"; endpoint.generation = "test-generation"; endpoint.epoch = null; endpoint.groups = false;
+		endpoint.grants = [WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL];
+		return endpoint;
+	}
 	static function clientActionPriorityTest():Void {
 		var clock = function() return Sys.time() * 1000;
 		var pair = MemoryTransport.pair();
@@ -25,7 +33,7 @@ class AgentProviderTestMain {
 				activity: "mutation", requests: [], error: null, connectionState: "connected", recoveryReason: null
 			});
 		});
-		var client = new workspace.client.RpcWorkspaceWorkbenchClient(new AgentTestEndpoint(clientConnection), clock);
+		var client = new workspace.client.RpcWorkspaceWorkbenchClient(agentEndpoint(clientConnection), clock);
 		client.poll();
 		client.agentAction("a", "read", "", null);
 		serverConnection.poll();
@@ -86,7 +94,7 @@ class AgentProviderTestMain {
 			ctx.respond({id:q.id,name:q.name,group:q.group,cwd:"C:/work",thread:"claude-session",state:"idle",turn:null,
 				workspaceRoot:"C:/work",provider:q.provider});
 		});
-		var client = new workspace.client.RpcWorkspaceWorkbenchClient(new AgentTestEndpoint(connection), clock);
+		var client = new workspace.client.RpcWorkspaceWorkbenchClient(agentEndpoint(connection), clock);
 		client.poll();
 		function pump():Void {server.poll();connection.poll();client.poll();}
 		function refresh():Void {now+=2000;client.refreshAgents();pump();}
@@ -95,7 +103,7 @@ class AgentProviderTestMain {
 		require(client.agentCreation() != null && creates==0,"Claude create was sent before provider negotiation");
 		pump();now+=200;client.poll();pump();
 		var unsupported = client.agentError();
-		require(client.agentCreation() == null && creates==0 && unsupported != null && unsupported.indexOf("update the workspace service")>=0,
+		require(client.agentCreation() == null && creates==0 && unsupported != null && unsupported.indexOf("does not support")>=0,
 			"Legacy daemon did not produce an actionable error without a create side effect");
 		refresh();
 		require(client.agentError()==unsupported,"Catalog refresh erased the unsupported-provider error");
@@ -131,7 +139,7 @@ class AgentProviderTestMain {
 		server.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
 			if(q.action=="prompt") prompt=ctx;else ctx.respond(view(q.id));
 		});
-		var client=new workspace.client.RpcWorkspaceWorkbenchClient(new AgentTestEndpoint(connection),clock);
+		var client=new workspace.client.RpcWorkspaceWorkbenchClient(agentEndpoint(connection),clock);
 		client.poll();
 		function pump():Void {server.poll();connection.poll();client.poll();}
 		function open(record:AgentRecord):Void {
@@ -176,7 +184,7 @@ class AgentProviderTestMain {
 			else if(mode=="ambiguous") ctx.fail({code:"provider_error",message:"Delivery uncertain",ambiguous:true});
 			else {held=ctx;query=q;}
 		});
-		var endpoint=new AgentTestEndpoint(connection);
+		var endpoint=agentEndpoint(connection);
 		var client=new workspace.client.RpcWorkspaceWorkbenchClient(endpoint,clock);
 		client.poll();
 		function pump():Void {server.poll();connection.poll();client.poll();}
@@ -202,15 +210,14 @@ class AgentProviderTestMain {
 	}
 
 	static function conversationTests():Void {
-		var epochs=new workspace.provider.ClaudeConversation();
+		var epochs=new workspace.provider.AgentConversation("Claude");
 		var startEpoch=epochs.epoch();
 		for(i in 0...8) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
 		require(epochs.epoch()==startEpoch && !epochs.hasOmitted(),"Appending changed history epoch");
-		for(i in 8...workspace.provider.ClaudeConversation.MAX_ENTRIES+1) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
+		for(i in 8...workspace.provider.AgentConversation.MAX_ENTRIES+1) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
 		require(epochs.epoch()!=startEpoch && epochs.hasOmitted(),"Eviction did not invalidate history epoch");
-		require(new workspace.provider.ClaudeConversation().epoch()!=startEpoch,"New conversation reused history epoch");
-		require(new workspace.provider.PiConversation().epoch()!=new workspace.provider.PiConversation().epoch(),"Pi conversation reused history epoch");
-		require(new workspace.provider.AgentKitConversation().epoch()!=new workspace.provider.AgentKitConversation().epoch(),"AgentKit conversation reused history epoch");
+		require(new workspace.provider.AgentConversation("Claude").epoch()!=startEpoch,"New conversation reused history epoch");
+		require(new workspace.provider.AgentConversation("Pi").epoch()!=new workspace.provider.AgentConversation("Pi").epoch(),"Pi conversation reused history epoch");
 		require(new workspace.provider.CodexConversation().epoch()!=new workspace.provider.CodexConversation().epoch(),"Codex conversation reused history epoch");
 		var historyPages=new workspace.provider.CodexHistoryPages();
 		var legacyLive=new workspace.provider.CodexConversation();
@@ -322,34 +329,83 @@ class AgentProviderTestMain {
 			throw s;
 	}
 
+	/**
+		A session another client creates reaches this client through the catalog CHANGED push, and nothing is read while
+		nothing changes: the client's clock never needs to move for the new session to appear, and hours on it send no list.
+	**/
+	static function catalogPushTest():Void {
+		var serviceNow = 0.0, clientNow = 1000.0;
+		var sessions:Array<AgentRecord> = [];
+		var catalogService = new workspace.runtime.WorkspaceCatalogService("w", "test-generation",
+			function() return {name: "W", folders: ["C:/work"], scratch: null}, function() return [], function() return sessions.copy(),
+			function() return new Map<String, Int>(), function() return [], function() return serviceNow);
+		var lists = 0;
+		function serve(server:RpcConnection):Void {
+			catalogService.bind(server, [workspace.service.WorkspaceCatalogProtocol.CAPABILITY, WorkspaceAgentProtocol.READ]);
+			server.register(WorkspaceAgentProtocol.LIST, function(q, ctx) {
+				lists++;
+				ctx.respond({instance: "test-generation", root: "C:/work", records: sessions.copy(), status: "Fixture", providers: ["codex"]});
+			});
+			server.register(WorkspaceAgentProtocol.CREATE, function(q, ctx) {
+				var record:AgentRecord = {id: q.id, name: q.name, group: q.group, cwd: "C:/work", thread: q.id, state: "idle", turn: null,
+					workspaceRoot: "C:/work"};
+				sessions.push(record);
+				ctx.respond(record);
+			});
+		}
+		var clock = function() return clientNow;
+		var pairA = MemoryTransport.pair(), clientA = new RpcConnection(pairA.client, clock), serverA = new RpcConnection(pairA.server, clock);
+		var pairB = MemoryTransport.pair(), clientB = new RpcConnection(pairB.client, clock), serverB = new RpcConnection(pairB.server, clock);
+		serve(serverA);
+		serve(serverB);
+		var watch = workspace.client.WorkspaceCatalogWatch.shared({machine: "local", workspace: "workspace"}, clock, true);
+		watch.attach(clientA);
+		var first = new workspace.client.RpcWorkspaceWorkbenchClient(agentEndpoint(clientA), clock);
+		first.catalogPushes = function() return watch.revision;
+		var second = new workspace.client.RpcWorkspaceWorkbenchClient(agentEndpoint(clientB), clock);
+		function pump():Void {
+			for (_ in 0...4) {
+				serverA.poll(); serverB.poll(); clientA.poll(); clientB.poll();
+				watch.poll(); first.poll(); second.poll();
+				catalogService.poll();
+			}
+		}
+		pump();
+		var initial = first.agents();
+		require(watch.live && initial != null && initial.records.length == 0, "First client did not read its lists on connecting");
+		var settled = lists;
+		for (_ in 0...20) { clientNow += 60000; serviceNow += 60; pump(); }
+		require(lists == settled, "An idle client listed sessions " + (lists - settled) + " times with nothing changed");
+		var created:Null<AgentRecord> = null;
+		second.createAgent("work", null, function(record) created = record);
+		pump();
+		require(created != null, "Second client did not create its session");
+		serviceNow += 0.2; // the service's catalog notices changes at most every 0.1 s
+		pump();
+		var seen = first.agents();
+		var made = created;
+		require(seen != null && made != null && seen.records.length == 1 && seen.records[0].id == made.id,
+			"The session another client created did not reach this client without its clock moving");
+		first.dispose(); second.dispose(); watch.dispose();
+		clientA.close(); serverA.close(); clientB.close(); serverB.close();
+		Sys.println("PASS: a session created by another client arrives by the catalog push; an idle client lists nothing");
+	}
+
 	static function main():Void {
 		AgentImageStagingTest.run();
 		AgentServiceTest.run();
-		AgentSnapshotTest.run();
 		conversationTests();
 		clientActionPriorityTest();
 		clientCreateCompatibilityTest();
 		clientCreationRaceTest();
 		clientCreationLifecycleTest();
+		catalogPushTest();
 
 		var root = Sys.args()[0],
 			executable = Sys.args()[1], bridge=Sys.args()[2],
 			codexScript:Null<String> = Sys.args().length >= 4 ? Sys.args()[3] : null,
 			clock = function() return Sys.time() * 1000;
 		var processes = new ProcessManager();
-		var sources = new BuildFileCollector();
-		sources.collect(root + "/build-inputs/source");
-		sources.collect(root + "/build-inputs/source/nested");
-		require(sources.files.length == 2, "Fingerprint source traversal followed a cycle, alias, broken link or excluded build directory");
-		sources.collect(root + "/build-inputs/source", true);
-		require(sources.files.length == 3, "Runtime traversal reused a source-only directory cache");
-		var runtime = new BuildFileCollector();
-		runtime.collect(root + "/build-inputs/runtime", true);
-		require(runtime.files.length == 1, "Fingerprint runtime traversal duplicated a symlink or followed a cycle");
-		var fresh = new BuildFileCollector();
-		sys.io.File.saveContent(root + "/build-inputs/source/new.hx", "changed");
-		fresh.collect(root + "/build-inputs/source");
-		require(fresh.files.length == 3, "Fingerprint traversal retained a stale directory cache");
 		var seed = new WorkspaceService("w", "e", [
 			{
 				id: "work",
@@ -358,8 +414,8 @@ class AgentProviderTestMain {
 				revision: 1
 			}
 		]);
-		var store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
-		var provider = new workspace.provider.WorkspaceAgentService("w", "owner", new WorkspaceDirectories(root).root, [new workspace.provider.CodexProvider("owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store, executable, bridge, codexScript)], store);
+		var store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), root);
+		var provider = new workspace.provider.WorkspaceAgentService("w", "owner", new WorkspaceDirectories(root).root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store, executable, bridge, codexScript)]), store);
 		var pair = MemoryTransport.pair(),
 			client = new RpcConnection(pair.client, clock),
 			server = new RpcConnection(pair.server, clock);
@@ -547,9 +603,9 @@ class AgentProviderTestMain {
 		server.close();
 		store.close();
 		processes.shutdown();
-		store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
+		store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), root);
 		processes = new ProcessManager();
-		provider = new workspace.provider.WorkspaceAgentService("w", "next-owner", new WorkspaceDirectories(root).root, [new workspace.provider.CodexProvider("next-owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store, executable, bridge, codexScript)], store);
+		provider = new workspace.provider.WorkspaceAgentService("w", "next-owner", new WorkspaceDirectories(root).root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("next-owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store, executable, bridge, codexScript)]), store);
 		var saved = store.loadAgents();
 		require(saved.length == 4
 			&& [for (r in saved) if (r.thread == thread) r].length == 1, "Thread identity did not survive workspace restart");
@@ -571,6 +627,15 @@ class AgentProviderTestMain {
 				recoveryPump();
 			}
 		}
+		// Nothing is started for saved sessions until one is read (its tab opens); that read starts Codex, which then
+		// reconnects every saved session.
+		for (_ in 0...40) recoveryPump();
+		require(!StringTools.startsWith(provider.status, "Codex connected"), "Codex started for saved sessions before any was read: " + provider.status);
+		var opened = false;
+		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+			workspace: "w", instance: "next-owner", id: "a", action: "read", text: "", request: null
+		}, 5000, function(_) opened = true, function(error) throw error.message);
+		recoveryWait(function() return opened);
 		recoveryWait(function() return StringTools.startsWith(provider.status, "Codex connected; some sessions need attention"));
 		var recoveredView:Null<AgentView> = null, recoveredFinished = false;
 		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
@@ -612,7 +677,7 @@ class AgentProviderTestMain {
 		store.close();
 		processes.shutdown();
 		sys.io.File.saveContent(root + "/newer-version", "1");
-		provider = new workspace.provider.WorkspaceAgentService("w", "bad-version", new WorkspaceDirectories(root).root, [new workspace.provider.CodexProvider("bad-version", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, null, executable, bridge, codexScript)], null);
+		provider = new workspace.provider.WorkspaceAgentService("w", "bad-version", new WorkspaceDirectories(root).root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("bad-version", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, null, executable, bridge, codexScript)]), null);
 		var badPair = MemoryTransport.pair(),
 			badClient = new RpcConnection(badPair.client, clock),
 			badServer = new RpcConnection(badPair.server, clock);
@@ -664,7 +729,7 @@ class AgentProviderTestMain {
 		badServer.close();
 		processes.shutdown();
 		// A saved record that fails validation is a row that says why, next to the good ones; the service starts.
-		var invalidStore = new WorkspaceSqliteStore(root + "/invalid-records.sqlite", "w", seed.snapshot(), 32, root);
+		var invalidStore = new WorkspaceSqliteStore(root + "/invalid-records.sqlite", "w", seed.snapshot(), root);
 		var good:AgentRecord = cast Reflect.copy([for (r in saved) if (r.thread != "") r][0]);
 		good.id = "good-record";
 		good.replay = null;
@@ -689,23 +754,3 @@ class AgentProviderTestMain {
 	}
 }
 
-private class AgentTestEndpoint implements workspace.client.WorkspaceRpcEndpoint {
-	final connection:haxeon.rpc.RpcConnection;
-	public function new(connection:haxeon.rpc.RpcConnection) this.connection = connection;
-	public function rootPath():Null<String> return "C:/work";
-	public var generation:String = "test-generation";
-	public function serviceGeneration():String return generation;
-	var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
-	public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
-		if (connection == null) return null;
-		if (eventRouter == null || eventRouter.connection != connection)
-			eventRouter = new workspace.client.WorkspaceTerminalEvents(connection);
-		return eventRouter;
-	}
-	public function rpcConnection():Null<haxeon.rpc.RpcConnection> return connection;
-	public function failureReason():Null<String> return null;
-	public function supportsWorkspaceGroups():Bool return false;
-	public function workspaceEpoch():Null<String> return null;
-	public function hasCapability(capability:String):Bool
-		return capability == WorkspaceAgentProtocol.READ || capability == WorkspaceAgentProtocol.CONTROL;
-}

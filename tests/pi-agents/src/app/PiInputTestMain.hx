@@ -28,9 +28,9 @@ class PiInputTestMain {
   var args=Sys.args(),root=args[0],script=args[1],clock=function() return Sys.time()*1000;
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
-  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
+  var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),root);
   var python=Sys.getEnv("EXOSUIT_TEST_PYTHON");if(python==null || python=="") python="python3";
-  function build():workspace.provider.WorkspaceAgentService return new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script)], store,"pi-image-fixture");
+  function build():workspace.provider.WorkspaceAgentService return new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script)]), store,"pi-image-fixture");
   var provider=build(),pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var value:Null<AgentView>=null,code="";

@@ -34,8 +34,9 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var catalogRevision:Int = 0;
   var catalogPending:Bool = false;
   var catalogMutation:Bool = false;
-  var catalogNext:Float = 0;
   var catalogKey:String = "";
+  /** A terminal list read is asked for; it starts once the one in flight ends. */
+  var terminalsWanted:Bool = false;
   var observedTerminalCreation:Int = 0;
 
   var agentCatalog:Null<WorkspaceAgentProtocol.AgentCatalog>;
@@ -49,7 +50,16 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var creationError:Null<String>;
   var agentsPending:Bool = false;
   var agentsRequestToken:Int = 0;
-  var agentsNext:Float = 0;
+  /** A session list read is asked for; it starts once the one in flight ends. */
+  var agentsWanted:Bool = false;
+  /** The `catalogPushes` value the lists were last read for; NEVER_READ reads them on the next poll. */
+  var observedCatalog:Int = NEVER_READ;
+  static inline final NEVER_READ = -2;
+  /** Sessions shown in a tab (`showAgents`): their views are kept current. */
+  var shownAgents:Map<String, Bool> = [];
+  var activeReadAt:Float = 0;
+  /** How often a shown session's view is read while a turn runs in it: its activity has no push. */
+  static inline final ACTIVE_READ_MS = 200;
   var agentMutation:Bool = false;
   /** Sessions whose last prompt, queue or steer may have reached the service without a reply, by deliveryKey. In memory only. */
   final uncertainAgentDeliveries:Map<String,String> = [];
@@ -76,6 +86,11 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var replacing = false;
 
   function rpc():Null < RpcConnection > return disposed ? null : endpoint.rpcConnection();
+  /** Puts a request this client sends by itself (not for a user action) in the ConnectTimeline, so an idle window can be seen to send none. */
+  function markRead(what:String):Void {
+    var name = timelineName, path = root();
+    ConnectTimeline.mark("rpc", name == null ? (path == null ? "" : path) : name(), what);
+  }
   function root():Null < String > return endpoint.rootPath();
   function instance():String return endpoint.serviceGeneration();
   function has(capability:String):Bool return endpoint.hasCapability(capability);
@@ -107,7 +122,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       catalog = null;
       catalogPending = false;
       catalogMutation = false;
-      catalogNext = 0;
+      terminalsWanted = false;
       catalogKey = "";
       observedTerminalCreation = 0;
       catalogRevision++;
@@ -127,7 +142,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentCatalog = null;
       agentActionError = null;
       creationError = null;
-      agentsNext = 0;
+      agentsWanted = false;
+      observedCatalog = NEVER_READ;
       agentsRevision++;
       if (lost) {
         catalogError = "Workspace connection changed; refresh terminal sessions";
@@ -135,12 +151,22 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
     }
     var terminalEvents = current == null ? null : endpoint.terminalEvents();
-    if (terminalEvents != null && terminalEvents.catalogRevision != observedTerminalCreation && !catalogPending) {
-      // Leave an invalidation unconsumed while a paged catalog read is in flight.
-      // Its snapshot may predate creation; fetch again as soon as it completes.
+    if (terminalEvents != null && terminalEvents.catalogRevision != observedTerminalCreation) {
+      // A read in flight may predate the creation: the wanted read follows it.
       observedTerminalCreation = terminalEvents.catalogRevision;
       refreshTerminals(true);
     }
+    var pushed = catalogPushes;
+    var seen = pushed == null ? -1 : pushed();
+    if (current != null && seen != observedCatalog) {
+      // A new connection, or the service pushed a catalog change: read the lists again. Nothing else does.
+      observedCatalog = seen;
+      refreshTerminals(false);
+      refreshAgents();
+    }
+    continueTerminals();
+    continueAgents();
+    readActiveViews();
     continueDiscovery();
     continueAgentCreate();
     continueModels();
@@ -230,20 +256,65 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function discoveredAgents():Null < WorkspaceAgentProtocol.AgentDiscovery > return discovery;
 
   /**
-    When set, the session list is read again only when this says the workspace changed (a catalog watch's token moved), or
-    after an action that asked for a fresh list, instead of on a timer. It is consumed when a read starts.
+    The revision of the catalog watch on this client's connection (WorkspaceCatalogWatch.revision), set by the owner of
+    the connection. The session and terminal lists are read when it moves (the service pushed a change), when the
+    connection changes, and after this client's own actions; never on a timer. Unset, they are read once per connection.
   **/
-  public var agentsStale:Null<Void -> Bool> = null;
+  public var catalogPushes:Null<Void -> Int> = null;
 
+  /** Reads the session list now, or as soon as the read in flight ends. */
   public function refreshAgents():Void {
+    agentsWanted = true;
+    continueAgents();
+  }
+
+  function continueAgents():Void {
     var connection = rpc();
-    if (connection == null || !has(WorkspaceAgentProtocol.READ) || agentsPending || clock() < agentsNext) return;
-    var stale = agentsStale;
-    if (stale != null && agentCatalog != null && agentsNext != 0 && !stale()) return;
+    if (!agentsWanted || agentsPending || connection == null || !has(WorkspaceAgentProtocol.READ)) return;
+    agentsWanted = false;
     agentsPending = true;
     var requestToken = ++agentsRequestToken;
-    agentsNext = clock() + 1000;
+    markRead("agents list");
     loadAgentPage(connection, requestToken, null, []);
+  }
+
+  /**
+    The sessions shown in tabs now. Their views are read when first shown, when a list shows their record changed, and
+    every ACTIVE_READ_MS while a turn runs in them; other sessions' views are not read.
+  **/
+  public function showAgents(ids:Array<String>):Void {
+    var shown:Map<String, Bool> = [];
+    for (id in ids) {
+      shown.set(id, true);
+      if (!shownAgents.exists(id) && agentViews.get(id) == null && listed(id)) agentAction(id, "read", "", null);
+    }
+    shownAgents = shown;
+  }
+
+  function listed(id:String):Bool {
+    var catalog = agentCatalog;
+    return catalog != null && Lambda.exists(catalog.records, function(record) return record.id == id);
+  }
+
+  /** After a list: reads the view of each shown session whose record changed, or that has no view (a reconnect clears them). */
+  function readChangedViews(previous:Null<WorkspaceAgentProtocol.AgentCatalog>):Void {
+    var catalog = agentCatalog;
+    if (catalog == null) return;
+    for (record in catalog.records) {
+      if (!shownAgents.exists(record.id)) continue;
+      var before = previous == null ? null : Lambda.find(previous.records, function(old) return old.id == record.id);
+      if (agentViews.get(record.id) == null || before == null || haxe.Json.stringify(before) != haxe.Json.stringify(record))
+        agentAction(record.id, "read", "", null);
+    }
+  }
+
+  function readActiveViews():Void {
+    if (clock() < activeReadAt || rpc() == null) return;
+    activeReadAt = clock() + ACTIVE_READ_MS;
+    for (id in shownAgents.keys()) {
+      var view = agentViews.get(id);
+      if (view != null && ["working", "creating", "reconnecting"].indexOf(view.record.state) >= 0) agentAction(id, "read", "", null);
+    }
   }
 
   function loadAgentPage(
@@ -286,12 +357,14 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       agentsPending = false;
       value.records = records;
-      // The catalog is listed every second; an identical listing must not redraw the window.
-      var changed = agentsError != null || agentCatalog == null
-        || haxe.Json.stringify(agentCatalog) != haxe.Json.stringify(value);
+      // A list that holds nothing new must not redraw the window.
+      var previous = agentCatalog;
+      var changed = agentsError != null || previous == null
+        || haxe.Json.stringify(previous) != haxe.Json.stringify(value);
       agentsError = null;
       agentCatalog = value;
       if (changed) agentsRevision++;
+      readChangedViews(previous);
     }, function(error) {
       if (rpc() == connection && requestToken == agentsRequestToken) {
         agentsPending = false;
@@ -353,7 +426,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
     agentsError=null;creationError=null;
     var query:AgentCreate={workspace:"workspace",instance:instance(),id:WorkspaceIds.create("agent"),group:group,
-      name:defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : defaults != null && defaults.provider == "agentkit" ? "Exosuit" : "Codex",
+      name:defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : "Codex",
       provider:defaults == null ? null : defaults.provider,thread:thread,
       defaultModel:thread == null && defaults != null ? defaults.model : null,
       defaultEffort:thread == null && defaults != null ? defaults.effort : null,
@@ -381,8 +454,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if(agentCatalog == null) {operation.next=clock()+100;refreshAgents();return;}
       var supported=agentCatalog.providers;
       if(supported == null || !supported.contains(query.provider)) {
-        failCreation(operation,"This workspace service does not support "+query.name
-          +" sessions. Open Remote Access and update the workspace service, then retry.");return;
+        failCreation(operation,"This workspace service does not support "+query.name+" sessions.");return;
       }
     }
     operation.inFlight=true;operation.phase="creating";agentsRevision++;
@@ -395,7 +467,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       creation=null;agentsError=null;creationError=null;
       // Fence catalog snapshots issued before this resource was reserved.
-      agentsRequestToken++;agentsPending=false;agentsNext=0;
+      agentsRequestToken++;agentsPending=false;
       if(agentCatalog != null) {
         agentCatalog.records=[for(r in agentCatalog.records) if(r.id != record.id) r];
         agentCatalog.records.push(record);
@@ -414,7 +486,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if(error.code == "provider_starting" && !error.ambiguous) {
         operation.phase="starting-provider";operation.next=clock()+500;agentsRevision++;return;
       }
-      failCreation(operation,error.message);agentsNext=0;
+      failCreation(operation,error.message);agentsWanted=true;
     });
   }
 
@@ -455,7 +527,6 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentsPending = false;
       agentViews.remove(id);
       agentTokens.remove(id);
-      agentsNext = 0;
       agentsRevision++;
       refreshAgents();
       if (deleted != null) deleted();
@@ -470,7 +541,6 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         agentsPending = false;
         agentViews.remove(id);
         agentTokens.remove(id);
-        agentsNext = 0;
         agentsRevision++;
         refreshAgents();
         if (deleted != null) deleted();
@@ -479,7 +549,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentMutation = false;
       agentMutationId = null;
       agentActionError = error.message;
-      agentsNext = 0;
+      agentsWanted = true;
       agentsRevision++;
     });
   }
@@ -489,8 +559,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
     if ((action == "move" && (agentCatalog == null || agentCatalog.canMove != true))
       || (action == "rename" && (agentCatalog == null || agentCatalog.canRename != true))) {
-      agentActionError = "Update the workspace service in Remote Access to " + (action == "rename" ? "rename" : "move")
-        + " agent sessions. Restarting the app does not update a service with active sessions.";
+      agentActionError = "This workspace service cannot " + (action == "rename" ? "rename" : "move") + " agent sessions.";
       agentsRevision++;
       return;
     }
@@ -530,6 +599,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     } else {
       agentReadPending.set(id, true);
       agentReadCount++;
+      markRead("agent read");
     }
     var selected =++ agentSelection;
     agentTokens.set(id, selected);
@@ -556,7 +626,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     },function(value) {
       if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
       if (updatesRecord && agentCatalog != null) {
-        agentsRequestToken++; agentsPending=false; agentsNext=0;
+        agentsRequestToken++; agentsPending=false; agentsWanted=true;
         for (index in 0...agentCatalog.records.length) if (agentCatalog.records[index].id == id) agentCatalog.records[index]=value.record;
       }
       publishLatestAgentView(connection,id,selected,value);
@@ -581,7 +651,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       } else if (mutate) {
         if (error.code == "provider_starting") { agentActionError=null; agentsError=error.message; }
         else agentActionError=action == "permissions" && error.code == "resolved"
-          ? "This workspace service does not support permission changes yet. Update it from Remote Access, then try again." : error.message;
+          ? "This workspace service does not support permission changes." : error.message;
       } else agentsError=error.message;
       if (mutate || errorsBefore != agentsError+"\n"+agentActionError) agentsRevision++;
     });
@@ -695,7 +765,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
   }
 
-  /** Snapshot acknowledgement is independent of assembling its potentially large view. */
+  /** One ACTION: the service answers with the session's view (one page). */
   function requestAgentView(connection:RpcConnection,id:String,selected:Int,generation:String,query:AgentAction,
       acknowledged:Null<String>->Void, success:AgentView->Void, failure:(RpcError,Bool)->Void):Void {
     var expectedRoot=root(), done=false, ack=false;
@@ -704,40 +774,12 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (!done && current()) { done=true; failure({code:"invalid_snapshot",message:message,ambiguous:false},ack); }
     }
     if (expectedRoot == null) { fail("Workspace is unavailable"); return; }
-    if (agentCatalog == null || agentCatalog.supportsSnapshots != true) {
-      connection.call(WorkspaceAgentProtocol.ACTION,query,query.action == "rename-native" ? 60000 : 20000,function(view) {
-        if (done || !current()) return;
-        if (view == null || view.record == null || view.record.id != id || view.record.workspaceRoot != expectedRoot) { fail("Invalid agent view"); return; }
-        ack=true; acknowledged(view.inputToken);
-        if (!current()) return;
-        done=true; success(view);
-      },function(error) { if (!done && current()) {done=true; failure(error,false);} });
-      return;
-    }
-    connection.call(WorkspaceAgentProtocol.ACTION_SNAPSHOT,query,query.action == "rename-native" ? 60000 : 20000,function(first) {
+    connection.call(WorkspaceAgentProtocol.ACTION,query,query.action == "rename-native" ? 60000 : 20000,function(view) {
       if (done || !current()) return;
-      if (first == null || first.session != id || first.root != expectedRoot) { fail("Invalid session snapshot scope"); return; }
-      ack=true; acknowledged(first.inputToken);
+      if (view == null || view.record == null || view.record.id != id || view.record.workspaceRoot != expectedRoot) { fail("Invalid agent view"); return; }
+      ack=true; acknowledged(view.inputToken);
       if (!current()) return;
-      if (first.snapshotError != null) { fail("Session snapshot unavailable"); return; }
-      var assembler:AgentSnapshotAssembler;
-      try assembler=new AgentSnapshotAssembler(first,id,cast expectedRoot) catch (_:Dynamic) { fail("Invalid session snapshot"); return; }
-      var next:Void->Void = null;
-      next=function() {
-        if (done || !current()) return;
-        if (assembler.complete()) {
-          try { var view=assembler.view(); done=true; success(view); } catch (_:Dynamic) fail("Invalid session snapshot view");
-          return;
-        }
-        var offset=assembler.offset;
-        connection.call(WorkspaceAgentProtocol.SNAPSHOT_READ,{workspace:"workspace",instance:generation,session:id,
-          token:assembler.snapshotToken(),offset:offset},20000,function(chunk) {
-          if (done || !current()) return;
-          try assembler.add(chunk) catch (_:Dynamic) { fail("Invalid session snapshot chunk"); return; }
-          next();
-        },function(_) fail("Session snapshot unavailable"));
-      };
-      next();
+      done=true; success(view);
     },function(error) { if (!done && current()) {done=true; failure(error,false);} });
   }
 
@@ -758,7 +800,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   }
   function publishAgentView(id:String,value:AgentView):Void {
     var previous=agentViews.get(id); agentViews.set(id,value);
-    if (previous == null || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) { agentsNext=0; agentsRevision++; }
+    if (previous == null || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) agentsRevision++;
   }
   function publishLatestAgentView(connection:RpcConnection,id:String,selected:Int,value:AgentView):Void {
     var state=historyWindow(id), previous=agentViews.get(id);
@@ -913,6 +955,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function terminalCatalogRevision():Int return catalogRevision;
   public function terminalCatalogBusy():Bool return catalogMutation;
 
+  /** Reads the terminal list now, or as soon as the read in flight ends; `force` clears the errors shown. */
   public function refreshTerminals(force:Bool):Void {
     if (root() == null) {
       if (force) {
@@ -921,8 +964,15 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       return;
     }
+    if (force) {catalogError = null;catalogActionError = null;}
+    terminalsWanted = true;
+    continueTerminals();
+  }
+
+  function continueTerminals():Void {
     var connection = rpc();
-    if (connection == null || catalogPending ||(!force && clock() < catalogNext)) return;
+    if (!terminalsWanted || catalogPending || connection == null) return;
+    terminalsWanted = false;
     if (!has(WorkspaceTerminalProtocol.READ) || !has(WorkspaceTerminalProtocol.CATALOG)) {
       if (catalogError == null) {
         catalogError = "This workspace service does not allow terminal discovery";
@@ -930,9 +980,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       return;
     }
-    if (force) {catalogError = null;catalogActionError = null;}
     catalogPending = true;
-    catalogNext = clock() + 1000;
+    markRead("terminals list");
     loadTerminalPage(connection, null, []);
   }
 
@@ -1031,7 +1080,6 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   function catalogCompleted(connection:RpcConnection):Void {
     if (rpc() != connection) return;
     catalogMutation = false;
-    catalogNext = 0;
     catalogRevision++;
     refreshTerminals(false);
   }
@@ -1041,7 +1089,6 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     catalogMutation = false;
     catalogActionError = error.ambiguous ? "Session change may have completed; refresh before retrying"
       : error.code == "stale_revision" ? "This session changed. Reload its name/group before saving." : error.message;
-    catalogNext = 0;
     catalogRevision++;
     refreshTerminals(false);
   }
@@ -1172,7 +1219,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if(closed!=null) closed();
     },function(error) {
       var message=error.code=="terminal_running" || error.code=="unknown_method"
-        ? "Update the workspace service in Remote Access to close running terminals."
+        ? "This workspace service cannot close running terminals."
         : error.ambiguous || error.code=="timeout" ? "Terminal close could not be confirmed. Refresh before retrying; its views have been kept open."
         : error.message;
       catalogFailed(connection,{code:error.code,message:message,ambiguous:false});
