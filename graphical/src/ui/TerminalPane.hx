@@ -351,7 +351,8 @@ class TerminalPane implements AgentTerminalPanel {
 		if (!force && !focusChanged && !selectionPaintChanged && changed == 0 && count == renderedRows.length
 			&& cursorRow == cursor.row && cursorColumn == cursor.column && cursorMode == cursor.mode) return false;
 		while (renderedRows.length > count) {
-			renderedRows.pop().layout.dispose();
+			var row = renderedRows.pop();
+			if (row != null) row.layout.dispose();
 			revisions.pop();
 		}
 		while (renderedRows.length < count) {
@@ -534,10 +535,9 @@ class TerminalPane implements AgentTerminalPanel {
 			style.height = LayoutAxis.fixed(TOUCH_KEYS_HEIGHT - 6.0);
 			style.padding = new haxeon.ui.Insets(0, 0, 0, 0);
 			var id = key.id;
-			var button = new TouchKeyButton(key.label, style, function() touchKey(id), "touch-key-" + id);
-			button.accessibilityLabel = id == "shift-tab" ? "Shift Tab" : key.label;
-			button.labelView = new haxeon.ui.widgets.text.Text(key.label, null, null, new haxeon.ui.core.TextStyleOverride(null, 12, null, TextWrap.None, haxeon.ui.TextAlignment.Center, null, null, null));
-			button.selected = id == "ctrl" && ctrlSticky;
+			var labelView = new haxeon.ui.widgets.text.Text(key.label, null, null, new haxeon.ui.core.TextStyleOverride(null, 12, null, TextWrap.None, haxeon.ui.TextAlignment.Center, null, null, null));
+			var button = new TouchKeyButton(key.label, style, function() touchKey(id), "touch-key-" + id, id == "ctrl" && ctrlSticky, labelView,
+				id == "shift-tab" ? "Shift Tab" : key.label);
 			result.push(new haxeon.ui.widgets.KeyedView(id, button));
 		}
 		return result;
@@ -554,7 +554,7 @@ class TerminalPane implements AgentTerminalPanel {
 			return;
 		}
 		if (!canSendInput() || paneNode == null) return;
-		var modifiers = ctrlSticky ? UiModifier.Control : 0;
+		var modifiers = ctrlSticky ? UiModifier.Control : UiModifier.empty();
 		ctrlSticky = false;
 		if (id == "shift-tab") {
 			// The terminfo back-tab, sent as is so no emulator mapping can turn it into a plain Tab.
@@ -636,18 +636,15 @@ class TerminalPane implements AgentTerminalPanel {
 				buttonStyle.height = LayoutAxis.fixed(CONTROL_BAR_HEIGHT - 2);
 				buttonStyle.padding = new haxeon.ui.Insets(8, 0, 8, 0);
 				var action = new haxeon.ui.widgets.controls.Button(controlActionText == "Restart Terminal" ? (remoteBackend.resumesConversation() ? "Resume" : "Restart") : controlActionText,buttonStyle,function() {
-					remoteBackend.activateControl();syncControlLayout();requestFrame();
+					remoteBackend.activateControl();syncControlLayout();
 					if (terminalNode != null) context.requestFocusAfterLayout(terminalNode.id);
-				},"terminal-control-action");
-				action.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
-				action.accessibilityLabel = controlActionText;
+					requestFrame();
+				},"terminal-control-action",null,haxeon.ui.widgets.controls.ButtonVariant.Secondary,null,null,null,null,null,null,null,null,null,controlActionText);
 				controls.push(new haxeon.ui.widgets.KeyedView("action",action));
 				if (controlDeclineText.length > 0) {
 					var decline = new haxeon.ui.widgets.controls.Button(controlDeclineText,buttonStyle,function() {
 						remoteBackend.declineControl();syncControlLayout();requestFrame();
-					},"terminal-control-decline");
-					decline.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
-					decline.accessibilityLabel = controlDeclineText;
+					},"terminal-control-decline",null,haxeon.ui.widgets.controls.ButtonVariant.Secondary,null,null,null,null,null,null,null,null,null,controlDeclineText);
 					controls.push(new haxeon.ui.widgets.KeyedView("decline",decline));
 				}
 			}
@@ -777,16 +774,16 @@ class TerminalPane implements AgentTerminalPanel {
 				return;
 			}
 			// A read-only pane cannot report the mouse, so a drag selects locally even when the program tracks it.
-			if ((event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0 || !canSendInput()) {
+			if (event.modifiers.contains(UiModifier.Shift) || session.emulator.mouseMode() == 0 || !canSendInput()) {
 				if (event.button != 0 || selectionPointer >= 0) return;
-				selectionCopiesOnRelease = session.emulator.mouseMode() != 0 && (event.modifiers & UiModifier.Shift) == 0;
+				selectionCopiesOnRelease = session.emulator.mouseMode() != 0 && !event.modifiers.contains(UiModifier.Shift);
 				var cell = pointerCell(event);
 				selectionPointer = event.pointerId;
 				selectionColumn = cell.column;
 				selectionRow = cell.row;
 				selectionScroll = 0;
 				// With mouse tracking Shift means "select locally"; outside a TUI it extends the anchor.
-				var extend = (event.modifiers & UiModifier.Shift) != 0 && session.emulator.mouseMode() == 0 && hasSelection;
+				var extend = event.modifiers.contains(UiModifier.Shift) && session.emulator.mouseMode() == 0 && hasSelection;
 				if (extend) selectionGesture.cancel();
 				// Row identity plus shared pixel slop tolerates clicks straddling a cell edge.
 				var clicks = extend ? 1 : selectionGesture.register(haxe.Int64.toStr(session.emulator.rowId(cell.row)),
@@ -846,7 +843,7 @@ class TerminalPane implements AgentTerminalPanel {
 				return;
 			}
 			if (mouseButton >= 0 && event.pointerId != mousePointer) return;
-			if ((event.modifiers & UiModifier.Shift) != 0 && mouseButton < 0) return;
+			if (event.modifiers.contains(UiModifier.Shift) && mouseButton < 0) return;
 			if (!closed && session.emulator.mouseMode() != 0)
 				reportMouse(event, mouseButton >= 0 ? mouseButton + 32 : 0, 4);
 		});
@@ -962,7 +959,7 @@ class TerminalPane implements AgentTerminalPanel {
 		node.on(UiEventKind.FocusLost, blur);
 		node.on(UiEventKind.Scroll, function(event:UiEvent) {
 			if (event.deltaY == 0 || closed) return;
-			if ((event.modifiers & UiModifier.Shift) == 0) {
+			if (!event.modifiers.contains(UiModifier.Shift)) {
 				var button = event.deltaY < 0 ? 64 : 65;
 				if (reportMouse(event, button, 1)) return;
 			}
@@ -1025,9 +1022,9 @@ class TerminalPane implements AgentTerminalPanel {
 		if (!canSendInput()) return false;
 		var cell = pointerCell(event);
 		var modifiers = 0;
-		if ((event.modifiers & UiModifier.Shift) != 0) modifiers |= 4;
-		if ((event.modifiers & UiModifier.Alt) != 0) modifiers |= 8;
-		if ((event.modifiers & UiModifier.Control) != 0) modifiers |= 16;
+		if (event.modifiers.contains(UiModifier.Shift)) modifiers |= 4;
+		if (event.modifiers.contains(UiModifier.Alt)) modifiers |= 8;
+		if (event.modifiers.contains(UiModifier.Control)) modifiers |= 16;
 		if (!session.emulator.mouse(cell.column, cell.row, button, kind, modifiers)) return false;
 		session.flushInput();
 		session.pollEvents();
@@ -1038,9 +1035,9 @@ class TerminalPane implements AgentTerminalPanel {
 	}
 
 	/** UiModifier bits as the terminal emulator wants them: Shift 1, Control 4, Alt 8, Super 16. */
-	static function terminalModifiers(modifiers:Int):Int
-		return ((modifiers & UiModifier.Shift) != 0 ? 1 : 0) | ((modifiers & UiModifier.Control) != 0 ? 4 : 0)
-			| ((modifiers & UiModifier.Alt) != 0 ? 8 : 0) | ((modifiers & UiModifier.Super) != 0 ? 16 : 0);
+	static function terminalModifiers(modifiers:UiModifier):Int
+		return (modifiers.contains(UiModifier.Shift) ? 1 : 0) | (modifiers.contains(UiModifier.Control) ? 4 : 0)
+			| (modifiers.contains(UiModifier.Alt) ? 8 : 0) | (modifiers.contains(UiModifier.Super) ? 16 : 0);
 
 	/**
 		Bytes for a cursor, editing or function key, as xterm sends them, or null for any other key. With Shift, Alt or
@@ -1048,9 +1045,9 @@ class TerminalPane implements AgentTerminalPanel {
 		`ESC [ 1 ; <m> <final>`, the others `ESC [ <n> ; <m> ~`. Programs read Ctrl+Left and Ctrl+Right as word jumps
 		from this. Function keys use GLFW key codes (F1 = 290).
 	**/
-	static function encodeKey(key:Int, modifiers:Int):Null<String> {
-		var parameter = 1 + ((modifiers & UiModifier.Shift) != 0 ? 1 : 0) + ((modifiers & UiModifier.Alt) != 0 ? 2 : 0)
-			+ ((modifiers & UiModifier.Control) != 0 ? 4 : 0);
+	static function encodeKey(key:Int, modifiers:UiModifier):Null<String> {
+		var parameter = 1 + (modifiers.contains(UiModifier.Shift) ? 1 : 0) + (modifiers.contains(UiModifier.Alt) ? 2 : 0)
+			+ (modifiers.contains(UiModifier.Control) ? 4 : 0);
 		var letter = switch key {
 			case UiKey.Up: "A";
 			case UiKey.Down: "B";
@@ -1135,7 +1132,7 @@ class TerminalPane implements AgentTerminalPanel {
 			case UiKey.Escape: "\x1b";
 			default: encodeKey(event.key, event.modifiers);
 		};
-		if (bytes == null && (event.modifiers & UiModifier.Control) != 0) {
+		if (bytes == null && event.modifiers.contains(UiModifier.Control)) {
 			if (event.key >= UiKey.A && event.key <= UiKey.Z)
 				bytes = String.fromCharCode(event.key - UiKey.A + 1);
 		}
@@ -1144,7 +1141,7 @@ class TerminalPane implements AgentTerminalPanel {
 		// where Option types characters.
 		if (bytes == null && (event.modifiers & (UiModifier.Alt | UiModifier.Control | UiModifier.Super)) == UiModifier.Alt
 			&& event.key >= UiKey.A && event.key <= UiKey.Z && Sys.systemName() != "Mac")
-			bytes = "\x1b" + String.fromCharCode(((event.modifiers & UiModifier.Shift) != 0 ? 65 : 97) + event.key - UiKey.A);
+			bytes = "\x1b" + String.fromCharCode((event.modifiers.contains(UiModifier.Shift) ? 65 : 97) + event.key - UiKey.A);
 		if (bytes != null) {
 			prepareInput();
 			session.write(Bytes.ofString(bytes));
