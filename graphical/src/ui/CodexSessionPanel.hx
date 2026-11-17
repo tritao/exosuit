@@ -10,6 +10,8 @@ import haxeon.ui.LayoutStyle;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
+import haxeon.ui.component.TrackedScope;
+import haxeon.reactive.Signal;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
@@ -41,7 +43,14 @@ private typedef SessionTextContext = { var path:String; var text:String; }
 private typedef LoadedMessageContent = { var token:String; var text:String; var partial:Bool; }
 private typedef SessionImageDraft = { var name:String; var id:String; var bytes:haxe.io.Bytes; var key:Int; }
 
-/** Conversation controls are a client projection; shared provider owns requests and turns. */
+/**
+  Conversation controls are a client projection; shared provider owns requests and turns.
+
+  The session is built in a scope of its own. A change only this panel shows (typing, toggles, copy feedback, scrolling
+  the transcript, an attachment or image preview finishing) calls `invalidate`, which re-runs that scope alone; one that
+  something outside it shows too (a client action, the session list, focus elsewhere) calls `frame`, which rebuilds the
+  window and the scope with it.
+**/
 class CodexSessionPanel implements View {
   static inline final MIN_ACTIVITY_HEIGHT:Float = 180;
   // Reserve header, spacing, a one-line composer and a usable activity area.
@@ -49,7 +58,11 @@ class CodexSessionPanel implements View {
   final getClient:Void -> Null<WorkspaceAgentClient>;
   final resource:String;
   final root:String;
+  /** Rebuilds the window: for changes that reach outside the session scope. */
   final frame:Void -> Void;
+  /** Read by the session scope; `invalidate` bumps it. */
+  final changes = new Signal<Int>(0);
+  final session:TrackedScope;
   final editorPalette:style.Theme;
   final syntaxes:SyntaxRegistry;
   final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
@@ -157,7 +170,7 @@ class CodexSessionPanel implements View {
           loadedContent.remove(oldest);
         }
       } else if (valid) { contentErrors.set(key,error == null ? "Message content is unavailable" : error); contentErrorTokens.set(key,token); }
-      if (returned) frame();
+      if (returned) invalidate();
     });
     returned = true;
   }
@@ -214,7 +227,15 @@ class CodexSessionPanel implements View {
     this.workspaceActions = workspaceActions;
     this.autoFocusPrompt = autoFocusPrompt == null ? function() return true : autoFocusPrompt;
     sessionScroll = new SessionScroll(this.autoFocusPrompt);
+    var body = new SessionBody(this);
+    session = new TrackedScope("codex-session", function():View {
+      changes.value;
+      return body;
+    });
   }
+
+  /** Re-runs the session scope only. For state that nothing outside this panel shows; UI thread, never inside a build. */
+  public function invalidate():Void changes.value = changes.value + 1;
 
   static function findModel(models:Null<Array<AgentModel>>, slug:String):Null<AgentModel> {
     if (models != null && slug != null && slug != "") for (model in models) if (model.model == slug) return model;
@@ -308,7 +329,9 @@ class CodexSessionPanel implements View {
     return {state: view.record.state, lines: [for (item in items) item.kind + ": " + item.text], error: view.error, prompt: prompt};
   }
 
-  public function build(context:BuildContext):RenderNode {
+  public function build(context:BuildContext):RenderNode return session.build(context);
+
+  function buildSession(context:BuildContext):RenderNode {
     var client = getClient();
     var catalog = client == null ? null : client.agents();
     if (client == null || catalog == null
@@ -373,7 +396,7 @@ class CodexSessionPanel implements View {
       prompt = v;
       promptRevision++;
       suggestionIndex = 0;dismissSuggestions = false;
-      frame();
+      invalidate();
     }, inputStyle, null, null, null, true);
     // Enter sends (Shift+Enter is the newline), so the on-screen keyboard's action key is Send.
     field.imeAction = 5;
@@ -407,7 +430,7 @@ class CodexSessionPanel implements View {
       });
     header.push(new KeyedView("details", quietButton(details ? "Hide session details" : "Session details", function() {
       details = !details;
-      frame();
+      invalidate();
     }, "codex-details")));
     var rows:Array<KeyedView> = [new KeyedView("header", new Row("codex-header", header, headerStyle))];
     var workspaceControls:Array<KeyedView> = [];
@@ -495,7 +518,7 @@ class CodexSessionPanel implements View {
       rows.push(new KeyedView("connection", paragraph("Connection: " + connectionState)));
       rows.push(new KeyedView("diagnostics-toggle", new Button(diagnostics ? "Hide diagnostics" : "Show diagnostics", null, function() {
         diagnostics = !diagnostics;
-        frame();
+        invalidate();
       })));
     }
     if (view.record.thread != "" && (view.record.state == "reconnect-failed" || connectionState == "disconnected")) {
@@ -537,7 +560,7 @@ class CodexSessionPanel implements View {
           function() client.agentAction(id,"remove-input","",entry.id),"agent-remove-input-"+entry.id,control);
         controls.push(new KeyedView("remove",remove));
         if (entry.text != "") {
-          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptRevision++;promptFocusRequested=false;frame();},null,control);
+          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptRevision++;promptFocusRequested=false;invalidate();},null,control);
           controls.push(new KeyedView("draft",draft));
         }
       }
@@ -582,7 +605,7 @@ class CodexSessionPanel implements View {
       ));
       if (structured && r.detail != "") {
         requestRows.push(new KeyedView("request-detail-toggle", quietButton(detailExpanded ? "Hide request details" : "Request details", function() {
-          expandedRequestDetails.set(r.id, !detailExpanded); frame();
+          expandedRequestDetails.set(r.id, !detailExpanded); invalidate();
         }, "request-detail-toggle-" + r.id)));
         if (detailExpanded) requestRows.push(new KeyedView("request-details", paragraph(r.detail)));
       }
@@ -594,7 +617,7 @@ class CodexSessionPanel implements View {
         var questions = r.questions;
         if (questions != null && questions.length > 0 && r.reviewable) {
           var form = questionForms.get(r.id);
-          if (form == null) form = new SessionQuestionForm(r.id, questions, control && connectionReady, frame,
+          if (form == null) form = new SessionQuestionForm(r.id, questions, control && connectionReady, invalidate,
             function(json) {
               var current = getClient();
               if (current == null || !current.canControlAgents() || current.agentBusy()) return;
@@ -783,7 +806,7 @@ class CodexSessionPanel implements View {
           commandStyle.width = LayoutAxis.grow();
           commandStyle.childGap = 8;
           commandStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
-          var toggle=quietButton("",function() {expanded.set(key,expanded.get(key)!=true);frame();},"command-toggle-"+key,null,
+          var toggle=quietButton("",function() {expanded.set(key,expanded.get(key)!=true);invalidate();},"command-toggle-"+key,null,
             expanded.get(key)==true ? IconName.ChevronDown : IconName.ChevronRight,16,expanded.get(key)==true ? "Hide details" : "Show details");
           toggle.style.width=LayoutAxis.fixed(30);
           var status=commandStatus(item.state);
@@ -796,7 +819,7 @@ class CodexSessionPanel implements View {
         } else if (reasoning) message.push(new KeyedView("reasoning-" + key,
           quietButton((expanded.get(key) == true ? "Hide reasoning" : "Show reasoning") + (item.state == "completed" ? "" : " · " + item.state), function() {
             expanded.set(key, expanded.get(key) != true);
-            frame();
+            invalidate();
           })));
         else {
           var roleStyle = new LayoutStyle();
@@ -810,7 +833,7 @@ class CodexSessionPanel implements View {
           if ((!tool || item.kind == "plan") && displayText != "") {
             var copyText = displayText;
             var copied = copiedMessages.get(key) == copyText;
-            var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); frame(); }, "agent-copy-" + key,
+            var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); invalidate(); }, "agent-copy-" + key,
               null, copied ? IconName.Check : IconName.Copy, 16,
               copied ? "Copied" : item.truncated && (full == null || full.partial) ? "Copy preview" : item.kind == "plan" ? "Copy plan" : "Copy message");
             roleChildren.push(new KeyedView("copy", copy));
@@ -823,7 +846,7 @@ class CodexSessionPanel implements View {
           if (item.kind == "agentMessage" || item.kind == "plan") {
             var rendered = markdown.get(key);
             if (rendered == null) { rendered = new CodexMarkdownView(displayText, editorPalette, syntaxes, openLink,
-              workspaceActions == null ? null : workspaceActions.resolveImage, frame,
+              workspaceActions == null ? null : workspaceActions.resolveImage, invalidate,
               workspaceActions == null ? null : workspaceActions.previewArtifact,
               workspaceActions == null ? null : workspaceActions.loadImage); markdown.set(key, rendered); }
             rendered.update(displayText);
@@ -839,7 +862,7 @@ class CodexSessionPanel implements View {
            var retainedId:String=cast imageId;
            message.push(new KeyedView(imageKey,new SessionMessageImageView(imageKey,retainedId,
              function(done) client.loadAgentImage(id,turn,itemId,retainedId,done),
-             opener == null ? null : function(bytes) opener(turn,itemId,retainedId,bytes),frame)));
+             opener == null ? null : function(bytes) opener(turn,itemId,retainedId,bytes),invalidate)));
           }
         }
         if (item.kind == "imageView" || item.kind == "imageGeneration") {
@@ -851,7 +874,7 @@ class CodexSessionPanel implements View {
             var resolve=workspaceActions == null ? null : workspaceActions.resolveImage;
             var load=workspaceActions == null ? null : workspaceActions.loadImage;
             message.push(new KeyedView("native-image-" + key,new SessionImageView("native-image-" + key,
-              item.kind == "imageView" ? "Viewed image" : "Generated image",destination,resolve,openLink,frame,load)));
+              item.kind == "imageView" ? "Viewed image" : "Generated image",destination,resolve,openLink,invalidate,load)));
           }
         }
         if (detail != "" && reasoning && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
@@ -861,7 +884,7 @@ class CodexSessionPanel implements View {
           message.push(new KeyedView("toggle-" + key,
             quietButton(expanded.get(key) == true ? "Hide details" : "Show details", function() {
             expanded.set(key, expanded.get(key) != true);
-            frame();
+            invalidate();
           }
           )));
           if (expanded.get(key) == true) {
@@ -881,7 +904,7 @@ class CodexSessionPanel implements View {
             message.push(new KeyedView("truncated-" + key, paragraph(contentErrors.exists(key) ? contentErrors.get(key) : "This item is truncated in the current view.")));
             if ((item.kind == "agentMessage" || item.kind == "plan") && item.state == "completed" && view.supportsMessageContent == true && item.contentToken != null) {
               var contentLabel = item.kind == "plan" ? "plan" : "response";
-              var load = quietButton(contentLoading == key ? "Loading " + contentLabel + "…" : contentErrors.exists(key) ? "Retry full " + contentLabel : "Load full " + contentLabel, function() { loadContent(client,id,item,key); frame(); },
+              var load = quietButton(contentLoading == key ? "Loading " + contentLabel + "…" : contentErrors.exists(key) ? "Retry full " + contentLabel : "Load full " + contentLabel, function() { loadContent(client,id,item,key); invalidate(); },
                 null, contentLoading == null);
               message.push(new KeyedView("load-content-" + key,load));
             }
@@ -935,7 +958,7 @@ class CodexSessionPanel implements View {
           if (requestAnchor == null || transcriptViewport == null || requestAnchor.resolved == null || transcriptViewport.resolved == null) return;
           var target = requestAnchor.globalBounds(), viewport = transcriptViewport.globalBounds();
           transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.offsetY + target.y - viewport.y - 4);
-          frame();
+          invalidate();
         }, "agent-review-request"))
       ], noticeStyle)));
     }
@@ -952,13 +975,13 @@ class CodexSessionPanel implements View {
         new KeyedView("review", review)
       ], notice)));
     }
-    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, frame,
+    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, invalidate,
       function(node) transcriptViewport = node, historyAnchor != null, historyReturnToLatest,
       function() historyReturnToLatest = false)));
     if (transcriptScroll.maxScrollY - transcriptScroll.offsetY > 2) rows.push(new KeyedView("jump-latest",
       new Button("Jump to latest", null, function() {
         transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.maxScrollY);
-        frame();
+        invalidate();
       }, "agent-jump-latest")));
     var suggestions = (canSend || (canQueue && view.requests.length == 0)) && !dismissSuggestions ? AgentCommandCompletion.matches(view.commands,prompt) : [];
     if (suggestionIndex >= suggestions.length) suggestionIndex = 0;
@@ -968,7 +991,7 @@ class CodexSessionPanel implements View {
       prompt = AgentCommandCompletion.insert(suggestions[index]);
       promptRevision++;
       suggestionIndex = 0;dismissSuggestions = false;promptFocusRequested = false;
-      frame();
+      invalidate();
     }
     for (index in 0...suggestions.length) {
       var choice = index;
@@ -1086,52 +1109,54 @@ class CodexSessionPanel implements View {
     // Capture on a stable parent so the field's own patch updates retain keyboard behavior.
     var promptStyle = new LayoutStyle();
     promptStyle.width = LayoutAxis.grow();
-    var promptNode = new Column("codex-prompt-keys", [new KeyedView("field", field)], promptStyle).build(context);
-    promptNode.walk(function(child) {
-      if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt" || child.semantics.label == "Pi prompt" || child.semantics.label == "Exosuit prompt")) {
-        child.onResolved(function(_) {
-          if (!promptFocusRequested && child.enabled && autoFocusPrompt()) promptFocusRequested = context.requestFocus(child.id);
-        });
-      }
-    });
-    promptNode.on(UiEventKind.KeyDown, function(event) {
-      if (event.key == UiKey.V && !(event.modifiers & (UiModifier.Control | UiModifier.Super)).isEmpty()
-          && !event.modifiers.contains(UiModifier.Alt) && workspaceActions != null && workspaceActions.pasteImage != null
-          && view.supportsImageUpload == true && control && connectionReady) {
-        var readClipboard:Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>} = cast workspaceActions.pasteImage;
-        var pasted = readClipboard();
-        if (pasted.bytes != null || pasted.error != null) {
-          event.preventDefault(); event.stopImmediatePropagation();
-          if (imageUploading) imageError = "Wait for the current image upload";
-          else if (imageDrafts.length >= 2) imageError = "Remove an image before pasting another";
-          else if (pasted.error != null) imageError = pasted.error;
-          else {
-            var generation = ++imageGeneration;
-            imageUploading = true; imageError = null;
-            uploadImage(client,id,imageThread,"Pasted image.png",cast pasted.bytes,generation);
+    // Decorated where it is built, inside the session: a scope's body must build its own root before any other node.
+    var promptView = new RequestAnchor(new Column("codex-prompt-keys", [new KeyedView("field", field)], promptStyle), function(promptNode) {
+      promptNode.walk(function(child) {
+        if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt" || child.semantics.label == "Pi prompt" || child.semantics.label == "Exosuit prompt")) {
+          child.onResolved(function(_) {
+            if (!promptFocusRequested && child.enabled && autoFocusPrompt()) promptFocusRequested = context.requestFocus(child.id);
+          });
+        }
+      });
+      promptNode.on(UiEventKind.KeyDown, function(event) {
+        if (event.key == UiKey.V && !(event.modifiers & (UiModifier.Control | UiModifier.Super)).isEmpty()
+            && !event.modifiers.contains(UiModifier.Alt) && workspaceActions != null && workspaceActions.pasteImage != null
+            && view.supportsImageUpload == true && control && connectionReady) {
+          var readClipboard:Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>} = cast workspaceActions.pasteImage;
+          var pasted = readClipboard();
+          if (pasted.bytes != null || pasted.error != null) {
+            event.preventDefault(); event.stopImmediatePropagation();
+            if (imageUploading) imageError = "Wait for the current image upload";
+            else if (imageDrafts.length >= 2) imageError = "Remove an image before pasting another";
+            else if (pasted.error != null) imageError = pasted.error;
+            else {
+              var generation = ++imageGeneration;
+              imageUploading = true; imageError = null;
+              uploadImage(client,id,imageThread,"Pasted image.png",cast pasted.bytes,generation);
+            }
+            frame(); return;
           }
-          frame(); return;
         }
-      }
-      if (suggestions.length > 0 && (event.modifiers & (UiModifier.Shift | UiModifier.Control | UiModifier.Alt)).isEmpty()) {
-        if (event.key == UiKey.Down || event.key == UiKey.Up) {
-          event.preventDefault();event.stopImmediatePropagation();
-          suggestionIndex = (suggestionIndex + (event.key == UiKey.Down ? 1 : suggestions.length-1)) % suggestions.length;
-          frame();return;
+        if (suggestions.length > 0 && (event.modifiers & (UiModifier.Shift | UiModifier.Control | UiModifier.Alt)).isEmpty()) {
+          if (event.key == UiKey.Down || event.key == UiKey.Up) {
+            event.preventDefault();event.stopImmediatePropagation();
+            suggestionIndex = (suggestionIndex + (event.key == UiKey.Down ? 1 : suggestions.length-1)) % suggestions.length;
+            invalidate();return;
+          }
+          if (event.key == UiKey.Tab || event.key == UiKey.Enter) {
+            event.preventDefault();event.stopImmediatePropagation();complete(suggestionIndex);return;
+          }
+          if (event.key == UiKey.Escape) {
+            event.preventDefault();event.stopImmediatePropagation();dismissSuggestions = true;invalidate();return;
+          }
         }
-        if (event.key == UiKey.Tab || event.key == UiKey.Enter) {
-          event.preventDefault();event.stopImmediatePropagation();complete(suggestionIndex);return;
+        if (event.key == UiKey.Enter && !event.modifiers.contains(UiModifier.Shift)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          submit();
         }
-        if (event.key == UiKey.Escape) {
-          event.preventDefault();event.stopImmediatePropagation();dismissSuggestions = true;frame();return;
-        }
-      }
-      if (event.key == UiKey.Enter && !event.modifiers.contains(UiModifier.Shift)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        submit();
-      }
-    }, haxeon.ui.core.UiEventPhase.Capture);
+      }, haxeon.ui.core.UiEventPhase.Capture);
+    });
     var composerFrame = new LayoutStyle();
     composerFrame.width = LayoutAxis.grow(0, 880);
     composerFrame.padding = new Insets(1, 1, 1, 1);
@@ -1143,14 +1168,14 @@ class CodexSessionPanel implements View {
     if (workspaceActions != null && workspaceActions.chooseImage != null && view.supportsImageUpload == true) {
       var chooseImage:((Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void)->Void = cast workspaceActions.chooseImage;
       var imageAction = quietButton("", function() {
-        if (imageUploading) { imageGeneration++; imageUploading = false; frame(); return; }
+        if (imageUploading) { imageGeneration++; imageUploading = false; invalidate(); return; }
         var generation = ++imageGeneration;
-        imageUploading = true; imageError = null; frame();
+        imageUploading = true; imageError = null; invalidate();
         chooseImage(function(name, bytes, error) {
           if (generation != imageGeneration) return;
-          if (!imageSessionCurrent(client,id,imageThread)) {imageUploading=false;imageError="Session changed while choosing an image";frame();return;}
+          if (!imageSessionCurrent(client,id,imageThread)) {imageUploading=false;imageError="Session changed while choosing an image";invalidate();return;}
           if (error != null || bytes == null || name == null) {
-            imageUploading = false; imageError = error; frame(); return;
+            imageUploading = false; imageError = error; invalidate(); return;
           }
           uploadImage(client,id,imageThread,name,bytes,generation);
         });
@@ -1183,22 +1208,22 @@ class CodexSessionPanel implements View {
     if (workspaceActions != null && workspaceActions.readContext != null) {
       var readContext:(String, (Null<String>, Null<String>)->Void)->Void = cast workspaceActions.readContext;
       var addContext = quietButton("", function() {
-        addingContext = !addingContext; contextGeneration++; contextLoading = false; contextError = null; frame();
+        addingContext = !addingContext; contextGeneration++; contextLoading = false; contextError = null; invalidate();
       }, "agent-add-context", control && connectionReady, IconName.NewFile, 16, addingContext ? "Cancel adding text" : "Add workspace text");
       addContext.style.width = LayoutAxis.fixed(34);
       addContext.style.height = LayoutAxis.fixed(34); addContext.style.padding = new Insets(9, 9, 9, 9);
       contextActions.push(new KeyedView("add", addContext));
       if (addingContext) {
         var pathStyle = new LayoutStyle(); pathStyle.width = LayoutAxis.grow(); pathStyle.height = LayoutAxis.fixed(32);
-        var pathField = new TextField("agent-context-path", contextPath, function(value) { contextPath = value; contextError = null; frame(); }, pathStyle);
+        var pathField = new TextField("agent-context-path", contextPath, function(value) { contextPath = value; contextError = null; invalidate(); }, pathStyle);
         pathField.label = "Workspace text path"; pathField.placeholder = "Path relative to session directory";
         pathField.enabled = !contextLoading;
         contextRows.push(new KeyedView("path", pathField));
         var load = quietButton(contextLoading ? "Reading…" : "Include text", function() {
           var path = StringTools.trim(contextPath);
-          if (path == "" || ~/[\x00-\x1f\x7f]/.match(path)) { contextError = "Enter a valid workspace path."; frame(); return; }
+          if (path == "" || ~/[\x00-\x1f\x7f]/.match(path)) { contextError = "Enter a valid workspace path."; invalidate(); return; }
           var generation = ++contextGeneration;
-          contextLoading = true; contextError = null; frame();
+          contextLoading = true; contextError = null; invalidate();
           readContext(path, function(value, error) {
             if (generation != contextGeneration) return;
             contextLoading = false;
@@ -1210,7 +1235,7 @@ class CodexSessionPanel implements View {
             else {
               textContext.push({path:path, text:value}); contextRevision++; contextPath = ""; addingContext = false;
             }
-            frame();
+            invalidate();
           });
         }, "agent-include-context", !contextLoading && StringTools.trim(contextPath) != "" && textContext.length < 2);
         contextRows.push(new KeyedView("load", load));
@@ -1223,7 +1248,7 @@ class CodexSessionPanel implements View {
       var pathLabel = new MiddleEllipsisText("context-file-label-" + index, file.path + " · included as text", true,
         TextStyleOverride.text(12, null, tokens.textSecondary));
       var removeText = quietButton("", function() {
-        textContext.splice(fileIndex, 1); contextRevision++; frame();
+        textContext.splice(fileIndex, 1); contextRevision++; invalidate();
       }, "agent-remove-context-" + index, null, IconName.Close, 14, "Remove");
       removeText.style.width = LayoutAxis.fixed(30);
       contextRows.push(new KeyedView("file-" + index, new Row("agent-context-file-" + index, [
@@ -1241,7 +1266,7 @@ class CodexSessionPanel implements View {
     trailingStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
     modelControls.push(new KeyedView("trailing", new Row("composer-trailing", trailing, trailingStyle)));
     var composerChildren:Array<KeyedView> = [new KeyedView("content", new Column("codex-composer", [
-      new KeyedView("prompt", new CodexPromptNode(promptNode)),
+      new KeyedView("prompt", promptView),
       new KeyedView("context", new Column("agent-context", contextRows)),
       new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
       new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
@@ -1268,6 +1293,14 @@ class CodexSessionPanel implements View {
     session.fillViewport = true;
     return session.build(context);
   }
+}
+
+/** The session scope's body: the panel's build, as one view object made once so the scope's body stays the same. */
+@:access(ui.CodexSessionPanel)
+private class SessionBody implements View {
+  final panel:CodexSessionPanel;
+  public function new(panel:CodexSessionPanel) this.panel = panel;
+  public function build(context:BuildContext):RenderNode return panel.buildSession(context);
 }
 
 /**
@@ -1320,12 +1353,6 @@ private class SettingMenuButton implements View {
   }
 }
 
-private class CodexPromptNode implements View {
-  final node:RenderNode;
-  public function new(node:RenderNode) this.node = node;
-  public function build(context:BuildContext):RenderNode return node;
-}
-
 private class RequestAnchor implements View {
   final child:View;
   final capture:RenderNode->Void;
@@ -1338,26 +1365,27 @@ private class AgentTranscript implements View {
   final content:View;
   final style:LayoutStyle;
   final controller:ScrollController;
-  final frame:Void->Void;
+  /** Re-runs the session scope: the jump button and following depend on the scroll position. */
+  final invalidate:Void->Void;
   final capture:RenderNode->Void;
   final preserveAnchor:Bool;
   final forceFollow:Bool;
   final followed:Void->Void;
-  public function new(content:View, style:LayoutStyle, controller:ScrollController, frame:Void->Void, capture:RenderNode->Void, preserveAnchor:Bool, forceFollow:Bool, followed:Void->Void) {this.content = content;this.style = style;this.controller = controller;this.frame = frame;this.capture = capture;this.preserveAnchor = preserveAnchor;this.forceFollow = forceFollow;this.followed = followed;}
+  public function new(content:View, style:LayoutStyle, controller:ScrollController, invalidate:Void->Void, capture:RenderNode->Void, preserveAnchor:Bool, forceFollow:Bool, followed:Void->Void) {this.content = content;this.style = style;this.controller = controller;this.invalidate = invalidate;this.capture = capture;this.preserveAnchor = preserveAnchor;this.forceFollow = forceFollow;this.followed = followed;}
   public function build(context:BuildContext):RenderNode {
     var node:Null<RenderNode> = null;
     // Follow new output only while the reader is already at the bottom.
     var follow = forceFollow || (!preserveAnchor && controller.maxScrollY - controller.offsetY <= 2);
     var scroll = new ScrollView("codex-activity",content,style, haxeon.ui.widgets.scroll.ScrollAxis.Vertical, controller);
-    scroll.onScroll = function(_) frame();
+    scroll.onScroll = function(_) invalidate();
     scroll.contentExtentProvider = function(width,height) {
       var geometry = node == null || node.children.length == 0 ? null : node.children[0].resolved;
       return {width:width,height:geometry == null ? height : Math.max(geometry.height,geometry.contentBounds.y+geometry.contentBounds.height)};
     };
     node = scroll.build(context);
     capture(node);
-    node.on(UiEventKind.KeyDown, function(_) frame());
-    node.on(UiEventKind.PointerUp, function(_) frame());
+    node.on(UiEventKind.KeyDown, function(_) invalidate());
+    node.on(UiEventKind.PointerUp, function(_) invalidate());
     if (node.children.length > 0) node.children[0].onResolved(function(_) {
       if (follow && controller.jumpTo(controller.offsetX, controller.maxScrollY)) context.requestLayoutFeedback();
       if (forceFollow) followed();
