@@ -56,7 +56,7 @@ try { $acquired = $lock.WaitOne([TimeSpan]::FromMinutes($LockWaitMinutes)) } cat
 if (-not $acquired) { Note "screen lock not free after $LockWaitMinutes min"; exit 124 }
 # A previous capture's exohost daemon (idle timeout 150 s) or editor of this checkout still running makes this run's
 # exohost start fail; the lock is ours, so nothing of this checkout belongs to a running capture. Compiler workers stay.
-$rootPattern = [regex]::Escape(($root -replace '\\', '/'))
+$rootPattern = [regex]::Escape(($root -replace '\\', '/')) + '/(exohost|graphical)/build[^/]*/host/main\.hl'
 Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object {
 	$_.CommandLine -and (($_.CommandLine -replace '\\', '/') -match $rootPattern) -and $_.CommandLine -notmatch 'compiler'
 } | ForEach-Object { Note "stopping leftover hl.exe $($_.ProcessId)"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
