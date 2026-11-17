@@ -36,7 +36,7 @@ class TerminalKeyTests {
 	public static function run(fonts:haxeon.ui.FontCollection):Void {
 		var shift = UiModifier.Shift, control = UiModifier.Control, alt = UiModifier.Alt;
 		// Pure encoding: the parameter is 1 + Shift 1 + Alt 2 + Control 4.
-		var cases:Array<{key:Int, modifiers:Int, bytes:String}> = [
+		var cases:Array<{key:Int, modifiers:UiModifier, bytes:String}> = [
 			{key: UiKey.Left, modifiers: control, bytes: "\x1b[1;5D"},
 			{key: UiKey.Right, modifiers: control, bytes: "\x1b[1;5C"},
 			{key: UiKey.Up, modifiers: shift, bytes: "\x1b[1;2A"},
@@ -57,18 +57,18 @@ class TerminalKeyTests {
 			{key: UiKey.Left, modifiers: control | UiModifier.CapsLock | UiModifier.NumLock, bytes: "\x1b[1;5D"},
 			{key: UiKey.Left, modifiers: UiModifier.Super, bytes: "\x1b[D"},
 			// Unmodified keys keep their plain sequences.
-			{key: UiKey.Left, modifiers: 0, bytes: "\x1b[D"},
-			{key: UiKey.Right, modifiers: 0, bytes: "\x1b[C"},
-			{key: UiKey.Up, modifiers: 0, bytes: "\x1b[A"},
-			{key: UiKey.Down, modifiers: 0, bytes: "\x1b[B"},
-			{key: UiKey.Home, modifiers: 0, bytes: "\x1b[H"},
-			{key: UiKey.End, modifiers: 0, bytes: "\x1b[F"},
-			{key: UiKey.Delete, modifiers: 0, bytes: "\x1b[3~"},
-			{key: UiKey.PageUp, modifiers: 0, bytes: "\x1b[5~"},
-			{key: UiKey.PageDown, modifiers: 0, bytes: "\x1b[6~"},
-			{key: UiKey.Insert, modifiers: 0, bytes: "\x1b[2~"},
-			{key: 290, modifiers: 0, bytes: "\x1bOP"},
-			{key: 301, modifiers: 0, bytes: "\x1b[24~"},
+			{key: UiKey.Left, modifiers: UiModifier.empty(), bytes: "\x1b[D"},
+			{key: UiKey.Right, modifiers: UiModifier.empty(), bytes: "\x1b[C"},
+			{key: UiKey.Up, modifiers: UiModifier.empty(), bytes: "\x1b[A"},
+			{key: UiKey.Down, modifiers: UiModifier.empty(), bytes: "\x1b[B"},
+			{key: UiKey.Home, modifiers: UiModifier.empty(), bytes: "\x1b[H"},
+			{key: UiKey.End, modifiers: UiModifier.empty(), bytes: "\x1b[F"},
+			{key: UiKey.Delete, modifiers: UiModifier.empty(), bytes: "\x1b[3~"},
+			{key: UiKey.PageUp, modifiers: UiModifier.empty(), bytes: "\x1b[5~"},
+			{key: UiKey.PageDown, modifiers: UiModifier.empty(), bytes: "\x1b[6~"},
+			{key: UiKey.Insert, modifiers: UiModifier.empty(), bytes: "\x1b[2~"},
+			{key: 290, modifiers: UiModifier.empty(), bytes: "\x1bOP"},
+			{key: 301, modifiers: UiModifier.empty(), bytes: "\x1b[24~"},
 		];
 		for (item in cases) {
 			var actual = ui.TerminalPane.encodeKey(item.key, item.modifiers);
@@ -112,7 +112,7 @@ class TerminalKeyTests {
 		for (mode in [{flags: "\x1b[<u", bytes: "\x7f"}, {flags: "\x1b[>1u", bytes: "\x7f"}, {flags: "\x1b[>8u", bytes: "\x1b[127;1u"}]) {
 			emulator.feedString(mode.flags);
 			backend.replies = "";
-			fixture.key(UiKey.Backspace, 0);
+			fixture.key(UiKey.Backspace, UiModifier.empty());
 			require(backend.replies == mode.bytes,
 				"Backspace after " + show(mode.flags) + " reached the PTY as " + show(backend.replies) + ", expected " + show(mode.bytes));
 		}
@@ -131,7 +131,7 @@ class TerminalKeyTests {
 	}
 
 	/** Run a real child behind a pseudoterminal (ConPTY on Windows), press keys, and return what the child reported. */
-	static function child(fonts:haxeon.ui.FontCollection, program:String, script:String, keys:Array<{key:Int, modifiers:Int}>):Array<String> {
+	static function child(fonts:haxeon.ui.FontCollection, program:String, script:String, keys:Array<{key:Int, modifiers:UiModifier}>):Array<String> {
 		var runtime = haxeon.platform.Runtime.start();
 		var session = new TerminalSession(terminalsession.LocalPtyBackend.spawn(
 			new terminalsession.TerminalProfile(program, [script], Sys.getCwd()), 100, 30), terminalkit.Emulator.open(100, 30, 8));
@@ -177,7 +177,7 @@ class TerminalKeyTests {
 			{key: UiKey.Home, modifiers: control},
 			{key: UiKey.Delete, modifiers: control},
 			{key: UiKey.PageUp, modifiers: shift},
-			{key: UiKey.Left, modifiers: 0},
+			{key: UiKey.Left, modifiers: UiModifier.empty()},
 		];
 		var node = find("node");
 		if (node != null) {
@@ -220,7 +220,7 @@ private class Fixture {
 		if (!context.focus.focus(root.id)) throw "Terminal key fixture did not focus";
 	}
 
-	public function key(key:Int, modifiers:Int, ?kind:String):Void context.key(kind == null ? UiEventKind.KeyDown : kind, key, modifiers);
+	public function key(key:Int, modifiers:UiModifier, ?kind:String):Void context.key(kind == null ? UiEventKind.KeyDown : kind, key, modifiers);
 
 	public function dispose():Void {
 		tab.dispose();
