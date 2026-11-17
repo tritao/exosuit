@@ -44,6 +44,7 @@ class SettingsTab {
 		};
 		tab.onClosed = function() {
 			tab.panel.discardUnsavedChanges();
+			tab.panel.dispose();
 			if (app.settingsPanel == tab.panel) {
 				app.settingsPanel = null; settingsModelsToken++; settingsModelsPending = false;
 			}
@@ -77,6 +78,7 @@ class SettingsTab {
 			tab.panel.setFilter(previous.filter);
 			if (previous.selectedCategory != null) tab.panel.select(previous.selectedCategory);
 			if (app.settingsPanel == previous) app.settingsPanel = tab.panel;
+			previous.dispose();
 		}
 	}
 	function settingsModelPickerState():SettingsModelPickerState {
