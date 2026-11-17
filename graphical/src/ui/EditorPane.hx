@@ -30,6 +30,8 @@ import haxeon.ui.widgets.text.TextDecorationKind;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutDirection;
 import haxeon.ui.LayoutStyle;
+import haxeon.ui.core.UiEventPhase;
+import haxeon.ui.core.UiModifier;
 import haxeon.ui.core.View;
 import haxeon.ui.theme.Theme;
 import haxeon.ui.widgets.KeyedView;
@@ -76,6 +78,8 @@ class EditorPane implements View {
 	public var applicationZoom:Float = 1.0;
 	public var editSettings:config.Settings = new config.Settings();
 	var editingLayout:Null<TextEditorLayout> = null;
+	/** The document revision `editingLayout` was laid out at. */
+	var editingRevision:Int = -1;
 
 	final onEdited:Void->Void;
 	public var caretRect(default, null):Null<Rect> = null;
@@ -112,14 +116,14 @@ class EditorPane implements View {
 	var definitionEnd:Int = -1;
 	var definitionState:Int = -1;
 
-	public function pointerModifiersChanged(modifiers:Int):Void {
+	public function pointerModifiersChanged(modifiers:UiModifier):Void {
 		if (updateDefinitionUnderline(definitionModifier(modifiers))) onEdited();
 	}
 
 	/** Control alone selects definitions; Caps Lock and Num Lock states are not held modifiers. */
-	static function definitionModifier(modifiers:Int):Bool {
-		var held = haxeon.ui.core.UiModifier.Shift | haxeon.ui.core.UiModifier.Control | haxeon.ui.core.UiModifier.Alt | haxeon.ui.core.UiModifier.Super;
-		return (modifiers & held) == haxeon.ui.core.UiModifier.Control;
+	static function definitionModifier(modifiers:UiModifier):Bool {
+		var held = UiModifier.Shift | UiModifier.Control | UiModifier.Alt | UiModifier.Super;
+		return (modifiers & held) == UiModifier.Control;
 	}
 
 	function updateDefinitionUnderline(control:Bool):Bool {
@@ -184,8 +188,10 @@ class EditorPane implements View {
 	}
 
 	public function deletionBoundary(position:editor.BufferPosition, direction:Int):editor.BufferPosition {
-		if (editingLayout == null || editingLayout.isDisposed()) return document.buffer.graphemeOffset(position, direction);
-		editingLayout.updateDocument(document.buffer.document, editingLayout.width, editingLayout.textStyle, editingLayout.paragraphStyle);
+		// The layout's text storage belongs to the text area's editor state; an edit since its last layout (two keys in one
+		// frame) leaves it behind the document, and the buffer's own grapheme segmentation answers instead.
+		if (editingLayout == null || editingLayout.isDisposed() || editingRevision != document.buffer.document.revision)
+			return document.buffer.graphemeOffset(position, direction);
 		var point = EditorCoordinates.codepoint(document, position);
 		return EditorCoordinates.position(document, direction < 0 ? editingLayout.previousGrapheme(point) : editingLayout.nextGrapheme(point));
 	}
@@ -399,6 +405,7 @@ class EditorPane implements View {
 		area.selectionProvider = selectionProvider;
 		area.onLayoutResolved = function(layout, geometry) {
 			editingLayout = layout;
+			editingRevision = document.buffer.document.revision;
 			gutter.resolveTextLayout(layout, geometry);
 			minimap.resolveTextLayout(layout);
 			if (viewportNode == null || viewportNode.resolved == null || scrollController.viewportHeight <= 0) return;
@@ -506,8 +513,9 @@ class EditorPane implements View {
 			});
 		});
 		var activate = function(event:haxeon.ui.core.UiEvent) { if (onActivated != null) onActivated(); };
-		container.on(haxeon.ui.core.UiEventKind.Focus, activate, "capture");
-		container.on(haxeon.ui.core.UiEventKind.PointerDown, activate, "capture");
+		// Capture: focus entering the pane (the text area, a scrollbar, the minimap) activates it, as a pointer press does.
+		container.on(haxeon.ui.core.UiEventKind.Focus, activate, UiEventPhase.Capture);
+		container.on(haxeon.ui.core.UiEventKind.PointerDown, activate, UiEventPhase.Capture);
 		var requestMenu = function(event:haxeon.ui.core.UiEvent) {
 			var handler = onContextMenu;
 			if (handler == null) return;
@@ -524,10 +532,10 @@ class EditorPane implements View {
 		container.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
 			var handler = onNavigationKey;
 			if (handler != null && handler(event)) { event.preventDefault(); event.stopPropagation(); }
-		}, "capture");
+		}, UiEventPhase.Capture);
 		container.on(haxeon.ui.core.UiEventKind.FocusLost, function(_) {
 			if (updateDefinitionUnderline(false)) onEdited();
-		}, "capture");
+		}, UiEventPhase.Capture);
 		node.on(haxeon.ui.core.UiEventKind.HoverLeave, function(_) {
 			pointerOffset = -1;
 			if (updateDefinitionUnderline(false)) onEdited();
