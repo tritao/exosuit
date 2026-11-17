@@ -54,8 +54,9 @@ class LanguageServerCommand {
 		if (configured.length > 0) return configured.copy();
 		if (environment != null && environment.length > 0) return [environment];
 		if (bundledAvailable) return [bundled];
-		// Windows cannot execute the Bash launcher; run what it runs, `haxeon lsp`, with the checkout's own haxeon command.
-		if (windows) return [HashLinkPath.executable(compilerRoot, "haxeon"), "lsp"];
+		// Windows cannot execute the Bash launcher; run what it runs, `haxeon lsp`, with the checkout's own haxeon command,
+		// or the one on PATH when the root has no VM path table (outside a checkout).
+		if (windows) return [try HashLinkPath.executable(compilerRoot, "haxeon") catch (_:Dynamic) "haxeon", "lsp"];
 		return [compilerRoot + "/scripts/haxeon-lsp"];
 	}
 }

@@ -72,7 +72,7 @@ class ExohostInventory {
 		Executables whose command lines exohost reads when scanning. `cmd.exe` is read only for its parent link (the live
 		session starts its live host, the editor, through `cmd /C`: hostedEditors follows it); it is never classified.
 	**/
-	public static inline var SCANNED_NAMES:String = "cmd.exe;hl.exe;hl;exosuit.exe;exosuit;exosuit-agent.exe;exosuit-agent;claude.exe;claude;codex.exe;codex;pi.exe;pi;node.exe;node;python.exe;python;python3.exe;python3;haxeon-lsp.exe;haxeon-lsp";
+	public static inline var SCANNED_NAMES:String = "cmd.exe;hl.exe;hl;exosuit.exe;exosuit;exosuit-agent.exe;exosuit-agent;claude.exe;claude;codex.exe;codex;pi.exe;pi;node.exe;node;python.exe;python;python3.exe;python3;haxeon-lsp.exe;haxeon-lsp;haxeon.exe;haxeon";
 
 	public final processes:Array<ExohostProcess> = [];
 	public final snapshot:Array<ProcessInfo>;

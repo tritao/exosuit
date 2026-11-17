@@ -41,6 +41,9 @@ class ExohostClassifier {
 		// The language server: a bundle's `haxeon-lsp.hl`, or what `haxeon lsp` runs from its tool cache, `<haxeon>/out/tools/LspMain-<key>.hl`.
 		if (lowered.indexOf("haxeon-lsp") >= 0 || lowered.indexOf("/out/tools/lspmain-") >= 0)
 			return result(ExohostKind.LanguageServer);
+		// The `haxeon lsp` command the editor starts on Windows, the parent of that VM.
+		if ((exe == "haxeon.exe" || exe == "haxeon") && arguments.length >= 2 && arguments[1] == "lsp")
+			return result(ExohostKind.LanguageServer);
 		if (lowered.indexOf("scripts/devtools.py") >= 0)
 			return result(ExohostKind.HelperProcess);
 		// Helpers that run under a general program (node, hl) and say what they are (ExohostKinds.HELPER_MARKER): the Claude
