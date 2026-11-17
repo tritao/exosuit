@@ -1,5 +1,6 @@
 package exohost;
 
+import build.HashLinkPath;
 import haxe.io.Path;
 import exohost.ExohostRecord.ExohostRecords;
 import exohost.ExohostRecord.ExohostWorkspace;
@@ -102,7 +103,7 @@ class ExohostClient {
 
 	/** Spawns `hl <launcher> daemon`, detached, with exohost's native libraries on the library path. */
 	public static function startDaemon(launcher:String):Void {
-		var child = sys.io.Process.spawn(Sys.executablePath(), [launcher, "daemon"], Path.directory(launcher), [libraryVariable()],
+		var child = sys.io.ChildProcess.spawn(Sys.executablePath(), [launcher, "daemon"], Path.directory(launcher), [libraryVariable()],
 			[nativePath(launcher)], true);
 		child.close();
 	}
@@ -137,7 +138,7 @@ class ExohostClient {
 		1. every directory under `<launcher dir>/native` (exohost's own native packages)
 		2. `lib` beside the launcher's directory (a bundle keeps tools/ and lib/ side by side)
 		3. the directory of the HashLink runtime that runs exohost
-		4. `out` and `.tools/hashlink` under the Haxeon checkout (`HAXEON_HOME`; scripts/exohost.py uses `HAXEON_ROOT`)
+		4. `out` and the VM directory of Haxeon's path table under the Haxeon checkout (`HAXEON_HOME`; scripts/exohost.py uses `HAXEON_ROOT`)
 		5. the inherited value
 	**/
 	public static function nativePath(launcher:String):String {
@@ -157,10 +158,14 @@ class ExohostClient {
 			if (FileSystem.exists(path) && directories.indexOf(path) < 0)
 				directories.push(path);
 		var haxeonHome = nonempty(Sys.getEnv("HAXEON_HOME"));
-		if (haxeonHome != null)
-			for (path in [Path.join([haxeonHome, "out"]), Path.join([haxeonHome, ".tools", "hashlink"])])
+		if (haxeonHome != null) {
+			var paths = [Path.join([haxeonHome, "out"])];
+			if (FileSystem.exists(Path.join([haxeonHome, "cmake", "hashlink-output-paths.txt"])))
+				paths.push(HashLinkPath.directory(haxeonHome));
+			for (path in paths)
 				if (FileSystem.exists(path))
 					directories.push(path);
+		}
 		var inherited = Sys.getEnv(libraryVariable());
 		if (inherited != null && inherited.length > 0)
 			directories.push(inherited);
