@@ -288,7 +288,8 @@ class EditorControl {
 				var id = text(params, "id", null);
 				withTerminal(id, answer, function(pane) {
 					var state:Dynamic = pane.diagnosticState();
-					return {id: id, rows: state.lines, cursor: {row: state.cursorRow, col: state.cursorColumn}, loading: state.loading};
+					return {id: id, rows: state.lines, cursor: {row: state.cursorRow, col: state.cursorColumn}, loading: state.loading,
+						win32Input: state.win32Input};
 				});
 			case "exosuit.dialogs.list":
 				answer({dialogs: dialogs.list()}, null);
