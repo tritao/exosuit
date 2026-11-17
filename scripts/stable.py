@@ -151,15 +151,13 @@ def language_server_build() -> Path:
     haxeon = ROOT / "haxeon"
     program = haxeon_paths.vm_dir(haxeon) / ("haxeon.exe" if os.name == "nt" else "haxeon")
     if not program.is_file():
-        raise RuntimeError(f"Required build output is missing: {program}
-Build Exosuit first with python scripts/build.py")
+        raise RuntimeError(f"Required build output is missing: {program}\nBuild Exosuit first with python scripts/build.py")
     environment = {**os.environ, "HAXEON_HOME": str(haxeon)}
     result = subprocess.run([str(program), "dev", "tool-path", "LspMain"], cwd=ROOT, env=environment, check=False,
                             capture_output=True, text=True)
     path = Path(result.stdout.strip())
     if result.returncode != 0 or not path.is_file():
-        raise RuntimeError(f"Could not build the Haxeon language server for the stable snapshot
-{result.stderr}")
+        raise RuntimeError(f"Could not build the Haxeon language server for the stable snapshot\n{result.stderr}")
     return path
 
 
