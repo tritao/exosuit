@@ -5,8 +5,9 @@ Builds Exosuit on Windows with the Visual Studio 2026 toolchain.
 .DESCRIPTION
 Loads the x64 environment of the newest Visual Studio 2026 (18.x) install, puts its
 bundled CMake first on PATH, and pins the default CMake generator to Visual Studio 2026.
-Then it runs the Haxeon toolchain bootstrap (pinned Haxe, libffi, HashLink, ccache,
-Haxeon native) and builds the agent, exohost and the graphical app.
+Then it runs the Haxeon toolchain bootstrap (pinned Haxe, libffi, ccache), builds Haxeon's
+native preset (the HashLink VM with the Haxeon runtime in it, haxeon.exe and haxeon-cli.hl, in
+haxeon/out/cmake/windows-msvc/hashlink-runtime) and builds the agent, exohost and the graphical app.
 
 The apps' native packages build with Ninja in this environment, through ccache
 (Haxeon's NativeCMakeProvider). A build started without it, such as scripts/run.py
@@ -21,7 +22,7 @@ before building. Benchmark run data is kept. Required after switching toolchains
 because CMake refuses to reuse a build directory made by another generator.
 
 .PARAMETER SkipBootstrap
-Skips the Haxeon toolchain bootstrap and only builds the app.
+Skips the Haxeon toolchain bootstrap and the native preset, and only builds the app.
 
 .EXAMPLE
 scripts/build-windows.ps1 -Clean
@@ -100,5 +101,13 @@ if ($Clean) {
 }
 if (-not $SkipBootstrap) {
     Invoke-Step "Haxeon toolchain bootstrap" { cmake -P (Join-Path $HaxeonDir "cmake/Bootstrap.cmake") }
+    # The bootstrap no longer builds the VM: the windows-msvc preset does (Release; about 10 minutes cold).
+    Push-Location $HaxeonDir
+    try {
+        Invoke-Step "Haxeon native configure" { cmake --preset windows-msvc }
+        Invoke-Step "Haxeon native build" { cmake --build --preset windows-msvc }
+    } finally {
+        Pop-Location
+    }
 }
 Invoke-Step "Exosuit build" { python (Join-Path $RootDir "scripts/build.py") @BuildArguments }
