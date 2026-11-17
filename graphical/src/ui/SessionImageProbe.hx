@@ -32,7 +32,7 @@ class SessionImageProbe {
    var size=decodeSessionPreview(SessionImageBytes.data(bytes),bytes.length,SessionImageBytes.data(pixels),pixels.length);
    var width=size >>> 16, height=size & 65535;
    if (width <= 0 || height <= 0 || width > 512 || height > 512) return null;
-   return Image.create(width,height,ImageFormat.RGBA8,pixels.sub(0,width*height*4));
+   return Image.create(width,height,ImageFormat.Rgba8,pixels.sub(0,width*height*4));
   } catch (_:Dynamic) return null;
  }
  /** Decode an original-resolution bounded image for the workspace editor. */
@@ -42,7 +42,7 @@ class SessionImageProbe {
    var pixels=Bytes.alloc(size.width*size.height*4);
    var actual=decodeSessionFull(SessionImageBytes.data(bytes),bytes.length,SessionImageBytes.data(pixels),pixels.length);
    if ((actual >>> 16) != size.width || (actual & 65535) != size.height) return null;
-   return Image.create(size.width,size.height,ImageFormat.RGBA8,pixels);
+   return Image.create(size.width,size.height,ImageFormat.Rgba8,pixels);
   } catch (_:Dynamic) return null;
  }
  public static function readBounded(path:String):Null<Bytes> {

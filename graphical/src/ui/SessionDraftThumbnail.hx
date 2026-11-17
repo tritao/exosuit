@@ -36,7 +36,7 @@ private class SessionDraftThumbnailState {
    var size = decodeDraftThumbnail(DraftThumbnailBytes.data(bytes), bytes.length, DraftThumbnailBytes.data(pixels), pixels.length);
    var width = size >>> 16, height = size & 65535;
    if (width > 0 && height > 0 && width <= 96 && height <= 96)
-    image = Image.create(width, height, ImageFormat.RGBA8, pixels.sub(0,width*height*4));
+    image = Image.create(width, height, ImageFormat.Rgba8, pixels.sub(0,width*height*4));
   } catch (_:Dynamic) image = null;
  }
  public function dispose():Void { if (image != null) image.dispose(); image = null; }

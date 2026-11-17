@@ -61,8 +61,7 @@ class SessionImageView implements View {
       if (path == null) throw "Image preview is unavailable for this location";
       finish(SessionImageProbe.readBounded(path),null);
      } catch (problem:Dynamic) finish(null,Std.string(problem));
-    },key+"-preview");
-    preview.enabled=!state.loading;
+    },key+"-preview",!state.loading);
     rows.push(new KeyedView("preview",preview));
    }
    if (state.error != null) rows.push(new KeyedView("error", new Text(state.error)));
