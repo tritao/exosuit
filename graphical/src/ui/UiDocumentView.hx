@@ -55,6 +55,12 @@ class UiDocumentView extends View {
 		own pointer and modifier state (the definition underline).
 	**/
 	public final presentation = new haxeon.reactive.Signal<Int>(0);
+	/**
+		This view's caret, selection and text, as a tracked source: its pane's scope reads it, and so does the status bar's
+		scope (`ExosuitApp.statusBar`) while this is the active view. Before each frame `ExosuitApp.submit` bumps it (through
+		RootChangeDetector) when the caret, the selection or the text changed, which runs those scopes again alone.
+	**/
+	public final editing = new haxeon.reactive.Signal<Int>(0);
 	final bufferSubscription:BufferSubscription;
 	final matches:Array<SearchMatch> = [];
 	var searchRevision:Int = 0;
