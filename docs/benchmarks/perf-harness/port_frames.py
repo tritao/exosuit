@@ -161,7 +161,8 @@ def report(first, second=None):
         if not second:
             continue
         if other is None:
-            print("  (no stage %r in the second run)" % stage["stage"])
+            print("  MISSING: no stage %r in the second run" % stage["stage"])
+            verdicts.append(stage["stage"] + ": missing in the second run")
             continue
         print("  frames %d  fps %.2f   interval ms p50/p90/max %s   input->frame ms %s   inputs %d, %d without a frame   <- second"
               % (other["frames"], other["fps"], fmt(other["interval_ms"]), fmt(other["input_ms"]), other["inputs"], other["inputs_without_frame"]))
@@ -177,6 +178,12 @@ def report(first, second=None):
             found.append("%d inputs drew no frame (second: %d)" % (stage["inputs_without_frame"], other["inputs_without_frame"]))
         print("  " + ("WORSE: " + "; ".join(found) if found else "ok"))
         verdicts += [stage["stage"] + ": " + f for f in found]
+    if second:
+        mine = {stage["stage"] for stage in first["stages"]}
+        for stage in second["stages"]:
+            if stage["stage"] not in mine:
+                print("\n[%s] MISSING: in the second run only; the first run's scenario stopped before it" % stage["stage"])
+                verdicts.append(stage["stage"] + ": missing in the first run")
     for run in [first] + ([second] if second else []):
         census = run.get("census")
         if not census:

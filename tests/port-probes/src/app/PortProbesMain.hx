@@ -12,7 +12,7 @@ import probes.TrackedScopeProbe;
 import probes.TreeExpansionProbe;
 
 /**
-	Headless probes of the haxeon UI behaviours the Exosuit port relies on (.port/docs/C-port-plan.md section 5). Each
+	Headless probes of the haxeon UI behaviours the Exosuit port relies on. Each
 	line states a rule and what this run observed; exit 1 when a rule no longer holds.
 **/
 class PortProbesMain {

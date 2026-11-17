@@ -8,7 +8,7 @@ import haxeon.ui.widgets.text.Text;
 
 /**
 	Open point 5 (trap T3): a tracked write during the root build. What does `submitCached` do, and can the context
-	submit again afterwards? (What `DesktopUiHost` then does with the error is answered from code in C-probe-results.md.)
+	submit again afterwards?
 	Also trap T5: a write wrapped in `withoutTracking` after a read of the same source in the same build.
 **/
 class BuildWriteProbe {

@@ -7,7 +7,7 @@ import haxeon.ui.widgets.text.Text;
 
 /**
 	Open point 8 (trap T20): the FPS title. A reuse frame runs no build; does it still return the tree (so the host counts
-	it as rendered, see C-probe-results.md for the host side)? A `BoundText` over a `Signal<String>` (plan D5): an equal
+	it as rendered)? A `BoundText` over a `Signal<String>` (plan D5): an equal
 	write asks for nothing, a new value asks for a frame and rewrites the text without a root build.
 **/
 class ReuseFrameProbe {
@@ -40,9 +40,10 @@ class ReuseFrameProbe {
 		Report.check(8, "an equal label write asks for nothing (T20: keep the once-a-second scheduleFrame)",
 			harness.selfFrames == frames, "selfFrames+=" + (harness.selfFrames - frames));
 		builds = harness.rootBuilds;
+		var before = harness.root;
 		harness.scheduleFrame();
 		root = harness.submit();
-		Report.check(8, "a scheduleFrame() with nothing changed is a reuse frame", harness.rootBuilds == builds && root == harness.root,
+		Report.check(8, "a scheduleFrame() with nothing changed is a reuse frame", harness.rootBuilds == builds && root == before,
 			"rootBuilds+=" + (harness.rootBuilds - builds));
 		harness.dispose();
 	}

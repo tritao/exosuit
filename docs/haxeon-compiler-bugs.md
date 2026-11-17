@@ -9,8 +9,8 @@ and the status.
 
 ## Open
 
-Found during the port to haxeon upstream `ff7e29aac` + our commits (`exosuit-upstream` 5d2c7ab19), 2026-11-17. The
-repro folders named below are under `.port/out/` in the port worktree (not in git); each entry has the minimal source.
+Found during the port to haxeon upstream `ff7e29aac` + our commits (`exosuit-upstream` 5d2c7ab19), 2026-11-17. Each
+entry has the minimal source.
 
 ### An empty array literal nested in an object inside an array: "element type ... reached IR generation unresolved"
 

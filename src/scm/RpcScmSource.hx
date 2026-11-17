@@ -463,7 +463,7 @@ class RpcScmSource implements ScmSource implements ScmRemoteReader {
 		if (!disposed && job.finish()) complete(new ScmJobResult<T>(job.generation, value, error));
 	}
 
-	/** `Array.remove` on this list fails IR verification inside the generic job instances (HAXEON-BUG, C-handoffs.md); a loop does not. */
+	/** `Array.remove` on this list fails IR verification inside the generic job instances (HAXEON-BUG, docs/haxeon-compiler-bugs.md); a loop does not. */
 	function forgetJob(job:ScmJob<Dynamic>):Void {
 		for (index in 0...activeJobs.length) if (activeJobs[index] == job) { activeJobs.splice(index, 1); break; }
 	}
