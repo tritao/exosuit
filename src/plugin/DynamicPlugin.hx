@@ -2,6 +2,7 @@ package plugin;
 
 import command.CommandContext;
 import compiler.Compiler;
+import compiler.Compiler.CompileResult;
 import compiler.runtime.CompilerIntrinsics;
 import compiler.compilation.BackendArtifact.BackendArtifacts;
 import compiler.core.Diagnostic.CompileError;
@@ -119,7 +120,7 @@ class DynamicPlugin implements Plugin {
 		var generation = observationGeneration;
 		compiling = true;
 		haxeon.Threads.create("exo.plugin.build", function() {
-			var build:Null<compiler.CompileResult> = null, error:Null<String> = null;
+			var build:Null<CompileResult> = null, error:Null<String> = null;
 			compilerMutex.acquire();
 			try {
 				if (updateCompilerSources()) build = compilePlugin();
@@ -192,7 +193,7 @@ class DynamicPlugin implements Plugin {
 		return publish(finished.build);
 	}
 
-	function publish(build:compiler.CompileResult):Bool {
+	function publish(build:CompileResult):Bool {
 		try {
 			var artifact = BackendArtifacts.hashLink(build.artifact), patchBytes = artifact.patchBytes;
 			if (patchBytes != null && !build.requiresReload) {
@@ -253,7 +254,7 @@ class DynamicPlugin implements Plugin {
 	public function busy():Bool
 		return compiling;
 
-	function compilePlugin():compiler.CompileResult {
+	function compilePlugin():CompileResult {
 		try {
 			return compiler.compile(manifest.entry);
 		} catch (error:CompileError) {
@@ -262,7 +263,7 @@ class DynamicPlugin implements Plugin {
 		}
 	}
 
-	function reload(build:compiler.CompileResult):Void {
+	function reload(build:CompileResult):Void {
 		var artifact = BackendArtifacts.hashLink(build.artifact),
 			previous = requireModule(),
 			previousIds = functionIds,
