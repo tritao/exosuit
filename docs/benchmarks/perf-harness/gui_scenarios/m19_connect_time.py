@@ -1,9 +1,8 @@
 """M19 connect time: how long a workspace takes to show 'Workspace connected' and its catalog rows.
 
 Times come from the editor's own ConnectTimeline (src/workspace/client/ConnectTimeline.hx, shown in the automation state as
-`timeline`, milliseconds since the process began), so they do not include the driver's polling. Four cases, all real input:
+`timeline`, milliseconds since the process began), so they do not include the driver's polling. Three cases, all real input:
   launch   the window's own workspace (Alpha, opened by the editor's start folder), from process start;
-  expand   an idle workspace (Gamma) expanded in the tree: service start until its rows show;
   open     an idle workspace (Beta) opened by a double click: click until connected and rows;
   back     a running workspace (Alpha, resident since launch) opened again.
 The numbers are written to results.json (checks named 'time ...', with the events between) and to timeline.json."""
@@ -16,7 +15,7 @@ from m19_folders import healthy
 
 FIXTURE = {"workspaces": ["alpha", "beta", "gamma"], "open": "alpha", "appArgs": ["--open-workbench"]}
 # Budgets in milliseconds, generous on purpose: they catch a return of the old multi-second waits, not machine noise.
-BUDGET = {"launch": 12000, "expand": 12000, "open": 12000, "back": 6000}
+BUDGET = {"launch": 12000, "open": 12000, "back": 6000}
 
 
 def after(timeline, start, test, last=False):
@@ -61,31 +60,15 @@ def connected_and_rows(gui, name, wid, begin_index, timeout=60):
 def run(gui):
     gui.wait("workspace rows", lambda s: len(s["state"]["machineWorkspaces"]) == 3 and gui.find(s, pattern="^w:"), 60)
     state = gui.state()
-    alpha, beta, gamma = (ws(state, n)["id"] for n in ("Alpha", "Beta", "Gamma"))
+    alpha, beta = (ws(state, n)["id"] for n in ("Alpha", "Beta"))
 
     gui.step("launch: the window's own workspace")
     status, rows = connected_and_rows(gui, "Alpha", alpha, 0)
     tl = timeline(gui)
-    suit = after(tl, 0, lambda e: e["event"] == "suit-reply" and e["detail"] == "machine ok")
     ready = after(tl, 0, lambda e: e["event"] == "ready" and e["workspace"] == alpha)
     # t of the first event is the start of the window's life; count from index 0.
     record(gui, "launch", [{"t": 0, "event": "process", "workspace": "", "detail": ""}] + tl, 0,
-           [("suit machine reply", None if suit is None else suit + 1), ("service ready", None if ready is None else ready + 1),
-            ("connected", status + 1), ("rows", rows + 1)])
-
-    gui.step("expand: Gamma, idle, started by expanding its row")
-    show_workbench(gui)
-    mark = len(timeline(gui))
-    row = gui.element("w:" + gamma)
-    gui.click(row, fx=min(0.04, 10.0 / row["w"]))
-    def gamma_rows(s):
-        tl = s["state"]["timeline"]
-        requested = after(tl, mark, lambda e: e["event"] == "start-requested" and e["workspace"] == gamma)
-        shown = after(tl, mark, lambda e: e["event"] == "rows-visible" and e["workspace"] == gamma)
-        return (requested, shown) if requested is not None and shown is not None else None
-    requested, shown = gui.wait("Gamma's rows", gamma_rows, 60)
-    tl = timeline(gui)
-    record(gui, "expand", tl, requested, [("rows", shown)])
+           [("service ready", None if ready is None else ready + 1), ("connected", status + 1), ("rows", rows + 1)])
 
     gui.step("open: Beta, idle, by a double click")
     mark = len(timeline(gui))

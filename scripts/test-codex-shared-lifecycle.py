@@ -2,7 +2,7 @@
 """Opt-in real inference acceptance; owns only one isolated test thread.
 
 Never stops/restarts the shared daemon or changes global Codex settings.
-The test thread remains in Codex history for inspection.
+The test thread remains in the Codex history of CODEX_HOME (one of the test's own) for inspection.
 """
 import argparse
 import json
@@ -10,10 +10,15 @@ import os
 from pathlib import Path
 import selectors
 import subprocess
+import sys
 import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'scripts'))
+from test_driver import signed_in_home
+# The real Codex keeps its threads in CODEX_HOME: one of the test's own, never ~/.codex.
+signed_in_home('CODEX_HOME')
 LIMIT = 262144
 
 

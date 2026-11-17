@@ -12,7 +12,7 @@ every text of the rendered page is in the PDF and that nothing lies outside a pa
 PDF page to <Run>\pdfcheck\pNN.png. Edge runs under the crash-dialog guard with its own temporary profile.
 
 .EXAMPLE
-pwsh -NoProfile -File docs/benchmarks/build-report/report.ps1 -Run $env:LOCALAPPDATA\Exosuit\build-reports\exosuit-fresh
+pwsh -NoProfile -File docs/benchmarks/build-report/report.ps1 -Run $env:TEMP\exosuit-build-reports\exosuit-fresh
 pwsh -NoProfile -File docs/benchmarks/build-report/report.ps1 -Run <dir> -Baseline docs/benchmarks/build-report/baselines/2026-10-30 -Pdf
 #>
 param(

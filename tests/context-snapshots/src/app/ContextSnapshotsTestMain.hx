@@ -5,35 +5,25 @@ import session.ContextSnapshotStore;
 import session.WorkspaceSession;
 import sys.FileSystem;
 import sys.io.File;
+import testing.HeadlessWorkbench;
 import ui.UiWorkbenchHost;
 import workspace.ContextKey;
 
 private typedef Window = {host:UiWorkbenchHost, store:ContextSnapshotStore};
 
 /**
-	Phase 8 of docs/roadmap/19-machine-workspaces.md, the restore part: one snapshot file per context, last write
+	Per-window contexts, the restore part: one snapshot file per context, last write
 	wins per group. A "window" here is a real workbench host plus its own store handle on the shared folder, doing
 	what SessionPersistence does (split the host's lines, `sync`) and what a restart does (`mergedLayout`, restore).
 **/
 class ContextSnapshotsTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 
-	static function newHost(workspace:workspace.Workspace, dock:haxeon.ui.docking.DockWorkspaceModel):UiWorkbenchHost
-		return new UiWorkbenchHost(new style.Theme(), new core.FocusManager(), workspace, new config.Settings(), function() {}, {
-			model: dock, focusEditor: function(_) {}, editorPreedit: function(_, _) {},
-			toggleSidebar: function() return false, activateExplorer: function() {},
-			activateProblems: function() {}, activateBuild: function() {}
-		});
-
-	static function freshDock():haxeon.ui.docking.DockWorkspaceModel {
-		var dock = new haxeon.ui.docking.DockWorkspaceModel();
-		dock.register(new haxeon.ui.docking.DockPanelDescriptor("editor", "Editor"));
-		dock.setDefaultLayout(haxeon.ui.docking.DockNode.Panel("editor"));
-		return dock;
-	}
+	static function newHost(workspace:workspace.Workspace):UiWorkbenchHost
+		return HeadlessWorkbench.create(new style.Theme(), new core.FocusManager(), workspace, new config.Settings());
 
 	static function window(workspace:workspace.Workspace, folder:String, focus:String):Window {
-		var host = newHost(workspace, freshDock());
+		var host = newHost(workspace);
 		host.initializeContext(focus);
 		return {host: host, store: new ContextSnapshotStore(folder)};
 	}
@@ -48,7 +38,7 @@ class ContextSnapshotsTestMain {
 
 	/** A restart: a new window restores `session` (as decoded from its encoding) with the files in `folder`. */
 	static function restart(workspace:workspace.Workspace, folder:String, session:WorkspaceSession, focus:String):UiWorkbenchHost {
-		var host = newHost(workspace, freshDock());
+		var host = newHost(workspace);
 		host.initializeContext(focus);
 		host.restoreSessionLines(WorkspaceSession.decode(session.encode()).mergedLayout(new ContextSnapshotStore(folder)));
 		return host;
@@ -79,7 +69,37 @@ class ContextSnapshotsTestMain {
 		return count;
 	}
 
+	/**
+		`seed SPEC STATE`: the editor state a window leaves after it opened the tabs SPEC lists ({machine, open: {id, name,
+		folders}, contexts: [{workspace, group, files}]}, the window on workspace `open`, the first context focused): one
+		file per context in STATE/contexts and
+		STATE/session.conf, written by the code the editor saves with. The ws_open GUI scenario seeds its run with it.
+	**/
+	static function seed(specPath:String, state:String):Int {
+		var spec:Dynamic = haxe.Json.parse(File.getContent(specPath));
+		var contexts:Array<Dynamic> = spec.contexts;
+		var workspace = new workspace.Workspace(new syntax.SyntaxRegistry());
+		var keys = [for (context in contexts) ContextKey.make(spec.machine, context.workspace, context.group)];
+		var w = window(workspace, state + "/contexts", keys[0]);
+		for (index in 0...contexts.length) {
+			go(w.host, keys[index]);
+			var files:Array<String> = contexts[index].files;
+			for (path in files) w.host.openFile(workspace.fileSystem.normalize(path), false);
+		}
+		go(w.host, keys[0]);
+		var session = save(w);
+		session.machineId = spec.machine;
+		// The workspace the window shows, as a window on it saves it: the window restarts there.
+		var open:Dynamic = spec.open;
+		var roots:Array<String> = open.folders;
+		session.savedWorkspace = new workspace.SavedWorkspace(open.id, open.name, roots);
+		require(session.save(state + "/session.conf"), "session.conf was not written");
+		return 0;
+	}
+
 	static function main():Int {
+		var args = Sys.args();
+		if (args.length == 3 && args[0] == "seed") return seed(args[1], args[2]);
 		var base = "build/context-snapshots";
 		removeFolder(base);
 		FileSystem.createDirectory(base);
@@ -102,8 +122,8 @@ class ContextSnapshotsTestMain {
 		var liveArguments:Array<String> = haxe.Json.parse(live[3]);
 		require(workspace.NewWindow.contextOf(liveArguments) == g1, "the live host's arguments do not carry the context: " + live[3]);
 		require(workspace.NewWindow.arguments("main.hl", g1, "", null).join("|") == plain.join("|"), "an unset live module changed the plain command line");
-		require(workspace.NewWindow.automationDirectory(null, 1) == "" && workspace.NewWindow.automationDirectory("d", 1) == "d"
-			&& workspace.NewWindow.automationDirectory("d", 2) == "d-2", "automation folders of new windows");
+		var opening = workspace.NewWindow.arguments("main.hl", g1, null, null, ["C:/a.txt"]);
+		require(opening.join("|") == "main.hl|--context=" + g1 + "|C:/a.txt", "a new window's paths: " + opening.join("|"));
 
 		// File names: stable, safe, distinct, and not confused by case.
 		require(ContextSnapshotStore.fileName(g1) == ContextSnapshotStore.fileName(g1), "file name is not stable");
@@ -208,7 +228,7 @@ class ContextSnapshotsTestMain {
 		var migrating = new ContextSnapshotStore(oldFolder);
 		var merged = decodedOld.mergedLayout(migrating);
 		require(ContextLayoutStore.read(merged).layouts.exists(g2), "old session.conf contexts were not kept when no files exist");
-		var migrated = newHost(workspace, freshDock());
+		var migrated = newHost(workspace);
 		migrated.initializeContext(g1);
 		migrated.restoreSessionLines(merged);
 		require(tabs(migrated, g2).join(",") == file("b"), "migrated group lost its tabs");

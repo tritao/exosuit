@@ -28,7 +28,7 @@ param(
 	[string[]]$UiPreviewArgs = @(),
 	[string]$UiPreviewTitle = 'Exosuit UI exploration',
 	# Drive the editor with a GUI scenario (gui_scenarios/<Drive>.py, gui_driver.py) instead of the profiler scenario:
-	# real OS input, positions and state from the app's automation snapshot, isolated state; no trace or metrics.
+	# over suit's control plane (synthetic input, the app's ui.snapshot), isolated state and suit; no trace or metrics.
 	[string]$Drive = '',
 	[int]$DriveSeconds = 100
 )
@@ -159,7 +159,7 @@ public static class PreviewWindowBounds {
 				if ($state.editor) {
 					$state.editorAt = $elapsed
 					Note "editor started: pid $($state.editor.ProcessId) after $([int]$elapsed) s"
-					$state.scenario = Start-Process python -ArgumentList @('-I', $driveScript, '--pid', $state.editor.ProcessId, '--dir', (Join-Path $out 'automation'),
+					$state.scenario = Start-Process python -ArgumentList @('-I', $driveScript, '--pid', $state.editor.ProcessId,
 						'--out', (Join-Path $out 'result'), '--deadline', $DriveSeconds, '--wait-window', '60') `
 						-RedirectStandardOutput (Join-Path $out 'scenario.log') -RedirectStandardError (Join-Path $out 'scenario.err') -PassThru -WindowStyle Hidden
 				}
@@ -177,6 +177,8 @@ public static class PreviewWindowBounds {
 		$result = Invoke-Guarded -FilePath python -ArgumentList $runArgs -WorkingDirectory $root -TimeoutSeconds $DeadlineSeconds -LogPath $log -OnTick $tickDrive
 		Format-GuardResult $result | Set-Content (Join-Path $out 'guard.txt')
 		Note (Format-GuardResult $result)
+		# A scenario may end the editor itself (suitctl quit) and still have checks to record: it gets 20 s to finish.
+		if ($state.scenario -and -not $state.scenario.HasExited -and $result.ExitCode -notin 124, 125) { [void]$state.scenario.WaitForExit(20000) }
 		if ($state.scenario -and -not $state.scenario.HasExited) { Stop-Process -Id $state.scenario.Id -Force -ErrorAction SilentlyContinue }
 		if ($state.scenario) { Get-Content (Join-Path $out 'scenario.log') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ } }
 		if ($result.ExitCode -in 124, 125) { Note "run ended by the guard (exit $($result.ExitCode))" }
@@ -190,7 +192,15 @@ public static class PreviewWindowBounds {
 	Note "CPU at $load% before launch"
 	"cpu_before_launch=$load" | Set-Content (Join-Path $out 'cpu.txt')
 	Note "measuring $root ($Profile$(if ($Live) { ', live' }), file $File)"
+	# All state of the run is its own (as gui_fixture.py sets it for -Drive): the editor's, the workspace services' and
+	# suit's, so the editor neither reaches the user's suit nor writes under %LOCALAPPDATA%\Exosuit.
 	$env:PRAGTICAL_PORTABLE = Join-Path $out 'state'
+	$env:EXOSUIT_AGENT_STATE_HOME = Join-Path $out 'agent-state'
+	$env:EXOSUIT_SCRATCH_HOME = Join-Path $out 'scratch'
+	$env:EXOSUIT_SUIT_HOME = Join-Path $out 'suit-home'
+	$env:EXOSUIT_SUIT_SCAN = '0'
+	$env:EXOSUIT_SUIT_TRAY = '0'
+	$env:EXOSUIT_SUIT_LAUNCHER = Join-Path $root 'suit\build\host\main.hl'
 	$runArgs = @('scripts/run.py')
 	if ($Live) { $runArgs += '--live' }
 	$runArgs += @("--profile=$Profile", $root, (Join-Path $root $File))

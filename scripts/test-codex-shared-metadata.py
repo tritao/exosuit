@@ -3,6 +3,10 @@
 import json,os,queue,shutil,subprocess,sys,tempfile,threading
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'scripts'))
+from test_driver import signed_in_home
+# The real Codex keeps its threads in CODEX_HOME: one of the test's own, never ~/.codex.
+signed_in_home('CODEX_HOME')
 peers=[]
 servers=[]
 def codex_command():

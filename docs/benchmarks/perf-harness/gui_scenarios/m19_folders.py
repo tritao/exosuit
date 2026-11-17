@@ -1,7 +1,7 @@
 """M19 folders: attach a second folder to a workspace, see Files and Search show both, then detach it.
 
-Real input: right-click the workspace row, click "Attach Folder...", (the native folder dialog is replaced by the path
-the driver leaves in the automation folder), then the Files and Search tabs, then "Detach Folder..." and the quick pick."""
+Real input: right-click the workspace row, click "Attach Folder...", (the driver answers the folder dialog over the
+protocol, gui.answer_dialog), then the Files and Search tabs, then "Detach Folder..." and the quick pick."""
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,15 +19,14 @@ def open_by_double_click(gui, wid, name):
 
 def attach_extra(gui, wid, extra, name):
     show_workbench(gui)
-    with open(os.path.join(gui.dir, "pick-folder.txt"), "w") as f:
-        f.write(extra)
     menu(gui, "w:" + wid, "Attach Folder" + ELLIPSIS)
+    gui.answer_dialog(paths=[extra])
     return gui.check("%s now has two folders" % name, lambda s: len(ws(s["state"], name)["folders"]) == 2, 15,
                      detail=lambda s: ws(s["state"], name)["folders"])
 
 
 def healthy(gui, label):
-    time.sleep(3)  # a failed (re)start of the manager is reported a moment after the switch
+    time.sleep(3)  # a failed (re)start of the workspace's service is reported a moment after the switch
     gui.check(label + ": the window is not 'Workspace unavailable'", lambda s: not s["state"]["workspaceError"], 8,
               detail=lambda s: (s["state"]["workspaceError"], s["state"]["notifications"]))
 

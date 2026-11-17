@@ -29,12 +29,12 @@ runtime, the Haxeon CLI and language server), since measured builds skip it.
 # A fresh checkout with a bootstrapped haxeon (a junction to a bootstrapped haxeon, or run bootstrap.ps1 first).
 $tool = 'docs/benchmarks/build-report'
 pwsh -NoProfile -File $tool/bootstrap.ps1 -Worktree C:\src\exosuit-fresh          # optional, timed separately
-pwsh -NoProfile -File $tool/measure.ps1 -Worktree C:\src\exosuit-fresh -Kind cold -CcacheDir $env:LOCALAPPDATA\Exosuit\build-reports\exosuit-fresh\ccache
-pwsh -NoProfile -File $tool/measure.ps1 -Worktree C:\src\exosuit-fresh -Kind noop -CcacheDir $env:LOCALAPPDATA\Exosuit\build-reports\exosuit-fresh\ccache
-pwsh -NoProfile -File $tool/measure.ps1 -Worktree C:\src\exosuit-fresh -Kind warm -CcacheDir $env:LOCALAPPDATA\Exosuit\build-reports\exosuit-fresh\ccache
+pwsh -NoProfile -File $tool/measure.ps1 -Worktree C:\src\exosuit-fresh -Kind cold -CcacheDir $env:TEMP\exosuit-build-reports\exosuit-fresh\ccache
+pwsh -NoProfile -File $tool/measure.ps1 -Worktree C:\src\exosuit-fresh -Kind noop -CcacheDir $env:TEMP\exosuit-build-reports\exosuit-fresh\ccache
+pwsh -NoProfile -File $tool/measure.ps1 -Worktree C:\src\exosuit-fresh -Kind warm -CcacheDir $env:TEMP\exosuit-build-reports\exosuit-fresh\ccache
 
 # The page, compared with the 2026-10-30 baseline, plus the PDF:
-pwsh -NoProfile -File $tool/report.ps1 -Run $env:LOCALAPPDATA\Exosuit\build-reports\exosuit-fresh -Baseline $tool/baselines/2026-10-30 -Pdf
+pwsh -NoProfile -File $tool/report.ps1 -Run $env:TEMP\exosuit-build-reports\exosuit-fresh -Baseline $tool/baselines/2026-10-30 -Pdf
 ```
 
 Runs start at once. Each records what else shared the machine (the CPU baseline before the build, busy cores
@@ -49,7 +49,7 @@ idle timeout, or stop it.
 | `-Worktree` | (required) | The Exosuit checkout to build. Its `haxeon` must be bootstrapped (`haxeon/out/haxeon-cli.hl`). |
 | `-Kind` | `cold` | `cold`: no app build folders may exist. `noop`: a build right after another. `warm`: deletes `agent/build`, `suit/build` and `graphical/build` first. |
 | `-Name` | the kind | The run's name: the prefix of its files, so several runs of one kind can share a folder. |
-| `-Out` | `%LOCALAPPDATA%\Exosuit\build-reports\<checkout folder name>` | The run folder. Keep it out of the repository: a cold run's process samples are several MB. |
+| `-Out` | `%TEMP%\exosuit-build-reports\<checkout folder name>` | The run folder. Keep it out of the repository: a cold run's process samples are several MB. |
 | `-CcacheDir` | the user's cache | ccache's directory for this build. A separate one keeps other builds out of the counters; an empty one makes a cold build cold. |
 | `-TimeoutSeconds` | 1500 | The guard's hard limit for the build (exit 124 when it is reached). |
 | `-BaselineSeconds` | 30 | How long the sampler records before the build starts, to show the machine's load. |

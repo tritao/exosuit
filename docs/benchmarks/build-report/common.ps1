@@ -4,10 +4,11 @@
 $BuildReportGit = @('-c', 'diff.ignoreSubmodules=all', '-c', 'submodule.recurse=false')
 $BuildReportGuard = Join-Path $PSScriptRoot '..\perf-harness\run-guarded.ps1'
 
-# The run folder: -Out when given, else %LOCALAPPDATA%\Exosuit\build-reports\<checkout folder name>. Created; returned
+# The run folder: -Out when given, else %TEMP%\exosuit-build-reports\<checkout folder name> (never Exosuit's state
+# folder %LOCALAPPDATA%\Exosuit). Created; returned
 # as a full path.
 function Resolve-RunFolder([string]$Worktree, [string]$Out) {
-	if (-not $Out) { $Out = Join-Path $env:LOCALAPPDATA ('Exosuit\build-reports\' + (Split-Path $Worktree -Leaf)) }
+	if (-not $Out) { $Out = Join-Path ([IO.Path]::GetTempPath()) ('exosuit-build-reports\' + (Split-Path $Worktree -Leaf)) }
 	New-Item -ItemType Directory -Force $Out | Out-Null
 	(Resolve-Path $Out).Path
 }

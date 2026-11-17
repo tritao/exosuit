@@ -3,6 +3,10 @@
 import json,os,selectors,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'scripts'))
+from test_driver import signed_in_home
+# The real Codex keeps its threads in CODEX_HOME: one of the test's own, never ~/.codex.
+signed_in_home('CODEX_HOME')
 codex=shutil.which(os.environ.get('EXOSUIT_CODEX_BIN','codex'))
 if not codex: raise SystemExit('Install Codex to run this metadata-only acceptance test')
 subprocess.run([codex,'app-server','daemon','start'],check=True,capture_output=True,timeout=30)
