@@ -2,7 +2,6 @@ package app;
 
 import process.OwnedProcess;
 import process.ProcessManager;
-import sys.io.Process;
 import sys.io.ChildProcess;
 import haxe.io.Bytes;
 import build.BuildLog;
@@ -26,7 +25,7 @@ class ProcessTestMain {
 	}
 
 	static function streamingBytes(fixture:String):Void {
-		var child = Process.spawn(fixture, ["copy"]), input = Bytes.alloc(131072), output = Bytes.alloc(131072), spare = Bytes.alloc(1);
+		var child = ChildProcess.spawn(fixture, ["copy"]), input = Bytes.alloc(131072), output = Bytes.alloc(131072), spare = Bytes.alloc(1);
 		for (index in 0...input.length) input.set(index, index & 255);
 		require(child.readStdout(output, 0, 1) == -2, "empty live pipe was not would-block");
 		var sent = 0, received = 0, closedInput = false, partial = false, eof = false;
@@ -55,7 +54,7 @@ class ProcessTestMain {
 		var readFailed = false;
 		try { child.readStdout(output, 0, 1); } catch (_:Dynamic) { readFailed = true; }
 		require(readFailed, "disposed streaming handle remained usable");
-		var broken = Process.spawn(fixture, ["exit", "0"]);
+		var broken = ChildProcess.spawn(fixture, ["exit", "0"]);
 		deadline = Sys.time() + 5;
 		while (broken.pollExit() == -1 && Sys.time() < deadline) {}
 		require(broken.pollExit() == 0, "broken-pipe fixture did not exit");
@@ -64,7 +63,7 @@ class ProcessTestMain {
 		require(writeFailed, "broken stdin pipe did not throw safely");
 		broken.close();
 		var spawnFailed = false;
-		try { Process.spawn("/definitely/missing/exosuit-process", []); } catch (error:Dynamic) {
+		try { ChildProcess.spawn("/definitely/missing/exosuit-process", []); } catch (error:Dynamic) {
 			spawnFailed = true;
 			var message = Std.string(error);
 			require(StringTools.startsWith(message, "Could not start process") && message.indexOf(": ") >= 0 && message.length < 256,
