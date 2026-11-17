@@ -61,37 +61,20 @@ class SuitClassifier {
 		if (program < 0 && (exe == "exosuit-agent.exe" || exe == "exosuit-agent"))
 			program = 0;
 		if (program >= 0) {
-			// `--machine` is a short helper that lists workspaces, not a workspace daemon.
-			if (arguments.indexOf("--machine") > program)
+			// The warm spare (`--spare`) until it adopts a workspace; its registry record then names the workspace.
+			if (arguments.indexOf("--spare") > program)
+				return result(SuitKind.WorkspaceSpare);
+			// A workspace's service: `--workspace ID [--folder F]... [--scratch S]`. Its state folder and generation are
+			// in its registry record.
+			var workspace = arguments.indexOf("--workspace");
+			if (workspace < program)
 				return null;
-			var manager = arguments.indexOf("--manager");
-			if (manager > program) {
-				var stateIndex = arguments.indexOf("--state-dir");
-				var generationIndex = arguments.indexOf("--generation");
-				// `--manager FOLDER`, `--manager --workspace ID [--folder F]... [--scratch S]`, or `--manager --from-state DIR`.
-				var workspace = at(arguments, manager + 1) == "--workspace" ? at(arguments, manager + 2) : null;
-				var root = workspace == null ? at(arguments, manager + 1) : firstFolder(arguments);
-				if (root == "--from-state") {
-					root = null;
-					stateIndex = manager + 1;
-				}
-				return {
-					kind: SuitKind.WorkspaceManager,
-					root: root,
-					stateDir: stateIndex > 0 ? at(arguments, stateIndex + 1) : null,
-					generation: generationIndex > 0 ? at(arguments, generationIndex + 1) : null,
-					workspace: workspace,
-					terminalDir: null
-				};
-			}
-			// The daemon: SOCKET PORT CREDENTIAL SEED [DATABASE [ROOT [INSTANCE ...]]].
-			var credential = at(arguments, program + 3);
 			return {
 				kind: SuitKind.WorkspaceHost,
-				root: at(arguments, program + 6),
-				stateDir: credential == null ? null : Path.directory(credential),
-				generation: at(arguments, program + 7),
-				workspace: null,
+				root: firstFolder(arguments),
+				stateDir: null,
+				generation: null,
+				workspace: at(arguments, workspace + 1),
 				terminalDir: null
 			};
 		}
@@ -199,7 +182,7 @@ class SuitClassifier {
 		return state.length == 0 ? null : state;
 	}
 
-	/** A workspace manager's first `--folder`, else its `--scratch`: the folder it starts in. */
+	/** A workspace service's first `--folder`, else its `--scratch`: the folder it starts in. */
 	static function firstFolder(arguments:Array<String>):Null<String> {
 		var folder = arguments.indexOf("--folder");
 		if (folder < 0) folder = arguments.indexOf("--scratch");

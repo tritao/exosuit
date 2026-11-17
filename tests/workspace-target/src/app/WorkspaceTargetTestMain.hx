@@ -1,10 +1,9 @@
 package app;
 
 import sys.FileSystem;
-import workspace.client.MachineWorkspaces;
 import workspace.client.WorkspaceServiceTarget;
 
-/** How the editor names a machine workspace's service to the agent, and which discovery descriptors it accepts. */
+/** How a machine workspace's service is named to the agent: its id, the folders that exist, and its scratch folder. */
 class WorkspaceTargetTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 
@@ -15,7 +14,7 @@ class WorkspaceTargetTestMain {
 		for (folder in [one, two, scratch]) FileSystem.createDirectory(folder);
 		try run(one, two, scratch) catch (failure:Dynamic) { cleanup(base); throw failure; }
 		cleanup(base);
-		Sys.println("PASS: a machine workspace is named to the agent by its id with its existing folders; descriptors of another service are refused");
+		Sys.println("PASS: a machine workspace is named to the agent by its id with its existing folders and scratch folder");
 	}
 
 	static function cleanup(base:String):Void {
@@ -26,34 +25,21 @@ class WorkspaceTargetTestMain {
 	static function run(one:String, two:String, scratch:String):Void {
 		var gone = one + "/missing";
 		var target = WorkspaceServiceTarget.forWorkspace("w1", [one, gone, two, one], scratch);
-		require(target.folders.length == 2, "missing and repeated folders stay in the target: " + target.folders.length + " " + one + " " + FileSystem.exists(one) + " " + FileSystem.isDirectory(one));
-		var arguments = target.managerArguments();
-		require(arguments.slice(0, 3).join(" ") == "--manager --workspace w1", "workspace arguments: " + arguments.join(" "));
-		require(arguments.indexOf("--folder") == 3 && arguments.lastIndexOf("--folder") == 5 && arguments.indexOf("--scratch") == 7,
-			"folders then scratch: " + arguments.join(" "));
+		require(target.folders.length == 2, "missing and repeated folders stay in the target: " + target.folders.join(", "));
+		var arguments = target.serviceArguments();
+		require(arguments.slice(0, 2).join(" ") == "--workspace w1", "workspace arguments: " + arguments.join(" "));
+		require(arguments.indexOf("--folder") == 2 && arguments.lastIndexOf("--folder") == 4 && arguments.indexOf("--scratch") == 6
+			&& arguments.length == 8, "folders then scratch: " + arguments.join(" "));
+		require(arguments[3] == target.folders[0] && arguments[5] == target.folders[1] && arguments[7] == target.scratch, "argument values");
 		require(target.root() == target.folders[0], "the service starts in the first folder");
 		require(target.signature() != WorkspaceServiceTarget.forWorkspace("w1", [two, one], scratch).signature(), "folder order is part of the signature");
+		require(target.signature() != WorkspaceServiceTarget.forWorkspace("w1", [one, two], null).signature(), "the scratch folder is part of the signature");
+		require(target.signature() == WorkspaceServiceTarget.forWorkspace("w1", [one, two, gone], scratch).signature(), "a missing folder changed the signature");
 
 		var folderless = WorkspaceServiceTarget.forWorkspace("w2", [], scratch);
-		require(folderless.root() != null && folderless.managerArguments().indexOf("--folder") < 0, "a folderless workspace starts in its scratch folder");
+		require(folderless.root() == folderless.scratch && folderless.serviceArguments().indexOf("--folder") < 0,
+			"a folderless workspace starts in its scratch folder");
 		require(WorkspaceServiceTarget.forWorkspace("w3", [gone], null).root() == null, "nothing to start in");
-		require(target.choiceKey() == "workspace:w1" && WorkspaceServiceTarget.choiceKeyOf("", one) == one, "choice keys");
-
-		// A workspace's service names the workspace and may be rooted in any folder; a folder's names only its folder.
-		require(WorkspaceServiceTarget.endpointProblem(target, one, "w1", two) == null, "the workspace's own service was refused");
-		require(WorkspaceServiceTarget.endpointProblem(target, one, "w9", one) != null, "another workspace's service was accepted");
-		require(WorkspaceServiceTarget.endpointProblem(target, one, null, one) != null, "a folder's service was accepted for a workspace");
-		require(WorkspaceServiceTarget.endpointProblem(null, one, null, one) == null, "the folder's own service was refused");
-		require(WorkspaceServiceTarget.endpointProblem(null, one, "w1", one) != null, "a workspace's service was accepted for a folder");
-		require(WorkspaceServiceTarget.endpointProblem(null, one, "", two) != null, "another folder's service was accepted");
-
-		// A workspace's own state next to its default state, per build.
-		var listing = MachineWorkspaces.parse('{"version":1,"machine":"m","launcher":"/l/main.hl","stateBase":"/s","managers":['
-			+ '{"workspace":"w1","root":"/a","stateDir":"/s/workspaces/w1","defaultState":true,"managerPid":5,"generation":"g","launcher":"/l/main.hl"},'
-			+ '{"root":"/a","stateDir":"/s/workspaces/h","defaultState":true,"managerPid":6,"generation":"h","launcher":"/l/main.hl"}]}');
-		require(listing.managers[0].workspace == "w1" && listing.managers[1].workspace == "", "listing workspace ids");
-		var own = MachineWorkspaces.ownState(listing, "/a", "/l/main.hl", "w1");
-		require(own == "/s/workspaces/w1-" + MachineWorkspaces.launcherKey("/l/main.hl"), "workspace own state: " + own);
-		require(MachineWorkspaces.ownState(listing, "/a", "/l/main.hl") != own, "folder own state differs");
+		require(WorkspaceServiceTarget.forWorkspace("w3", [gone], null).serviceArguments().join(" ") == "--workspace w3", "no folders, no scratch");
 	}
 }

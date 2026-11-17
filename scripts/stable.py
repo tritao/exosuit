@@ -286,7 +286,6 @@ def launch(arguments: list[str]) -> int:
             "PRAGTICAL_PORTABLE": str(DATA),
             "EXOSUIT_AGENT_STATE_HOME": str(DATA),
             "EXOSUIT_AGENT_LAUNCHER": str(bundle / "agent" / "main.hl"),
-            "EXOSUIT_AGENT_MANAGED_UPDATES": "0",
             "EXOSUIT_STABLE_BUNDLE": str(bundle),
             "EXOSUIT_CHANNEL": "stable",
             "EXOSUIT_HAXEON_LSP_COMMAND": json.dumps([sys.executable, str(lsp_helper)]),

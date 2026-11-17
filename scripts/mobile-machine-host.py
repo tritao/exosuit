@@ -34,7 +34,6 @@ Files in DIR: ready.json, pairing.json ({pendingCode, deviceId, approved, grante
 requests), stop (create it to stop). An emulator reaches the host's loopback with `adb -s emulator-N reverse tcp:PORT tcp:PORT`.
 """
 import argparse
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -43,12 +42,10 @@ import sys
 import time
 
 SCRIPTS = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("suit_relay_harness", SCRIPTS / "test-suit-relay.py")
-harness = importlib.util.module_from_spec(spec)
-sys.modules["suit_relay_harness"] = harness
-spec.loader.exec_module(harness)
 sys.path.insert(0, str(SCRIPTS))
-from agent_test_runtime import manager_environment, runtime_paths  # noqa: E402
+import suit_harness as harness  # noqa: E402
+sys.path.insert(0, str(SCRIPTS))
+from test_driver import runtime_paths, service_environment  # noqa: E402
 
 ROOT = harness.ROOT
 DEFAULT_OUT = Path(r"C:\Users\corbi\projects\exosuit-wt\mobile\state\mobile-machine-host\run")
@@ -102,15 +99,13 @@ def start(arguments) -> int:
     for name in ("credentials", "agent-state", "portable"):
         (out / name).mkdir(exist_ok=True)
 
-    environment = manager_environment(ROOT)
+    environment = service_environment(ROOT)
     environment.update({
         "EXOSUIT_AGENT_STATE_HOME": str(out / "agent-state"), "PRAGTICAL_PORTABLE": str(out / "portable"),
         "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1", "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(out / "credentials"),
         "EXOSUIT_CODEX_BIN": sys.executable, "EXOSUIT_CODEX_SCRIPT": str(ROOT / "tests" / "workspace-agents" / "fake-codex.py"),
         "EXOSUIT_CODEX_PROXY_LAUNCHER": str(ROOT / "scripts" / "run-codex-proxy.py"), "FAKE_CODEX_REPLY": "1",
-        "EXOSUIT_AGENT_ALWAYS_AVAILABLE": "1", "EXOSUIT_SUIT": "off"})
-    for inherited in ("EXOSUIT_RELAY_VIA_SUIT", "EXOSUIT_RELAY_ORIGIN"):
-        environment.pop(inherited, None)
+        "EXOSUIT_SERVICE_IDLE_SECONDS": "3000"})
 
     relay = harness.Relay(out)
     suit = harness.Suit(out, {
@@ -118,7 +113,9 @@ def start(arguments) -> int:
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(out / "credentials"), "EXOSUIT_AGENT_STATE_HOME": str(out / "agent-state"),
         "EXOSUIT_AGENT_LAUNCHER": str(harness.AGENT), "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unusedPhone9",
         "EXOSUIT_CODEX_BIN": sys.executable, "EXOSUIT_CODEX_SCRIPT": environment["EXOSUIT_CODEX_SCRIPT"],
-        "EXOSUIT_CODEX_PROXY_LAUNCHER": environment["EXOSUIT_CODEX_PROXY_LAUNCHER"], "FAKE_CODEX_REPLY": "1", "EXOSUIT_AGENT_ALWAYS_AVAILABLE": "1"})
+        "EXOSUIT_CODEX_PROXY_LAUNCHER": environment["EXOSUIT_CODEX_PROXY_LAUNCHER"], "FAKE_CODEX_REPLY": "1", "EXOSUIT_SERVICE_IDLE_SECONDS": "3000"})
+    # The services report to this suit (service-attach), which then lists them as running and forwards device streams to them.
+    environment["EXOSUIT_SUIT_HOME"] = str(suit.home)
     exit_code = 0
     started = time.monotonic()
     ids: dict[str, str] = {}
@@ -129,9 +126,24 @@ def start(arguments) -> int:
         assert "started" in suit("start")
         log("suit-started", home=str(suit.home))
 
-        def run_agent(*extra: str, cwd: Path, timeout: float = 120, env: dict | None = None) -> subprocess.CompletedProcess:
-            return subprocess.run([str(runtime), str(bytecode), *extra], env=env or environment, cwd=str(cwd), capture_output=True, text=True,
-                                  timeout=timeout, creationflags=NO_WINDOW)
+        def start_service(workspace: str, folder: Path, env: dict, timeout: float = 120) -> str:
+            """Starts workspace `workspace`'s service as suit does, in the background, and returns its pipe once its service.log
+            says it is ready."""
+            log = out / "agent-state" / "workspaces" / workspace / "service.log"
+            offset = log.stat().st_size if log.exists() else 0
+            process = subprocess.Popen([str(runtime), str(bytecode), "--workspace", workspace, "--folder", str(folder)], env=env,
+                                       cwd=str(folder), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                       creationflags=NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError(f"the service of {workspace} exited with {process.returncode}")
+                text = log.read_bytes()[offset:].decode("utf-8", "replace") if log.exists() else ""
+                for line in text.splitlines():
+                    if "service ready on " in line:
+                        return line.split("service ready on ", 1)[1].partition(" for ")[0].strip()
+                time.sleep(0.2)
+            raise RuntimeError(f"the service of {workspace} was not ready in {timeout} s")
 
         def claude_environment(name: str) -> dict:
             """Alpha's Claude Code terminal is the fake TUI; Beta's is the real CLI when asked, always on a throwaway config."""
@@ -161,12 +173,7 @@ def start(arguments) -> int:
             workspace = reply["workspace"]["id"]
             ids[name] = workspace
             # The service suit would start on a device's OPEN, started here first so its sessions exist; suit finds it by its state folder.
-            started_service = run_agent("--manager", "--workspace", workspace, "--folder", str(folder), "--detach", "--idle-seconds", "3000", cwd=folder,
-                                        env=claude_environment(name))
-            if started_service.returncode != 0:
-                raise RuntimeError(f"manager --detach failed: {started_service.stderr}{started_service.stdout}")
-            endpoint = json.loads(started_service.stdout)
-            local_socket = endpoint["socket"]
+            local_socket = start_service(workspace, folder, claude_environment(name))
             sockets[name] = local_socket
             deadline = time.monotonic() + 90
             while admin("--socket", local_socket, "--list-sessions").returncode != 0:
@@ -336,7 +343,7 @@ def hold_control(out: Path, arguments) -> int:
     with open(log_path, "w", encoding="utf-8") as log:
         process = subprocess.Popen([str(runtime), str(ADMIN), "--socket", socket_path, "--hold-control", arguments.terminal,
                                     "--hold-seconds", str(arguments.seconds), "--columns", str(arguments.columns), "--rows", str(arguments.rows)],
-                                   env=manager_environment(ROOT), cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+                                   env=service_environment(ROOT), cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         text = log_path.read_text(encoding="utf-8", errors="replace")

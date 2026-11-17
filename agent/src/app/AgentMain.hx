@@ -6,87 +6,216 @@ import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.AtomicFile;
 import workspace.transport.NativeRpcHub;
+import workspace.transport.NativeRpcTransport;
 import workspace.transport.WorkspaceRpcServer;
-import workspace.transport.SessionPreflight;
 import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceLifetime;
 import workspace.storage.WorkspaceSqliteStore;
+import workspace.runtime.ServiceLog;
 import workspace.runtime.WorkspaceTerminalManager;
-import workspace.runtime.WorkspaceRelayHost;
-import workspace.runtime.WorkspaceRelaySettings;
-import workspace.runtime.WorkspaceCredentialStores;
-import workspace.runtime.WorkspaceNoiseIdentity;
-import workspace.transport.NoiseMessageTransport;
-import workspace.runtime.WorkspacePairingManager;
-import workspace.runtime.WorkspaceRelayStatusFile;
-import suit.relay.SuitRelayProtocol;
-import suit.relay.SuitRelayProtocol.SuitRelayAttachRequest;
-import suit.relay.SuitRelayProtocol.SuitRelayReportedDevice;
+import suit.SuitServiceLink;
 
-/** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
+/** The workspace a service serves: its id in suit's machine catalog and its folders, as suit passed them. */
+typedef ServiceTarget = {
+	var workspace:String;
+	var folders:Array<String>;
+	var scratch:Null<String>;
+}
+
+/**
+	The agent providers' programs. Finding one is a search of PATH on Windows (tens of milliseconds each), and none
+	depends on the workspace, so a spare finds them before it is adopted.
+**/
+typedef ProviderPrograms = {
+	var codex:String;
+	var codexScript:Null<String>;
+	var codexProxy:Null<String>;
+	var claude:String;
+	var claudeScript:Null<String>;
+	var pi:String;
+	var piScript:Null<String>;
+}
+
+/**
+	A workspace's service: one process per running workspace, which suit starts
+	(`exosuit-agent.hl --workspace ID [--folder F]... [--scratch S]`). It takes its state folder's lock, listens on its
+	pipe and then reports to suit (SuitServiceLink): that report is how suit learns it is ready and which pipe to hand
+	out, and its connection closing is how suit learns that it stopped. It stops by itself after
+	`EXOSUIT_SERVICE_IDLE_SECONDS` (600 by default) with no client and no busy agent turn, or when suit asks.
+
+	`exosuit-agent.hl --spare` is the warm spare suit keeps while an editor is linked: loaded and linked to suit, it
+	serves the workspace suit hands it (`adopt`) the moment one is opened, so an idle workspace opens without a process
+	start.
+**/
 class AgentMain {
-	/**
-		Whom the catalog belongs to, as its `workspace_meta.root` records it: a workspace's key when the state folder is a
-		workspace's (its folders may change between starts), else the folder.
-	**/
-	static function catalogOwner(credentialFile:String, root:String):String {
-		var workspace = stateWorkspace(Path.directory(credentialFile));
-		return workspace == null ? root : AgentStateIdentity.catalogOwner(workspace);
-	}
-
-	/** The id of the workspace whose state folder this is, or null for a folder's state (or a test's, with no identity). */
-	static function stateWorkspace(stateDirectory:String):Null<String> {
-		var path = Path.join([stateDirectory, "workspace.json"]);
-		return FileSystem.exists(path) ? AgentStateIdentity.read(path).workspace : null;
-	}
-
-	/**
-		The catalog watch over this service's groups, sessions and terminals. A workspace's service answers to its id and
-		describes its folders; a folder's service answers to "workspace" and describes its folder.
-	**/
-	static function catalogService(stateDirectory:String, instance:String, root:String, clock:Void->Float,
-			groups:Void->Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>,
-			sessions:Void->Array<workspace.service.WorkspaceAgentProtocol.AgentRecord>,
-			requests:Void->Map<String, Int>,
-			terminals:Void->Array<workspace.service.WorkspaceTerminalProtocol.TerminalRecord>):workspace.runtime.WorkspaceCatalogService {
-		var path = Path.join([stateDirectory, "workspace.json"]);
-		var watch = new AgentIdentityWatch(path, function() return AgentStateIdentity.forFolder(root));
-		var id = watch.current().workspace;
-		var name = Path.withoutDirectory(StringTools.replace(root, "\\", "/"));
-		var description = function():workspace.runtime.WorkspaceCatalogService.CatalogDescription {
-			var identity = watch.current();
-			return {name: name, folders: identity.folders.copy(), scratch: identity.scratch};
-		};
-		return new workspace.runtime.WorkspaceCatalogService(id == null ? "workspace" : id, instance, description, groups,
-			sessions, requests, terminals, function() return clock() / 1000);
-	}
-
-	/** The folders to serve at start: the usable ones of the state's workspace folders (see WorkspaceFolders.select), else the single `root`. */
-	static function startFolders(stateDirectory:String, root:String):Array<String> {
-		var path = Path.join([stateDirectory, "workspace.json"]);
-		if (!FileSystem.exists(path)) return [root];
-		var identity = AgentStateIdentity.read(path);
-		if (identity.workspace == null) return [root];
-		var listed = workspace.WorkspaceFolders.select(identity.folders).folders;
-		return listed.length > 0 ? listed : [root];
-	}
+	/** The exit status of a service that found its workspace's state locked by another one. */
+	static inline final IN_USE = 3;
+	static inline final IDLE_SECONDS = 600;
 
 	static function main():Void {
 		var args = Sys.args();
-		// A terminal host is not part of any service: it takes no manager's lock and outlives them all.
-		if (args.length > 0 && args[0] == "--terminal-host") {
-			Sys.exit(TerminalHostMain.run(args.slice(1)));
-			return;
+		AgentNative.setPrivateUmask();
+		var spare = args.length == 1 && args[0] == "--spare";
+		var target:Null<ServiceTarget> = null;
+		if (!spare)
+			try target = parse(args) catch (error:Dynamic) {
+				Sys.stderr().writeString("Usage: exosuit-agent.hl --workspace ID [--folder FOLDER]... [--scratch FOLDER] | --spare: " + Std.string(error) + "\n");
+				Sys.exit(2);
+				return;
+			}
+		var runtime = Runtime.start(), hub = new NativeRpcHub(runtime.events);
+		var report = new SuitServiceLink(hub);
+		var code = 0;
+		var programs:Null<ProviderPrograms> = null;
+		if (spare)
+			try {
+				programs = providerPrograms();
+				warm();
+				target = awaitAdoption(runtime, report);
+			} catch (error:Dynamic) {
+				Sys.stderr().writeString("Spare: " + Std.string(error) + "\n");
+				code = 2;
+			}
+		if (target != null)
+			try code = serve(target, programs, runtime, hub, report) catch (error:Dynamic) {
+				ServiceLog.note("Workspace startup failed: " + Std.string(error));
+				code = 1;
+			}
+		report.dispose();
+		hub.dispose();
+		runtime.dispose();
+		Sys.exit(code);
+	}
+
+	static function parse(args:Array<String>):ServiceTarget {
+		if (args.length < 2 || args[0] != "--workspace")
+			throw "--workspace requires a workspace id";
+		var folders:Array<String> = [], scratch:Null<String> = null;
+		var index = 2;
+		while (index < args.length) {
+			var option = args[index++];
+			if ((option != "--folder" && option != "--scratch") || index >= args.length)
+				throw 'Unknown workspace service option: $option';
+			if (option == "--scratch") scratch = args[index++];
+			else folders.push(args[index++]);
 		}
-		AgentManagerNative.guardChildLock();
-		if (args.length > 0 && args[0] == "--manager") {
-			Sys.exit(AgentManager.run(args.slice(1)));
-			return;
+		return targetOf(args[1], folders, scratch);
+	}
+
+	/** Workspace `id` with its folders and scratch folder as full paths; throws on a bad id or a folder that is not one. */
+	static function targetOf(id:String, folders:Array<String>, scratch:Null<String>):ServiceTarget {
+		if (!AgentStateIdentity.validWorkspaceId(id)) throw "--workspace requires a workspace id";
+		var target:ServiceTarget = {workspace: id, folders: [], scratch: null};
+		function full(folder:String):String {
+			var path = FileSystem.fullPath(folder);
+			if (path == null || !FileSystem.isDirectory(path)) throw 'Workspace folder is not a directory: $folder';
+			return path;
 		}
-		if (args.length > 0 && args[0] == "--machine") {
-			Sys.exit(AgentMachine.run(args.slice(1)));
-			return;
+		for (folder in folders) {
+			var path = full(folder);
+			if (target.folders.indexOf(path) < 0) target.folders.push(path);
 		}
+		if (scratch != null) target.scratch = full(scratch);
+		return target;
+	}
+
+	/**
+		The spare's wait: linked to suit, it idles until suit hands it a workspace (whose target it returns), asks it to
+		stop, or goes (null either way). It then runs in the first folder, as a started service does.
+	**/
+	static function awaitAdoption(runtime:Runtime, report:SuitServiceLink):Null<ServiceTarget> {
+		report.offerSpare();
+		// Listed as the spare (suit lists registered processes even when it does not scan); the record becomes the
+		// service's once a workspace adopts it.
+		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceSpare, {root: Sys.getCwd(), stateDir: "", generation: null, workspace: null});
+		while (true) {
+			runtime.events.wait(1.0);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+			report.poll();
+			var adopted = report.adoption;
+			if (adopted != null) {
+				// The editor that opened this workspace connects while it starts: see FineTimer.
+				workspace.transport.FineTimer.hold(3.0);
+				var target = targetOf(adopted.workspace, adopted.folders, adopted.scratch);
+				var root = target.folders.length > 0 ? target.folders[0] : target.scratch;
+				if (root != null) Sys.setCwd(root);
+				return target;
+			}
+			if (report.abandoned || report.stopRequest != null) {
+				suit.SuitClient.unregister();
+				return null;
+			}
+		}
+	}
+
+	/**
+		A spare runs once what every service's start runs first, so an adopted spare starts as fast as a running process
+		can: SQLite loaded and opened, the hashing that names the pipe.
+	**/
+	static function warm():Void {
+		var path = Path.join([AgentState.base(), "spare-" + Sys.getPid() + ".sqlite"]);
+		try {
+			var db = sqlitekit.Database.open(path, 1000);
+			db.exec("PRAGMA journal_mode=WAL");
+			db.exec("PRAGMA synchronous=FULL");
+			db.exec("CREATE TABLE warm (id INTEGER PRIMARY KEY)");
+			db.exec("INSERT INTO warm VALUES (1)");
+			db.close();
+		} catch (_:Dynamic) {}
+		for (file in [path, path + "-wal", path + "-shm", path + ".sqlitekit-lock"])
+			try if (FileSystem.exists(file)) FileSystem.deleteFile(file) catch (_:Dynamic) {}
+		haxe.crypto.Sha256.encode("warm");
+	}
+
+	/** The providers' programs: the EXOSUIT_*_BIN overrides, else found on PATH. */
+	static function providerPrograms():ProviderPrograms {
+		function program(variable:String, name:String):String {
+			var configured = Sys.getEnv(variable);
+			return process.ExecutablePath.resolve(configured == null ? name : configured);
+		}
+		var codexProxy = Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER");
+		if (codexProxy == null || codexProxy.length == 0) codexProxy = AgentState.codexProxy();
+		return {
+			codex: program("EXOSUIT_CODEX_BIN", "codex"), codexScript: Sys.getEnv("EXOSUIT_CODEX_SCRIPT"), codexProxy: codexProxy,
+			claude: program("EXOSUIT_CLAUDE_BIN", "claude"), claudeScript: Sys.getEnv("EXOSUIT_CLAUDE_SCRIPT"),
+			pi: program("EXOSUIT_PI_BIN", "pi"), piScript: Sys.getEnv("EXOSUIT_PI_SCRIPT")
+		};
+	}
+
+	/** The idle limit: `EXOSUIT_SERVICE_IDLE_SECONDS`, else ten minutes. */
+	static function idleMilliseconds():Int {
+		var configured = Std.parseFloat(Sys.getEnv("EXOSUIT_SERVICE_IDLE_SECONDS"));
+		return Std.int((Math.isNaN(configured) || configured < 1 ? IDLE_SECONDS : configured) * 1000);
+	}
+
+	/** Serves `target` until it is idle or suit asks it to stop; the exit status. */
+	static function serve(target:ServiceTarget, programs:Null<ProviderPrograms>, runtime:Runtime, hub:NativeRpcHub, report:SuitServiceLink):Int {
+		var stateDirectory = AgentState.directoryOf(target.workspace);
+		AgentState.prepare(stateDirectory);
+		ServiceLog.open(Path.join([stateDirectory, "service.log"]));
+		var lock = AgentNative.acquireLock(Path.join([stateDirectory, "agent.lock"]));
+		if (lock == null) {
+			ServiceLog.note("not started: another service runs this workspace");
+			return IN_USE;
+		}
+		var code = 0;
+		try code = serveLocked(target, programs, stateDirectory, runtime, hub, report) catch (error:Dynamic) {
+			try AgentNative.releaseLock(lock) catch (_:Dynamic) {}
+			throw error;
+		}
+		AgentNative.releaseLock(lock);
+		return code;
+	}
+
+	static function serveLocked(target:ServiceTarget, programs:Null<ProviderPrograms>, stateDirectory:String, runtime:Runtime, hub:NativeRpcHub,
+			report:SuitServiceLink):Int {
+		var workspaceId = target.workspace;
+		var identity = AgentState.claim(stateDirectory, workspaceId, target.folders, target.scratch);
+		var root = identity.primaryRoot();
+		var instance = AgentNative.randomToken().substr(0, 32);
+		ServiceLog.note('service starting: generation $instance, pid ${Sys.getPid()}');
 		var stableLease:Null<String> = null;
 		var stableBundle = Sys.getEnv("EXOSUIT_STABLE_BUNDLE");
 		if (stableBundle != null && stableBundle.length > 0) {
@@ -95,250 +224,126 @@ class AgentMain {
 			stableLease = Path.join([stableBundle, ".running-daemon-" + Sys.getPid()]);
 			AtomicFile.create(stableLease, Std.string(Sys.getPid()) + "\n");
 		}
-		if (args.length < 4 || args.length > 9)
-			throw "Usage: exosuit-agent PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS [RELAY_BOOTSTRAP]]]]]";
-		// Settles EXOSUIT_SUIT once, before this daemon spawns terminals or compiler workers, so they inherit it.
-		suit.SuitClient.resolve(haxe.io.Path.directory(args[2]));
-		var idleMilliseconds = args.length >= 8 ? Std.parseInt(args[7]) : 60000;
-		if (idleMilliseconds == null || idleMilliseconds < 0)
-			throw "Invalid workspace idle timeout";
-		var lifetime = new WorkspaceLifetime(idleMilliseconds);
-		var port = Std.parseInt(args[1]);
-		var metadata = sys.FileSystem.metadata(args[2]);
-		if (metadata == null || metadata.size != 64)
-			throw "Invalid session credential file size";
-		var token = sys.io.File.getContent(args[2]);
-		SessionPreflight.validateToken(token);
-		var processes = new process.ProcessManager();
-		var runtime = Runtime.start(),
-			hub = new NativeRpcHub(runtime.events);
-		var clock = function() return NativeKit.nk_time_seconds() * 1000;
-		// HTTP remains rejected by RelayMachineEndpoint except for loopback. This
-		// opt-in exists for local Worker development and test runs only.
-		var allowLoopbackHttp = Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") == "1";
-		var relayHost:Null<WorkspaceRelayHost> = null;
-		var relaySetupError:Null<String> = null;
-		var relayRoot = FileSystem.fullPath(args.length >= 6 ? args[5] : Sys.getCwd());
-		// suit holds the machine socket when it runs, so a device can reach this workspace with no editor open.
-		function suitAttach(settings:WorkspaceRelaySettings):Null<SuitRelayAttachRequest> {
-			if (!SuitRelayProtocol.viaSuitEnabled())
-				return null;
-			return {
-				root: relayRoot,
-				stateDir: haxe.io.Path.directory(args[2]),
-				machineId: settings.endpoint.machineId,
-				origin: settings.endpoint.origin,
-				executable: Sys.executablePath(),
-				launcher: FileSystem.fullPath(Sys.programPath())
-			};
-		}
-		if (args.length == 9) {
-			try {
-				var settings = WorkspaceRelaySettings.loadBootstrap(args[8]);
-				relayHost = new WorkspaceRelayHost(runtime.events, hub, settings, allowLoopbackHttp, suitAttach(settings));
-			} catch (error:Dynamic) relaySetupError = Std.string(error);
-		}
-		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
-		var stateDirectory = haxe.io.Path.directory(args[2]);
-		var folders = startFolders(stateDirectory, directories.root);
-		var files = new workspace.runtime.WorkspaceFileService("workspace", folders, clock, runtime.events);
-		var scm = new workspace.runtime.WorkspaceScmService("workspace", folders, processes, Sys.getEnv("EXOSUITE_GIT_BIN"));
+		// Listen, open the catalog and report before the rest starts: suit answers the editor that waits on this start,
+		// and its connection (and Hello) waits in the pipe while the terminals and agents come up. The server takes the
+		// connections that came meanwhile once it exists.
+		var socket = AgentState.endpointOf(workspaceId, stateDirectory);
+		if (Sys.systemName() != "Windows" && socket.length > 100)
+			throw "State directory path is too long for a local socket";
+		var early:Array<NativeRpcTransport> = [];
+		var accept:NativeRpcTransport->Void = function(transport) early.push(transport);
+		hub.listen(NativeRpcHub.local(socket), function(transport) accept(transport));
+		var directories = new workspace.runtime.WorkspaceDirectories(root);
+		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
+			generation: instance, workspace: workspaceId});
+		// The catalog opens before the report (about 3 ms): a catalog that cannot be opened (damaged, or of a newer build)
+		// ends the service before suit hands its pipe out, so suit answers the open with the reason service.log names.
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it. A new catalog has no groups:
 		// the workspace itself holds sessions and terminals until groups are made.
-		var seed = new WorkspaceService("workspace", args[3], []);
-		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot(), 32, catalogOwner(args[2], directories.root)) : null;
-		// Catalogs from before that still have the seeded "Work" group; its contents move to the workspace (once).
-		if (store != null) store.retireSeedGroup(args[3], directories.root);
-		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
-		// With hosts on, each terminal's PTY lives in a process of its own that outlives this daemon; a later generation adopts it.
-		var terminalHosts = workspace.runtime.TerminalHosts.create(runtime.events, stateDirectory, Path.join([AgentManager.stateBase(), "terminal-host"]),
-			directories.root, stateWorkspace(stateDirectory));
-		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,WorkspaceTerminalManager.REPLAY_BYTES,store,function() return service.snapshot().groups, terminalHosts, stateDirectory);
-		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");
-		var codexScript = Sys.getEnv("EXOSUIT_CODEX_SCRIPT");
-		var claudeExecutable = Sys.getEnv("EXOSUIT_CLAUDE_BIN");
-        var claude = new workspace.provider.ClaudeProvider(directories, function() return service.snapshot().groups, processes, clock, store,
-            process.ExecutablePath.resolve(claudeExecutable == null ? "claude" : claudeExecutable), Sys.getEnv("EXOSUIT_CLAUDE_SCRIPT"));
-        var piExecutable = Sys.getEnv("EXOSUIT_PI_BIN");
-        var pi = new workspace.provider.PiProvider(directories, function() return service.snapshot().groups, processes, clock,
-            haxe.io.Path.directory(args[2]), store, process.ExecutablePath.resolve(piExecutable == null ? "pi" : piExecutable), Sys.getEnv("EXOSUIT_PI_SCRIPT"));
-        var agentKitSettings = workspace.provider.AgentKitSettings.fromEnvironment(haxe.io.Path.join([haxe.io.Path.directory(args[2]), "agentkit"]));
-        var agentKit = new workspace.provider.AgentKitProvider(directories, function() return service.snapshot().groups, clock,
-            new haxeon.agent.nativekit.NativeKitHttpTransport(runtime.events, agentKitSettings.allowsPlainHttp()), agentKitSettings, store);
-        var codex = new workspace.provider.CodexProvider(args.length >= 7 ? args[6] : args[3], directories,
-            function() return service.snapshot().groups, processes, clock, store,
-            process.ExecutablePath.resolve(executable == null ? "codex" : executable), Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"), codexScript);
-        var agents = new workspace.provider.WorkspaceAgentService("workspace", args.length >= 7 ? args[6] : args[3],
-            directories.root, [codex, claude, pi, agentKit], store,
-            args.length >= 5 ? FileSystem.fullPath(args[4]) : FileSystem.fullPath(Path.directory(args[2])));
-		// A chat session's conversation is never a terminal's to resume.
-		terminals.otherConversations = function() return [for (record in agents.records()) record.thread];
+		var database = Path.join([stateDirectory, "catalog.sqlite"]);
+		var seedEpoch = AgentNative.randomToken().substr(0, 32);
+		var seed = new WorkspaceService("workspace", seedEpoch, []);
+		var store = new WorkspaceSqliteStore(database, "workspace", seed.snapshot(), AgentStateIdentity.catalogOwner(workspaceId));
+		// Listening: suit hands this pipe out from now on, and lists the service until this connection closes.
+		report.serve(workspaceId, socket, instance, directories.root);
+		var lifetime = new WorkspaceLifetime(idleMilliseconds());
+		var processes = new process.ProcessManager();
+		var clock = function() return NativeKit.nk_time_seconds() * 1000;
+		var listed = workspace.WorkspaceFolders.select(identity.folders).folders;
+		var folders = listed.length > 0 ? listed : [root];
+		var files = new workspace.runtime.WorkspaceFileService("workspace", folders, clock, runtime.events);
+		var scm = new workspace.runtime.WorkspaceScmService("workspace", folders, processes, Sys.getEnv("EXOSUITE_GIT_BIN"));
+		var service = new WorkspaceService("workspace", seedEpoch, seed.snapshot().groups, 256, 16, store, directories.resolve);
+		// Each terminal's PTY lives in a host process of its own that outlives this daemon; a later generation adopts it.
+		var terminalHosts = new workspace.runtime.TerminalHosts(runtime.events, stateDirectory, Path.join([AgentState.base(), "terminal-host"]),
+			Sys.programPath(), directories.root, workspaceId);
+		var terminals = new WorkspaceTerminalManager("workspace", instance, directories.root, terminalHosts,
+			WorkspaceTerminalManager.REPLAY_BYTES, store, function() return service.snapshot().groups);
+		// Chat providers are built when first needed (WorkspaceAgentService). Their programs are found on PATH then,
+		// unless a spare found them before it was adopted.
+		var found = programs;
+		function program():ProviderPrograms {
+			if (found == null) found = providerPrograms();
+			return found;
+		}
+		var groups = function() return service.snapshot().groups;
+		var agents = new workspace.provider.WorkspaceAgentService("workspace", instance, directories.root, [
+			new workspace.provider.AgentProviderFactory("codex", function() return new workspace.provider.CodexProvider(instance, directories,
+				groups, processes, clock, store, program().codex, program().codexProxy, program().codexScript)),
+			new workspace.provider.AgentProviderFactory("claude", function() return new workspace.provider.ClaudeProvider(directories, groups,
+				processes, clock, store, program().claude, program().claudeScript)),
+			new workspace.provider.AgentProviderFactory("pi", function() return new workspace.provider.PiProvider(directories, groups, processes,
+				clock, stateDirectory, store, program().pi, program().piScript))
+		], store, FileSystem.fullPath(database));
 		service.canRemoveGroup = function(group) {
 			for (terminal in terminals.snapshot().terminals) if (terminal.group == group) return false;
 			return agents.groupIsEmpty(group);
 		};
-		var noiseIdentity:Null<WorkspaceNoiseIdentity> = null;
-		if (relayHost != null && store == null)
-			throw "Remote workspace access requires persistent device storage";
-		var serverRef:Null<WorkspaceRpcServer> = null;
-		var pairingManager:Null<WorkspacePairingManager> = null;
-		function installPairing():Void {
-			if (relayHost == null || store == null) throw "Remote access requires persistent workspace storage";
-			noiseIdentity = new WorkspaceNoiseIdentity(relayHost.endpoint.machineId, WorkspaceCredentialStores.relay());
-			var activeStore = store, activeRelay = relayHost, activeIdentity = noiseIdentity;
-			pairingManager = new WorkspacePairingManager(activeStore, activeRelay, activeIdentity.privateKeyForHandshake(),
-				function() return serverRef == null ? [] : serverRef.remoteOffered(), clock,
-				function(secure, grants) {
-					var current = serverRef;
-					if (current == null)
-						secure.close();
-					else
-						current.acceptRemote(secure, grants);
-				});
-			relayHost.onChannel = function(channel) pairingManager.acceptChannel(channel.channelId, channel);
-		}
-		if (relayHost != null) {
-			try installPairing() catch (error:Dynamic) {
-				relayHost.dispose();
-				relayHost = null;
-				relaySetupError = Std.string(error);
-			}
-		}
-		var server = new WorkspaceRpcServer(service, clock, null,
-			args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null,
-			terminals, agents, pairingManager, files, scm);
-		serverRef = server;
-		var catalog = catalogService(Path.directory(args[2]), args.length >= 7 ? args[6] : args[3], directories.root, clock,
-			function() return service.snapshot().groups, agents.records, agents.requestCounts, function() return terminals.snapshot().terminals);
+		var server = new WorkspaceRpcServer(service, clock, null, {workspace: "workspace", root: directories.root, instance: instance},
+			terminals, agents, files, scm);
+		var watch = new AgentIdentityWatch(Path.join([stateDirectory, "workspace.json"]), function() return identity);
+		var name = Path.withoutDirectory(StringTools.replace(root, "\\", "/"));
+		var catalog = new workspace.runtime.WorkspaceCatalogService(workspaceId, instance, function() {
+			var current = watch.current();
+			return {name: name, folders: current.folders.copy(), scratch: current.scratch};
+		}, function() return service.snapshot().groups, agents.records, agents.requestCounts,
+			function() return terminals.snapshot().terminals, function() return clock() / 1000);
 		server.enableCatalog(catalog.bind);
+		var catalogSnapshot = new workspace.runtime.CatalogSnapshotFile(stateDirectory, workspaceId, catalog, function() return clock() / 1000);
 		server.enableFolders(function(requested) return workspace.runtime.WorkspaceFolderChange.apply(requested, stateDirectory, directories.root, files, scm).folders);
-		var updates = new workspace.service.WorkspaceUpdatePolicy();
-		// The manager settles the build identity while this daemon starts and records it with the generation it spawned
-		// (EXOSUIT_AGENT_BUILD_FILE); it is read when first asked for. EXOSUIT_AGENT_BUILD_ID names it outright.
-		var build = Sys.getEnv("EXOSUIT_AGENT_BUILD_ID");
-		if (build != null && build.length == 0) build = null;
-		var buildFile = Sys.getEnv("EXOSUIT_AGENT_BUILD_FILE");
-		var buildGeneration = args.length >= 7 ? args[6] : "";
-		function settledBuild():String {
-			if (build == null && buildFile != null && buildFile.length > 0) {
-				try {
-					var lines = sys.io.File.getContent(buildFile).split("\n");
-					if (lines.length >= 2 && lines[0] == buildGeneration && StringTools.trim(lines[1]).length > 0) build = StringTools.trim(lines[1]);
-				} catch (_:Dynamic) {}
-			}
-			return build == null ? "unknown" : build;
-		}
-		var updateRequestedAt:Float = 0;
-		var restarting = false;
-		if (Sys.getEnv("EXOSUIT_AGENT_MANAGED_UPDATES") == "1")
-			server.enableLifecycle(function():workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus return {
-				protocol: workspace.service.WorkspaceLifecycleProtocol.VERSION,
-				build: settledBuild(),
-				terminals: terminals.activeCount(), agents: agents.updateActivityCount(), updatePending: updates.pending,
-				keptTerminals: terminals.hostedCount()
-			}, function(mode:String):Bool {
-				if (!updates.request(mode)) return false;
-				updateRequestedAt = clock();
-				return true;
-			});
-		server.remoteAccessStatus = function() return {
-			configured: relayHost != null,
-			connected: relayHost != null && relayHost.connected,
-			origin: relayHost == null ? null : relayHost.endpoint.origin,
-			error: relaySetupError != null ? relaySetupError : relayHost == null ? null : relayHost.lastError
-		};
-		var setupPath = haxe.io.Path.directory(args[2]) + "/relay-bootstrap.json";
-		var setupPollAt:Float = 0;
-		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
-		var websocket = hub.listen(NativeRpcHub.websocket(port, "/workspace", true), function(transport) {
-			server.acceptWebSocket(transport, token);
-		});
-		Sys.println("READY: exosuit-agent local and loopback WebSocket");
-		Sys.stdout().flush();
-		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
-			generation: args.length >= 7 ? args[6] : null, workspace: stateWorkspace(stateDirectory)});
-		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);
-		var clientReportAt:Float = 0;
+		accept = server.acceptLocal;
+		for (transport in early)
+			server.acceptLocal(transport);
+		early.resize(0);
+		ServiceLog.note('service ready on $socket for ${directories.root}');
+		AgentNative.installStopSignals();
+		// Busy until then: the loop turns every 10 ms for a moment after anything happened, so replies, catalog pushes and
+		// file-change batches that follow it go out at once.
+		var hotUntil:Float = clock() + 500;
+		var reason = "idle";
 		while (true) {
-			runtime.events.wait(0.01);
-			for (_ in 0...128)
+			// Provider processes are read by polling; everything else wakes the event wait.
+			var polled = processes.activeCount() > 0;
+			runtime.events.wait(clock() < hotUntil ? 0.01 : polled ? 0.05 : 1.0);
+			for (_ in 0...128) {
 				if (!runtime.events.poll())
 					break;
-			if (relayHost == null && clock() >= setupPollAt) {
-				setupPollAt = clock() + 500;
-				if (sys.FileSystem.exists(setupPath)) {
-					try {
-						var settings = WorkspaceRelaySettings.loadBootstrap(setupPath);
-						relayHost = new WorkspaceRelayHost(runtime.events, hub, settings, allowLoopbackHttp, suitAttach(settings));
-						installPairing();
-						server.enablePairing(pairingManager);
-						relaySetupError = null;
-					} catch (error:Dynamic) {
-						if (relayHost != null) relayHost.dispose();
-						relayHost = null;
-						relaySetupError = Std.string(error);
-					}
-				}
+				hotUntil = clock() + 500;
 			}
-			if (relayHost != null || relaySetupError != null)
-				relayStatus.update(clock(), relayHost, pairingManager, relaySetupError);
-			if (relayHost != null && relayHost.viaSuit && clock() >= clientReportAt) {
-				clientReportAt = clock() + 1000;
-				var devices:Array<SuitRelayReportedDevice> = [], pendingDevices:Array<String> = [];
-				if (pairingManager != null) {
-					for (device in pairingManager.listDevices())
-						if (!device.revoked)
-							devices.push({deviceId: device.deviceId, grants: device.grants, connected: device.connected});
-					for (request in pairingManager.listPending())
-						pendingDevices.push(request.deviceId);
-				}
-				relayHost.reportClients({devices: devices, pending: pendingDevices,
-					open: {terminals: terminals.activeCount(), agents: agents.activeCount()}});
-			}
+			report.poll();
 			server.poll();
 			catalog.poll();
+			catalogSnapshot.poll();
 			files.poll();
 			scm.poll();
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();
-			if (relayHost != null) {
-				relayHost.poll(clock());
-				if (pairingManager != null)
-					pairingManager.poll();
-			}
-			var remoteAccess = relayHost == null ? 0 : relayHost.activeCount();
-			// Allow the update acknowledgement to flush before disconnecting clients.
-			if (clock() - updateRequestedAt >= 250 && updates.shouldRestart(terminals.activeCount(), agents.updateActivityCount())) {
-				restarting = true;
+			// suit asked: at once, or (a restart onto another build) once no agent turn runs.
+			var asked = report.stopRequest;
+			if (asked == "now" || asked == "turn" && agents.activeCount() == 0) {
+				reason = asked == "now" ? "suit asked it to stop" : "suit restarts it on another build";
 				break;
 			}
-			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount() + remoteAccess,
-				agents.updateActivityCount()))
+			if (AgentNative.stopRequested()) {
+				reason = "a stop signal (console close, Ctrl+C or logoff)";
+				break;
+			}
+			// Terminals do not keep the service: their hosts keep them, and the next service adopts them.
+			if (lifetime.shouldStop(clock(), server.clientCount(), agents.activeCount(), agents.updateActivityCount()))
 				break;
 		}
-		workspace.runtime.ServiceLog.note((restarting ? "service stopping for an update" : "service stopping: idle") + ", "
-			+ terminals.activeCount() + " terminal(s) running, " + terminals.hostedCount() + " of them in hosts that keep them");
-		relayStatus.remove();
+		catalogSnapshot.write();
+		ServiceLog.note("service stopped: " + reason + ", " + terminals.activeCount() + " terminal(s) kept running by their hosts");
 		suit.SuitClient.unregister();
-		if (pairingManager != null)
-			pairingManager.dispose();
-		if (relayHost != null)
-			relayHost.dispose();
 		agents.dispose();
 		processes.shutdown();
 		terminals.dispose();
 		server.dispose();
 		files.dispose();
-		hub.dispose();
-		if (store != null)
-			store.close();
-		if (noiseIdentity != null)
-			noiseIdentity.dispose();
-		runtime.dispose();
-		Sys.println(restarting ? "STOPPED: exosuit-agent update" : "STOPPED: exosuit-agent idle");
-		Sys.stdout().flush();
+		store.close();
 		if (stableLease != null && FileSystem.exists(stableLease))
 			try FileSystem.deleteFile(stableLease) catch (_:Dynamic) {}
+		return 0;
 	}
 }

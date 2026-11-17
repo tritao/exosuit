@@ -70,7 +70,7 @@ private typedef CatalogPlan = {
 }
 
 /**
-	The workspace's catalog watch (M19 Phase 6; protocol in docs/roadmap/RPC-VECTORS.md, "Workspace refs and the
+	The workspace's catalog watch (M19 Phase 6; protocol in docs/RPC-VECTORS.md, "Workspace refs and the
 	catalog watch"): CATALOG pages of groups, sessions and terminals with no content, resumable by token, and
 	CHANGED hints to watching connections. Local connections only for now: remote peers get the capability with the
 	mobile adaptation.
@@ -192,6 +192,30 @@ class WorkspaceCatalogService {
 
 	public function watcherCount():Int
 		return watchers.length;
+
+	/** Notices changes now, watched or not (at most every REFRESH_SECONDS); the revision, which moves on with each. */
+	public function notice():Int {
+		refresh(REFRESH_SECONDS);
+		return revision;
+	}
+
+	/**
+		The whole catalog as one reset page with status "idle": what idle rows show once the service stopped
+		(WorkspaceCatalogProtocol.SNAPSHOT_FILE). It goes to a file, not over the wire, so it is not cut into pages.
+	**/
+	public function whole(ref:WorkspaceRef):WorkspaceCatalog {
+		refresh(0);
+		var records = snapshot, describing = snapshot.describing;
+		var result:WorkspaceCatalog = {
+			ref: ref, instance: instance, token: instance + "." + revision, reset: true, more: false,
+			name: describing.name, folders: [], scratch: describing.scratch, status: "idle",
+			attention: records.terminalAttention + records.sessionAttention,
+			groups: [], sessions: [], terminals: [], removedGroups: [], removedSessions: [], removedTerminals: [], watching: false
+		};
+		for (entry in planFor({groups: true, sessions: true, terminals: true}, 0, revision, true, describing))
+			addTo(result, entry, records, false);
+		return result;
+	}
 
 	/** Paged reads kept for connections, for tests. */
 	public function planCount():Int

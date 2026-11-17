@@ -8,7 +8,7 @@ class WorkspaceLifetimeTests {
   }
 
   public static function run():Void {
-    var lifetime = new WorkspaceLifetime();
+    var lifetime = new WorkspaceLifetime(60000);
     require(!lifetime.shouldStop(100, 0, 0), "Startup grace missing");
     require(!lifetime.shouldStop(60099, 0, 0), "Stopped before idle deadline");
     require(!lifetime.shouldStop(60100, 1, 0), "Connected client lost at deadline");
@@ -16,17 +16,12 @@ class WorkspaceLifetimeTests {
     require(!lifetime.shouldStop(140000, 0, 1), "Owned session lost without clients");
     require(!lifetime.shouldStop(200000, 0, 0), "Session completion must start fresh grace");
     require(lifetime.shouldStop(260000, 0, 0), "Idle service failed to stop");
-    var live = new WorkspaceLifetime();
+    var live = new WorkspaceLifetime(60000);
     require(!live.shouldStop(0, 0, 0, 2) && !live.shouldStop(599999, 0, 0, 2), "Idle chat processes ended before ten minutes");
     require(live.shouldStop(600000, 0, 0, 2), "Idle chat processes kept the service up for good");
     var short = new WorkspaceLifetime(2000);
     require(!short.shouldStop(0, 0, 0, 1) && !short.shouldStop(19999, 0, 0, 1) && short.shouldStop(20000, 0, 0, 1),
       "The longer wait is not ten times a short idle limit");
-    var available = new WorkspaceLifetime(0);
-    require(
-      !available.shouldStop(0, 0, 0) && !available.shouldStop(1000000000, 0, 0),
-      "Always-available service stopped"
-    );
-    Sys.println("PASS: workspace idle grace, connected clients, owned sessions, idle chat processes and always-available policy");
+    Sys.println("PASS: workspace idle grace, connected clients, owned sessions and idle chat processes");
   }
 }

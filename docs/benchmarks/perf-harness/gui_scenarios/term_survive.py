@@ -1,5 +1,5 @@
 """A terminal survives the editor and its workspace service. An editor (A) opens the workspace Alpha, makes a terminal
-and types a loop into it that prints a line and appends to a file every two seconds. A is closed with Alt+F4, and the
+and types a loop into it that prints a line and appends to a file every two seconds. A is closed (exosuit.quit, as closing it does), and the
 workspace service is stopped with a stop request (what suit's Stop and Quit send). The loop must keep running. A new
 editor (R) is started on the same state: the terminal must be listed as running, its tab must show lines the loop printed
 while no service ran, and the loop must still be the same process.
@@ -7,7 +7,6 @@ while no service ran, and the loop must still be the same process.
 The run's own editor window stays open and idle with no workspace open, because the harness ends the scenario when that
 process exits; A and R are processes the scenario starts.
 
-Terminal hosts are turned on by the fixture's environment (the run's state is isolated, where they are off by default).
 Real input only. Everything started here is stopped at the end: the second editor, the service and the terminal host."""
 import glob
 import json
@@ -22,8 +21,9 @@ from gui_driver import Gui
 from m19_folders import open_by_double_click
 from m19_sessions_drag import new_terminal
 from m19_two_windows_restart import close_window, command_line
+from sweep_common import running_services, stop_services
 
-FIXTURE = {"workspaces": ["alpha"], "open": None, "appArgs": ["--open-workbench"], "env": {"EXOSUIT_TERMINAL_HOST": "1"}}
+FIXTURE = {"workspaces": ["alpha"], "open": None, "appArgs": ["--open-workbench"]}
 
 
 def terminal_text(state):
@@ -46,14 +46,15 @@ def alive(pid):
 
 
 def run(gui):
-    out_dir = os.path.dirname(gui.dir)
+    out_dir = os.path.dirname(gui.out)
     state_dir = os.path.join(out_dir, "agent-state")
     tick_file = os.path.join(out_dir, "ticks.txt")
     started = []
     host_pids = []
 
     def endpoints():
-        return glob.glob(os.path.join(state_dir, "workspaces", "*", "endpoint.json"))
+        """The workspace services of the run that still run."""
+        return running_services(state_dir)
 
     def hosts():
         found = []
@@ -64,21 +65,12 @@ def run(gui):
                 pass
         return found
 
-    def stop_services():
-        for path in endpoints():
-            try:
-                generation = json.load(open(path))["generation"]
-                with open(os.path.join(os.path.dirname(path), "stop-request.json"), "w") as f:
-                    f.write(json.dumps({"version": 1, "generation": generation}) + "\n")
-            except (OSError, ValueError, KeyError):
-                pass
 
     def editor(name, arguments):
         """Starts an editor process on the run's state, as m19_two_windows_restart does; returns its Gui."""
         program = next(x for x in arguments if x.lower().endswith(".hl"))
         root = os.path.abspath(os.path.join(os.path.dirname(program), "..", "..", ".."))
-        folder = os.path.join(out_dir, "automation-" + name)
-        env = dict(os.environ, EXOSUIT_AUTOMATION_DIR=folder)
+        env = dict(os.environ)
         native = os.path.join(os.path.dirname(program), "native")
         libraries = [os.path.join(native, d) for d in sorted(os.listdir(native))] if os.path.isdir(native) else []
         libraries.append(os.path.dirname(arguments[0]))
@@ -88,7 +80,7 @@ def run(gui):
         log.write(" ".join(arguments) + chr(10)); log.flush()
         process = subprocess.Popen(arguments, env=env, cwd=root, stdout=log, stderr=subprocess.STDOUT, creationflags=0x08000000)
         started.append(process.pid)
-        return Gui(process.pid, folder, os.path.join(gui.out, "window-" + name), max(10, gui.deadline - time.monotonic()), 30)
+        return Gui(process.pid, os.path.join(gui.out, "window-" + name), max(10, gui.deadline - time.monotonic()), 30)
 
     def record(window):
         gui.results.extend(window.results)
@@ -117,11 +109,11 @@ def run(gui):
         a.check("the terminal runs in one terminal host", lambda s: len(host_pids) == 1 and alive(host_pids[0]), 2, detail=lambda s: host_pids)
         a.shot_window("1-before-close")
 
-        gui.step("close the editor (Alt+F4), then stop the workspace service (a stop request, as suit's Quit sends)")
+        gui.step("close the editor, then stop the workspace service (suit's stop over its link, as suit's Quit sends)")
         closed = close_window(a, a.pid)
         record(a)
         gui.results.append({"check": "editor A closed", "ok": closed, "note": ""})
-        stop_services()
+        stop_services(out_dir, state_dir)
         end = time.monotonic() + 15
         while endpoints() and time.monotonic() < end:
             time.sleep(0.2)
@@ -142,7 +134,7 @@ def run(gui):
                 detail=lambda s: s["state"]["terminals"])
         if not any(t["kind"] == "terminal" for p in r.state()["panes"] for t in p["tabs"]):
             show_workbench(r)
-            r.click(r.element("t:" + terminal))
+            r.click(r.element(open_row(r, "t", terminal)))
         r.check("the terminal has its tab", lambda s: any(t["kind"] == "terminal" for p in s["state"]["panes"] for t in p["tabs"]), 10)
         gap = "TICK %d %d" % (shell, at_stop + 1)
         r.check("the tab shows a line printed while no service ran (%s)" % gap, lambda s: gap in terminal_text(s["state"]), 15,
@@ -160,7 +152,7 @@ def run(gui):
                 record(window)
         for pid in started:
             subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
-        stop_services()
+        stop_services(out_dir, state_dir)
         for pid in set(host_pids + hosts()):
             subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
 

@@ -2,20 +2,23 @@ package suit;
 
 /** How suit stops a process of one kind; afterwards it kills the process if it still runs, and its tree (SuitTerminator). */
 enum SuitStop {
-	/** Ask it to close its windows, so it can save or prompt. Never forced: it may hold unsaved work. */
-	CloseWindows;
+	/**
+		Ask it over its suit link to quit (`exosuit.quit`), so it saves its session and keeps or asks about unsaved work.
+		Never forced: it may hold unsaved work.
+	**/
+	QuitRequest;
 
-	/** Write `stop-request.json` for its generation: it stops its daemon and releases its lock, and does not restart. */
-	StopRequest;
+	/**
+		Ask it over its suit link to stop (a workspace service): it ends its agent processes and releases its lock; its
+		terminals carry on in their hosts.
+	**/
+	ServiceStop;
 
-	/** Stop it through the workspace manager that started it, so the manager neither restarts nor outlives it. */
-	ThroughManager;
-
-	/** Kill it at once. The stop's sweep then ends its whole tree (SuitKinds.endsTree), else only its exosuit-kind descendants (SuitLineage). */
+	/**
+		Kill it at once. The stop's sweep then ends its whole tree (SuitKinds.endsTree; for a terminal host, its program's),
+		else only its exosuit-kind descendants (SuitLineage).
+	**/
 	Kill;
-
-	/** Write `end-request.json` in its folder (a terminal host): it ends its program and itself; killed if it does not. */
-	EndRequest;
 }
 
 /** When a process of one kind counts as orphaned. */
@@ -42,8 +45,13 @@ enum SuitOrphanRule {
 **/
 enum abstract SuitKind(String) to String {
 	var Editor = "editor";
-	var WorkspaceManager = "workspace-manager";
+	/** A workspace's service: one process per running workspace, which suit starts. */
 	var WorkspaceHost = "workspace-host";
+	/**
+		The warm spare suit keeps while an editor is linked (`exosuit-agent.hl --spare`): a service process with no
+		workspace yet. The workspace opened next adopts it; it then reports and is listed as that workspace's service.
+	**/
+	var WorkspaceSpare = "workspace-spare";
 	var CompilerWorker = "compiler-worker";
 	var LiveSession = "live-session";
 	var LiveHost = "live-host";
@@ -75,8 +83,8 @@ class SuitKinds {
 	public static function parse(value:Null<String>):SuitKind {
 		return switch value {
 			case "editor": SuitKind.Editor;
-			case "workspace-manager": SuitKind.WorkspaceManager;
 			case "workspace-host": SuitKind.WorkspaceHost;
+			case "workspace-spare": SuitKind.WorkspaceSpare;
 			case "compiler-worker": SuitKind.CompilerWorker;
 			case "live-session": SuitKind.LiveSession;
 			case "live-host": SuitKind.LiveHost;
@@ -92,10 +100,8 @@ class SuitKinds {
 
 	public static function stop(kind:SuitKind):SuitStop {
 		return switch kind {
-			case SuitKind.Editor: CloseWindows;
-			case SuitKind.WorkspaceManager: StopRequest;
-			case SuitKind.WorkspaceHost: ThroughManager;
-			case SuitKind.TerminalHost: EndRequest;
+			case SuitKind.Editor: QuitRequest;
+			case SuitKind.WorkspaceHost | SuitKind.WorkspaceSpare: ServiceStop;
 			default: Kill;
 		};
 	}
@@ -104,14 +110,16 @@ class SuitKinds {
 		return switch kind {
 			// A terminal host is meant to run with no editor and no service: that is never an orphan.
 			case SuitKind.Editor | SuitKind.Suit | SuitKind.TerminalHost: Never;
-			case SuitKind.WorkspaceManager | SuitKind.WorkspaceHost: NoEditorUsesRoot;
+			// A spare ends by itself when its link to suit closes.
+			case SuitKind.WorkspaceSpare: Never;
+			case SuitKind.WorkspaceHost: NoEditorUsesRoot;
 			case SuitKind.CompilerWorker: NoHaxeonUser;
 			default: OwnerGone;
 		};
 	}
 
 	/**
-		A kind exosuit starts itself: a workspace manager starts its daemon, a live session its host and
+		A kind exosuit starts itself: suit starts workspace services, a live session its host and
 		compiler workers. Only these are adopted by descent, and only these are swept under a target that does not end its
 		whole tree (SuitKinds.endsTree).
 		Editors are started by the user, and are never stopped by force. A terminal host is started by a service but is
@@ -126,7 +134,7 @@ class SuitKinds {
 
 	public static function spawnedByExosuit(kind:SuitKind):Bool {
 		return switch kind {
-			case SuitKind.WorkspaceManager | SuitKind.WorkspaceHost | SuitKind.CompilerWorker | SuitKind.LiveSession | SuitKind.LiveHost
+			case SuitKind.WorkspaceHost | SuitKind.WorkspaceSpare | SuitKind.CompilerWorker | SuitKind.LiveSession | SuitKind.LiveHost
 				| SuitKind.AgentProvider | SuitKind.LanguageServer | SuitKind.HelperProcess: true;
 			default: false;
 		};
@@ -135,8 +143,8 @@ class SuitKinds {
 	/**
 		True for a kind whose whole OS process tree ends when suit ends it (SuitProcessTree): what an agent provider started
 		(MCP servers, tool commands, a dev server), what runs under a workspace service, a live session or a launcher.
-		Editors and terminal hosts below are never part of such a tree. A terminal host is not one of these kinds: its
-		program ends through its own end path, and its tree is followed only when suit has to kill the host.
+		Editors and terminal hosts below are never part of such a tree. A terminal host is not one of these kinds: the tree
+		below it is the user's program, followed only when suit itself ends the host (SuitTerminator).
 	**/
 	public static function endsTree(kind:SuitKind):Bool {
 		return switch kind {
@@ -167,7 +175,7 @@ class SuitKinds {
 
 	/** A workspace service: it has a root and a state directory, where it may publish relay status. */
 	public static function isWorkspaceService(kind:SuitKind):Bool
-		return kind == SuitKind.WorkspaceManager || kind == SuitKind.WorkspaceHost;
+		return kind == SuitKind.WorkspaceHost;
 
 	/** True for a kind the polite quit (`suit quit --keep-terminals`) leaves running: terminal hosts. */
 	public static function keptByPoliteQuit(kind:SuitKind):Bool
@@ -175,9 +183,8 @@ class SuitKinds {
 
 	/** The menu verb for stopping one: editors are closed, not terminated. */
 	public static function stopVerb(kind:SuitKind):String
-		return switch stop(kind) {
-			case CloseWindows: "Close";
-			case EndRequest: "End terminal";
+		return kind == SuitKind.TerminalHost ? "End terminal" : switch stop(kind) {
+			case QuitRequest: "Close";
 			default: "Terminate";
 		};
 }

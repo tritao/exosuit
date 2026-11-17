@@ -17,6 +17,9 @@
     },
     "exosuit-graphical": {
       "path": "../../graphical"
+    },
+    "exosuit-model-tests": {
+      "path": "../support"
     }
   },
   "target": "host",

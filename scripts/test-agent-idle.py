@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
-"""Real managed shutdown: idle, unnegotiated sockets, authenticated clients and opt-in availability."""
+"""A workspace service's idle stop: a connection that never speaks does not keep it up, a linked client does, and the
+catalog database outlives it."""
 import contextlib
-import json
 from pathlib import Path
 import socket
-import subprocess
-import sys
 import tempfile
 import time
 
-from agent_test_runtime import launcher_path, manager_command
-from test_driver import ROOT, WINDOWS, build_test, endpoints, isolated_environment, kill_tree, run_tree, stop_managers
+from test_driver import (ROOT, WINDOWS, build_test, launcher_path, isolated_environment, process_runs, run_tree, service_log,
+                         start_service, stop_services, workspace_id)
 
-MANAGER = launcher_path(ROOT)
-MANAGER_COMMAND = manager_command(ROOT)
+LAUNCHER = launcher_path(ROOT)
 RUNNER = build_test('workspace-attachment')
 
 
 @contextlib.contextmanager
 def raw_connection(address):
-    """A connection to the manager's local endpoint that never speaks: a Unix socket, or a named pipe on Windows."""
+    """A connection to the service's endpoint that never speaks: a named pipe on Windows, else a Unix socket."""
     if WINDOWS:
         with open(address, 'r+b', buffering=0) as pipe:
             yield pipe
@@ -29,67 +26,31 @@ def raw_connection(address):
             yield raw
 
 
-def endpoint_gone(address):
-    if not WINDOWS:
-        return not Path(address).exists()
-    # Asking whether a pipe exists opens it, so open it: a manager that is gone has no pipe of that name.
-    try:
-        with open(address, 'r+b', buffering=0):
-            return False
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-
-
 with tempfile.TemporaryDirectory(prefix='exidle-', ignore_cleanup_errors=True) as temporary:
     fixture = Path(temporary)
     root = fixture / 'project'; root.mkdir()
     state = fixture / 'state'
-    environment = isolated_environment(state, MANAGER, 'workspace-attachment')
-    def endpoint():
-        entries = endpoints(state)
-        return entries[0] if entries else None
-    def ready(process):
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            assert process.poll() is None, 'Manager exited before readiness: ' + (fixture / 'manager.log').read_text()[-4000:]
-            path = endpoint()
-            if path:
-                try: return json.loads(path.read_text())
-                except (OSError, ValueError): pass  # being written
-            time.sleep(0.05)
-        raise AssertionError('Readiness timeout')
-    with (fixture / 'manager.log').open('w') as log:
-        process = None
-        try:
-            # No handshake: a raw socket cannot keep a service alive indefinitely.
-            process = subprocess.Popen([*MANAGER_COMMAND, str(root), '--idle-seconds', '2'], env=environment, stdout=log, stderr=subprocess.STDOUT)
-            first = ready(process)
-            with raw_connection(first['socket']):
-                assert process.wait(timeout=12) == 0, 'Idle shutdown reported failure'
-            assert endpoint() is None and endpoint_gone(first['socket']), 'Idle shutdown left live discovery/socket'
-            database = Path(first['credentialFile']).parent / 'catalog.sqlite'
-            assert database.exists(), 'Idle shutdown discarded persistent catalog'
-            # A fresh instance reopens the same durable database. Clients reset grace.
-            process = subprocess.Popen([*MANAGER_COMMAND, str(root), '--idle-seconds', '10'], env=environment, stdout=log, stderr=subprocess.STDOUT)
-            second = ready(process)
-            assert first['generation'] != second['generation']
-            run_tree([*RUNNER, 'hold', str(root), str(MANAGER)], environment, timeout=120)
-            assert process.poll() is None and endpoint() is not None, 'Last disconnect had no grace'
-            assert process.wait(timeout=15) == 0 and endpoint() is None
-            # Explicit availability propagates through the detached manager boundary.
-            subprocess.run([*MANAGER_COMMAND, str(root), '--detach', '--idle-seconds', '1', '--always-available'], env=environment, check=True, timeout=90,
-                           stdout=subprocess.DEVNULL, stderr=log)
-            descriptor = json.loads(endpoint().read_text())
-            time.sleep(2)
-            assert endpoint() is not None and json.loads(endpoint().read_text())['generation'] == descriptor['generation'], 'Always-available service idled out'
-            print('PASS: graceful idle stop, unnegotiated socket exclusion, connected sibling, retained catalog, restart and detached always-available mode', flush=True)
-        except Exception:
-            log.flush()
-            print((fixture / 'manager.log').read_text()[-6000:], file=sys.stderr)
-            raise
-        finally:
-            if process is not None:
-                kill_tree(process)
-            stop_managers(state)
+    environment = isolated_environment(state, LAUNCHER, 'workspace-attachment')
+    try:
+        first = start_service(environment, state, root, idle_seconds=2)
+        with raw_connection(first.endpoint):
+            assert first.wait(timeout=15) == 0, 'the idle stop reported a failure'
+        log = service_log(state, workspace_id(root)).read_text()
+        assert 'service stopped: idle' in log, log[-2000:]
+        database = service_log(state, workspace_id(root)).parent / 'catalog.sqlite'
+        assert database.exists(), 'the idle stop discarded the catalog database'
+        # A new service reopens the same database; a linked client keeps it past its idle time, and it stops after.
+        environment['EXOSUIT_SERVICE_IDLE_SECONDS'] = '4'
+        run_tree([*RUNNER, 'hold', str(root), str(LAUNCHER)], environment, timeout=150)
+        log = service_log(state, workspace_id(root)).read_text()
+        assert log.count('service starting: generation ') == 2, log[-2000:]
+        second = [line for line in log.splitlines() if 'service starting: generation ' in line][-1]
+        assert second.split('generation ')[1].split(',')[0] != first.generation
+        pid = int(second.rsplit(', pid ', 1)[1])
+        deadline = time.monotonic() + 20
+        while process_runs(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not process_runs(pid), 'the service outlived its idle time after its last client left'
+        print('PASS: a silent connection does not keep a service up, a linked client does, and the catalog database stays', flush=True)
+    finally:
+        stop_services(state)

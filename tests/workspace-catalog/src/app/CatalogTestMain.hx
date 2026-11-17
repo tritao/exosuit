@@ -384,7 +384,7 @@ class CatalogTestMain {
 	/** workspace.json changes while the service runs: a torn file keeps the last good identity and is tried again. */
 	static function identityWatch():Void {
 		var directory = haxe.io.Path.join([Sys.getEnv("TEMP") != null ? Sys.getEnv("TEMP") : "/tmp", "exosuit-catalog-identity-" + Std.int(Sys.time())]);
-		if (!AgentManagerNative.prepareDirectory(directory)) throw "cannot create " + directory;
+		if (!AgentNative.prepareDirectory(directory)) throw "cannot create " + directory;
 		var path = haxe.io.Path.join([directory, "workspace.json"]);
 		var id = "workspace-" + StringTools.rpad("", "a", 32);
 		function write(folder:String):Void

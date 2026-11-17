@@ -2,576 +2,116 @@ package app;
 
 import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
-import platform.Platform;
-import process.ProcessManager;
-import workspace.client.LocalWorkspaceClient;
+import testing.DirectService;
+import workspace.client.WorkspaceLink;
+import workspace.client.WorkspaceServiceTarget;
 
+/**
+	WorkspaceLink against a real workspace service, started the way suit starts it (testing.DirectService):
+
+	  link ROOT LAUNCHER      two links to one workspace share its one service and both verify it; a link whose
+	                          opener names the wrong service fails closed; closing a link leaves the other connected
+	  restart ROOT LAUNCHER   the service is killed: a link the window needs (`revive`) connects to the next service,
+	                          a link kept only for rows ends
+	  hold ROOT LAUNCHER      a linked client keeps a service with a short idle time running past it
+**/
 class AttachmentTestMain {
   static function require(value:Bool, message:String):Void {
     if (!value) throw message;
   }
 
+  static var runtime:Runtime;
+  static function clock():Float return NativeKit.nk_time_seconds() * 1000;
+
+  static function step(links:Array<WorkspaceLink>):Void {
+    runtime.events.wait(0.01);
+    for (_ in 0...128) if (!runtime.events.poll()) break;
+    for (link in links) link.poll();
+  }
+
+  static function until(links:Array<WorkspaceLink>, done:Void->Bool, milliseconds:Float, what:String, ?detail:Void->String):Void {
+    var deadline = clock() + milliseconds;
+    while (!done()) {
+      require(clock() < deadline, "timed out: " + what + (detail == null ? "" : " (" + detail() + ")"));
+      step(links);
+    }
+  }
+
   static function main():Void {
-    var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
-    if (mode == "cleanup-relay") {
-      var cleanupRuntime = Runtime.start();
-      for (account in ["relay:" + launcher + "/machine/" + root, "noise-static:" + root]) {
-        var value:haxe.io.Bytes = haxeon.credentials.Credentials.get("com.exosuit.workspace-relay", account);
-        if (value != null) {
-          for (index in 0...value.length) value.set(index, 0);
-          haxeon.credentials.Credentials.delete("com.exosuit.workspace-relay", account);
-        }
-      }
-      cleanupRuntime.dispose();
-      return;
+    var args = Sys.args(), mode = args[0];
+    var root = args[1], launcher = args[2];
+    runtime = Runtime.start();
+    var direct = new DirectService(launcher);
+    var target = direct.forRoot(root);
+    switch mode {
+      case "link": link(direct, target);
+      case "restart": restart(direct, target);
+      case "hold": hold(direct, target);
+      default: throw "unknown mode " + mode;
     }
-
-    var runtime = Runtime.start(), processes = new ProcessManager();
-    var clock = function() return NativeKit.nk_time_seconds() * 1000;
-    if (mode == "terminal-legacy-inspect") {
-      var legacy = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
-      legacy.select(root);
-      var backend = new workspace.client.RpcTerminalBackend(function() return legacy, args[3], root, false, null, null, true);
-      var deadline = clock() + 30000;
-      while (clock() < deadline) {
-        runtime.events.wait(0.005);
-        for (_ in 0...128) if (!runtime.events.poll()) break;
-        legacy.poll(); backend.pollEvents(function(_) {});
-        if (backend.controlStatus().indexOf("update the workspace daemon") >= 0) break;
-      }
-      require(backend.isAttached(), "Legacy control RPC disconnected terminal output");
-      require(backend.controlStatus().indexOf("update the workspace daemon") >= 0, "Expected legacy daemon compatibility status");
-      require(backend.controlAction() == "", "Unsupported control action remains enabled");
-      backend.close(); legacy.dispose(); processes.shutdown(); runtime.dispose();
-      Sys.println("PASS: legacy daemon keeps terminal attached with an actionable update status");
-      return;
-    }
-    if (mode == "terminal-pool") {
-      var other = root + "/other";
-      sys.FileSystem.createDirectory(other);
-      var pool = new workspace.client.LocalTerminalWorkspacePool(runtime.events, processes, launcher, clock);
-      var first = pool.endpoint(root), second = pool.endpoint(other);
-      require(first != second && pool.endpoint(root) == first, "Terminal roots share or replace an endpoint");
-      var one = new workspace.client.RpcTerminalBackend(function() return pool.endpoint(root), "pool-first", root, true);
-      var two = new workspace.client.RpcTerminalBackend(function() return pool.endpoint(other), "pool-second", other, true);
-      var deadline = clock() + 90000;
-      while ((!one.isAttached() || !two.isAttached()) && clock() < deadline) {
-        runtime.events.wait(0.005);
-        for (_ in 0...128) if (!runtime.events.poll()) break;
-        pool.poll();
-        one.pollEvents(function(_) {}); two.pollEvents(function(_) {});
-      }
-      require(one.isAttached() && two.isAttached(), "Terminals did not attach to both workspace daemons");
-      require(first.rootPath() == root && second.rootPath() == other, "Workspace identity changed across terminal roots");
-      require(pool.endpoint(other) == second && pool.endpoint(root) == first, "Switching roots replaced a terminal connection");
-      var peer = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
-      peer.select(root);
-      var restored = new workspace.client.RpcTerminalBackend(function() return peer, "pool-first", root, false, null, null, true);
-      var tick = function() {
-        runtime.events.wait(0.005);
-        for (_ in 0...128) if (!runtime.events.poll()) break;
-        pool.poll(); peer.poll();
-        one.pollEvents(function(_) {}); restored.pollEvents(function(_) {});
-      };
-      deadline = clock() + 10000;
-      while (!restored.isAttached() && clock() < deadline) tick();
-      require(restored.isAttached() && one.canControl() && !restored.canControl(), "Restoring stole another client's control");
-      one.activateControl();
-      deadline = clock() + 5000;
-      while (!restored.canControl() && clock() < deadline) tick();
-      require(restored.canControl(), "Restored desktop did not claim an unowned terminal");
-      restored.activateControl();
-      deadline = clock() + 5000;
-      while (restored.controlStatus() != "Read only · no client is controlling this terminal" && clock() < deadline) tick();
-      require(!restored.canControl(), "Explicit release failed");
-      deadline = clock() + 300;
-      while (clock() < deadline) tick();
-      require(!restored.canControl(), "Automatic claim overrode an explicit release");
-      restored.close(); peer.dispose();
-      var mismatched = new workspace.client.RpcTerminalBackend(function() return pool.endpoint(root), "missing", other, false);
-      require(mismatched.controlStatus().indexOf(other) >= 0, "Workspace mismatch still shows an indefinite connecting status");
-      mismatched.close();
-      var missing = new workspace.client.RpcTerminalBackend(function() return pool.endpoint(root), "missing-restored-session", root, false);
-      deadline = clock() + 5000;
-      while (missing.controlStatus().indexOf("Terminal unavailable:") != 0 && clock() < deadline) {
-        runtime.events.wait(0.005);
-        for (_ in 0...128) if (!runtime.events.poll()) break;
-        pool.poll();
-        try missing.pollEvents(function(_) {}) catch (_:Dynamic) {}
-      }
-      require(missing.controlStatus().indexOf("Terminal unavailable:") == 0, "Missing restored terminal still shows connecting");
-      // A failed view offers a retry, which asks the service again instead of staying failed until the pane is reopened.
-      require(missing.controlAction() == "Retry", "A failed terminal offered no retry");
-      missing.activateControl();
-      require(missing.controlStatus().indexOf("Terminal unavailable:") != 0 && missing.controlAction() == "", "Retry left the failure in place");
-      deadline = clock() + 5000;
-      while (missing.controlStatus().indexOf("Terminal unavailable:") != 0 && clock() < deadline) {
-        runtime.events.wait(0.005);
-        for (_ in 0...128) if (!runtime.events.poll()) break;
-        pool.poll();
-        try missing.pollEvents(function(_) {}) catch (_:Dynamic) {}
-      }
-      require(missing.controlStatus().indexOf("Terminal unavailable:") == 0 && missing.controlAction() == "Retry", "A retried missing terminal did not report its failure again");
-      missing.close();
-      require(missing.controlAction() == "", "A closed view still offered a retry");
-      pool.retainRoots([other]);
-      require(first.rpcConnection() == null && second.rpcConnection() != null, "Closing one root disconnected another or retained its unused client");
-      one.close(); two.close(); pool.dispose(); processes.shutdown(); runtime.dispose();
-      Sys.println("PASS: terminals attach to independent workspace daemons and retain endpoints across root switches");
-      return;
-    }
-    if (mode == "terminal-handover") {
-      terminalHandover(runtime, processes, clock, root, launcher);
-      return;
-    }
-    if (mode == "manager-choice") {
-      managerChoice(runtime, processes, clock, root, launcher);
-      return;
-    }
-    if (mode == "workspace-identity") {
-      workspaceIdentity(runtime, processes, clock, root, launcher, args[3], args[4], args[5]);
-      return;
-    }
-    var a = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
-    var b = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
-    var step = function() {
-      runtime.events.wait(0.005);
-      for (_ in 0...128) if (!runtime.events.poll()) break;
-      a.poll();
-      b.poll();
-    };
-    a.select(root);
-    b.select(root);
-    // A new catalog has no groups (ADR 0006), so the folder a client is served from is the service's root, not a first group's.
-    var same = workspace.client.MachineWorkspaces.normalPath;
-    var deadline = clock() + 115000;
-    if (mode == "relay-persist-inspect") {
-      while ((!a.ready || !b.ready) && clock() < deadline) {
-        require(a.error == null && b.error == null, "Attachment failed after relay restart: " + a.error + " / " + b.error);
-        step();
-      }
-      deadline = clock() + 10000;
-      while (a.remoteAccessStatus() == null && clock() < deadline) { a.refreshPairings(false); step(); }
-      var status = a.remoteAccessStatus();
-      require(a.ready && status != null && status.configured && status.origin == args[3],
-        "Persisted relay configuration was not restored after manager restart: " + (status == null ? "no status" : status.origin));
-      a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
-      Sys.println("PASS: workspace relay settings persist across manager restart");
-      return;
-    }
-    if (mode == "reject") {
-      while (a.error == null && clock() < deadline) {
-        require(!a.ready, "Unverified workspace accepted");
-        step();
-      }
-      require(a.error != null && !a.ready, "Mismatched discovery/daemon identity accepted");
-      Sys.println("PASS: invalid workspace discovery/identity fails closed");
-    } else {
-      while ((!a.ready || !b.ready) && clock() < deadline) {
-        require(a.error == null && b.error == null, "Attachment failed: " + a.error + " / " + b.error);
-        step();
-      }
-      require(
-        a.ready && b.ready && a.instance == b.instance && same(a.rootPath()) == same(root),
-        "Concurrent clients did not attach to one validated daemon"
-      );
-      if (mode == "update-idle" || mode == "update-busy" || mode == "update-now" || mode == "update-legacy") {
-        var previous = a.instance;
-        var busy = mode != "update-idle";
-        if (busy) {
-          var opened = false;
-          a.rpc().call(workspace.service.WorkspaceTerminalProtocol.OPEN,
-            {workspace: "workspace", instance: previous, id: "update-test", create: true, columns: 80, rows: 24},
-            3000, function(_) opened = true, function(error) { throw error.message; });
-          deadline = clock() + 5000;
-          while (!opened && clock() < deadline) step();
-          require(opened, "Could not open test terminal");
-        }
-        sys.io.File.saveContent(args[3], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        a.select(null); a.select(root);
-        deadline = clock() + 110000;
-        if (busy) {
-          while ((!a.ready || !a.serviceUpdateAvailable() || mode != "update-legacy" && a.serviceStatus() == null) && clock() < deadline) step();
-          require(a.serviceUpdateAvailable(), "Changed build was not detected");
-          var until = clock() + 2000;
-          while (clock() < until) { step(); require(b.ready && b.instance == previous, "Busy service restarted automatically"); }
-          if (mode == "update-now" || mode == "update-legacy") {
-            a.requestServiceUpdate("now");
-          } else {
-          a.requestServiceUpdate("idle");
-          while (clock() < deadline) {
-            step(); require(b.ready && b.instance == previous, "Queued update interrupted a running terminal");
-            var currentStatus = a.serviceStatus();
-            if (currentStatus != null && currentStatus.updatePending) break;
-            require(a.serviceUpdateError() == null, "Update preparation failed: " + a.serviceUpdateError());
-          }
-          var queued = a.serviceStatus();
-          require(queued != null && queued.updatePending && queued.terminals == 1, "Update did not wait for active terminal");
-          a.requestServiceUpdate("cancel");
-          var canceled = false;
-          var cancelDeadline = clock() + 5000;
-          while (clock() < cancelDeadline) {
-            step(); var currentStatus = a.serviceStatus();
-            if (currentStatus != null && !currentStatus.updatePending && !a.serviceUpdateBusy()) { canceled = true; break; }
-          }
-          require(canceled && b.instance == previous, "Could not cancel queued update");
-          a.requestServiceUpdate("idle");
-          a.rpc().call(workspace.service.WorkspaceTerminalProtocol.TERMINATE,
-            {workspace: "workspace", instance: previous, id: "update-test"}, 3000,
-            function(_) {}, function(error) { throw error.message; });
-          }
-        }
-        while (clock() < deadline) {
-          step();
-          require(a.error == null && b.error == null, "Reconnect failed: " + a.error + " / " + b.error);
-          require(a.serviceUpdateError() == null, "Update failed: " + a.serviceUpdateError());
-          var currentStatus = a.serviceStatus();
-          if (a.ready && b.ready && a.instance != previous && a.instance == b.instance && currentStatus != null
-            && currentStatus.build == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") break;
-        }
-        require(a.ready && b.ready && a.instance != previous && a.instance == b.instance, "Clients did not reconnect to replacement daemon");
-        a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
-        Sys.println("PASS: " + mode + " replaces daemon safely and reconnects sibling editors");
-        return;
-      }
-      if (mode == "update-existing-idle") {
-        if (a.serviceUpdateAvailable() && !a.serviceUpdateBusy()) a.requestServiceUpdate("idle");
-        deadline = clock() + 115000;
-        while (a.serviceUpdateBusy() && clock() < deadline) step();
-        require(!a.serviceUpdateBusy() && a.serviceUpdateError() == null,
-          "Could not schedule idle update: " + a.serviceUpdateError());
-        a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
-        Sys.println("PASS: workspace update prepared and requested for idle without terminating sessions");
-        return;
-      }
-      if (mode == "relay-live" || mode == "relay-inspect" || mode == "relay-browser") {
-        var original = a.instance;
-        deadline = clock() + 5000;
-        while (a.remoteAccessStatus() == null && clock() < deadline) { a.refreshPairings(false); step(); }
-        if (mode != "relay-inspect") a.configureRelay(args[3]);
-        deadline = clock() + 30000;
-        var connected = false;
-        while (clock() < deadline) {
-          step(); a.refreshPairings(false);
-          require(a.error == null && b.error == null && b.ready && b.instance == original,
-            "Relay setup interrupted the workspace: " + a.error + " / " + b.error);
-          var status = a.remoteAccessStatus();
-          if (status != null && status.connected && a.canManagePairings()) { connected = true; break; }
-        }
-        var status = a.remoteAccessStatus();
-        require(connected, "Native hosted relay connection failed: " + (status == null ? "no status" : status.error));
-        if (mode == "relay-inspect") {
-          deadline = clock() + 90000;
-          while ((!a.ready || a.serviceUpdateAvailable() || a.serviceUpdateBusy()) && clock() < deadline) {
-            var service = a.serviceStatus();
-            if (service != null && (service.terminals > 0 || service.agents > 0)) break;
-            step();
-          }
-          require(a.serviceUpdateError() == null, "Service update failed: " + a.serviceUpdateError());
-          Sys.println("SERVICE: " + haxe.Json.stringify(a.serviceStatus()));
-          Sys.println("UPDATE AVAILABLE: " + a.serviceUpdateAvailable());
-          a.refreshPairings(true);
-          deadline = clock() + 5000;
-          while (a.pairingList() == null && a.pairingError() == null && clock() < deadline) step();
-          require(a.pairingList() != null && a.pairingError() == null, "Current workspace pairing RPC failed: " + a.pairingError());
-          a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
-          Sys.println("PASS: current workspace relay connected and pairing administration responds without errors");
-          return;
-        }
-        var invited = false, invitationError:Null<String> = null;
-        a.createPairing(60, function(value, error) {
-          invitationError = error;
-          invited = value != null && value.pairingSocketUrl.indexOf("wss://") == 0;
-          if (invited && mode == "relay-browser") sys.io.File.saveContent(args[4], value.pairingSocketUrl);
-        });
-        deadline = clock() + 10000;
-        while (!invited && invitationError == null && clock() < deadline) step();
-        require(invited && invitationError == null, "Native live pairing invitation failed: " + invitationError);
-        if (mode == "relay-browser") {
-          Sys.println("READY: browser pairing fixture");
-          deadline = clock() + 90000;
-          var pending = false;
-          var approvalStarted = false;
-          while (clock() < deadline) {
-            step(); a.refreshPairings(false);
-            if (sys.FileSystem.exists(args[4] + ".done")) break;
-            var pairings = a.pairingList();
-            if (pairings != null && pairings.pending.length > 0) {
-              sys.io.File.saveContent(args[4] + ".code", pairings.pending[0].authenticationCode);
-              pending = true;
-              if (!approvalStarted && sys.FileSystem.exists(args[4] + ".approve")) {
-                approvalStarted = true;
-                a.approvePairing(pairings.pending[0].deviceId,
-                  [workspace.service.WorkspaceProtocol.IDENTITY_CAPABILITY, workspace.service.WorkspaceProtocol.READ,
-                   workspace.service.WorkspaceProtocol.TREE, workspace.service.WorkspaceFileProtocol.READ], function(error) {
-                    sys.io.File.saveContent(args[4] + ".approval-result", error == null ? "ok" : error);
-                  });
-              }
-              if (sys.FileSystem.exists(args[4] + ".done")) break;
-            }
-          }
-          require(pending, "Browser did not reach native Noise pairing confirmation");
-          Sys.println("PASS: browser reached native Noise pairing confirmation");
-        }
-        a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
-        Sys.println("PASS: native HTTPS/WSS hosted relay connection and pairing invitation preserve sibling editor sessions");
-        return;
-      }
-      if (mode == "remote-setup") {
-        var instance = a.instance;
-        // The client may be ready from the descriptor while its discover helper still runs; it can configure once that ends.
-        deadline = clock() + 30000;
-        while ((a.remoteAccessStatus() == null || !a.canConfigureRelay()) && clock() < deadline) { a.refreshPairings(false); step(); }
-        var initialStatus = a.remoteAccessStatus();
-        require(initialStatus != null && !initialStatus.configured && a.canConfigureRelay(),
-          "Connected local daemon did not expose unconfigured remote access: status " + initialStatus + ", can configure " + a.canConfigureRelay());
-        a.configureRelay("https://relay.example/path?token=secret");
-        var refused = try { new workspace.transport.RelayMachineEndpoint("https://relay.example/path?token=secret", "00000000000000000000000000000000"); false; } catch (_:Dynamic) true;
-        require(a.pairingError() != null && a.ready && b.ready, "Invalid relay address disturbed the workspace: refusal " + a.pairingError()
-          + ", ready " + a.ready + "/" + b.ready + ", can configure " + a.canConfigureRelay() + ", update busy " + a.serviceUpdateBusy()
-          + ", RelayMachineEndpoint refuses the address " + refused);
-        a.configureRelay("https://127.0.0.1:1");
-        deadline = clock() + 15000;
-        while (clock() < deadline) {
-          step(); a.refreshPairings(false);
-          require(b.ready && b.instance == instance, "Enabling remote access interrupted a sibling workspace client");
-          var status = a.remoteAccessStatus();
-          if (status != null && status.configured && status.error != null) break;
-        }
-        var status = a.remoteAccessStatus();
-        require(a.ready && a.instance == instance && status != null && status.configured && !status.connected
-          && status.origin == "https://127.0.0.1:1" && status.error != null && !a.canManagePairings(),
-          "Runtime relay configuration did not report offline status without replacing the daemon: " + a.error);
-        a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
-        Sys.println("PASS: relay setup preserves the daemon and sibling clients, reports connection errors, and gates invitations");
-        return;
-      }
-      if (mode == "hold") {
-        var holdUntil = clock() + 12000;
-        while (clock() < holdUntil) {
-          if (clock() >= holdUntil - 6000) a.dispose();
-          step();
-          require(b.ready && b.error == null, "Connected sibling lost during idle grace");
-        }
-        Sys.println("PASS: authenticated clients keep daemon alive beyond its idle timeout");
-        a.dispose();
-        b.dispose();
-        processes.shutdown();
-        runtime.dispose();
-
-        return;
-      }
-      var previousInstance = a.instance, previousEpoch = a.epoch();
-      a.dispose();
-      for (_ in 0...8) step();
-      require(b.ready, "Closing a client stopped its sibling's daemon");
-      // Switching cancels the old attachment and resumes the same persistent workspace on return.
-      b.select(root + "/other");
-      deadline = clock() + 115000;
-      while (!b.ready && clock() < deadline) {
-        require(b.error == null, "Folder switch failed: " + b.error);
-        step();
-      }
-      require(
-        b.ready && b.instance != previousInstance && same(b.rootPath()) == same(root + "/other"),
-        "Folder switch kept the old catalog"
-      );
-      b.select(root);
-      deadline = clock() + 15000;
-      while (!b.ready && clock() < deadline) {
-        require(b.error == null, "Reuse failed: " + b.error);
-        step();
-      }
-      require(
-        b.ready && b.instance == previousInstance && b.epoch() == previousEpoch,
-        "Returning to a folder spawned a replacement daemon"
-      );
-      Sys
-        .println("PASS: concurrent discovery/spawn, typed identity, shared reuse, folder switching and client-independent daemon lifetime");
-    }
-    a.dispose();
-    b.dispose();
-    processes.shutdown();
-    require(processes.activeCount() == 0, "Attachment helper leaked");
     runtime.dispose();
-
   }
 
-  /**
-    A terminal of folder A reaches A's service through the window's own client (the pool's `shared`). The window then
-    opens folder B: the terminal's connection moves to a client of the pool's before the window's client closes it, so
-    the terminal never shows "Connecting to workspace terminal…" and keeps its screen and history (args: root A, launcher;
-    B is A/other).
-  **/
-  static function terminalHandover(runtime:Runtime, processes:ProcessManager, clock:Void->Float, root:String, launcher:String):Void {
-    var first = sys.FileSystem.fullPath(root), second = sys.FileSystem.fullPath(root + "/other");
-    var window = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
-    var pool = new workspace.client.LocalTerminalWorkspacePool(runtime.events, processes, launcher, clock);
-    pool.shared = window;
-    window.select(first);
-    var terminal = new workspace.client.RpcTerminalBackend(function() return pool.endpoint(first), "handover", first, true);
-    var tick = function() {
-      runtime.events.wait(0.005);
-      for (_ in 0...128) if (!runtime.events.poll()) break;
-      window.poll(); pool.poll();
-      terminal.pollEvents(function(_) {});
-    };
-    var deadline = clock() + 90000;
-    while (!(terminal.isAttached() && terminal.isSynchronized()) && clock() < deadline) {
-      require(window.error == null, "Window attachment failed: " + window.error);
-      tick();
-    }
-    require(terminal.isAttached() && terminal.isSynchronized(), "The terminal did not attach: " + terminal.controlStatus());
-    require(pool.endpoint(first) == window, "The terminal did not use the window's client");
-    var connection = window.rpcConnection(), generation = window.serviceGeneration();
-    require(connection != null, "The window's client has no connection");
-
-    window.select(second);
-    var moved = pool.endpoint(first);
-    require(moved != null && moved != window, "The terminal's service was not handed to a client of the pool's");
-    require(moved.rpcConnection() == connection && moved.serviceGeneration() == generation,
-      "The handed-over client does not hold the window's connection");
-    function steady(when:String):Void {
-      require(pool.endpoint(first) == moved, "The terminal's client changed " + when);
-      require(terminal.isAttached() && terminal.isSynchronized(), "The terminal reported " + terminal.controlStatus() + " " + when);
-      require(moved.rpcConnection() == connection, "The terminal's connection was replaced " + when);
-    }
-    steady("right after the window left");
-    deadline = clock() + 90000;
-    while (!(window.ready && window.rootPath() == second) && clock() < deadline) {
-      require(window.error == null, "Window attachment to B failed: " + window.error);
-      tick();
-      steady("while the window opened B");
-    }
-    require(window.ready && window.rootPath() == second, "The window did not open B");
-    require(window.rpcConnection() != connection, "The window kept A's connection");
-    deadline = clock() + 1500;
-    while (clock() < deadline) { tick(); steady("after the window opened B"); }
-    terminal.close(); pool.dispose(); window.dispose(); processes.shutdown(); runtime.dispose();
-    Sys.println("PASS: a terminal attached through the window's client keeps its connection and history when the window opens another folder");
+  static function link(direct:DirectService, target:WorkspaceServiceTarget):Void {
+    var a = new WorkspaceLink(runtime.events, clock, direct.open, target);
+    var b = new WorkspaceLink(runtime.events, clock, direct.open, target);
+    until([a, b], function() {
+      require(a.error == null && b.error == null, "a link failed: " + a.error + " / " + b.error);
+      return a.ready && b.ready && a.catalogMirror() != null;
+    }, 90000, "two links ready");
+    require(a.instance == b.instance && a.instance.length == 32, "two links did not share one verified service");
+    require(a.servedWorkspace() == target.workspace && a.statusLabel() == "Workspace connected", "the link does not name its workspace");
+    require(a.workspace == target.workspace && a.servesRoot(target.folders[0]), "the link does not serve its folder");
+    // An opener that names the right pipe for another service (another root): IDENTITY does not match; nothing is accepted.
+    var instance = a.instance, endpoint:Null<String> = null;
+    direct.open(target.workspace, function(service, _) endpoint = service == null ? null : service.endpoint);
+    require(endpoint != null, "the running service was not found again");
+    var named:String = endpoint;
+    var forged = new WorkspaceLink(runtime.events, clock, function(_, done) done({endpoint: named, generation: instance, root: "/elsewhere"}, null), target);
+    until([a, b, forged], function() {
+      require(!forged.ready, "a link accepted a service that is not the one named");
+      return forged.failure() != null;
+    }, 15000, "the forged link to fail");
+    forged.dispose();
+    a.dispose();
+    for (_ in 0...20) step([b]);
+    require(b.ready && b.instance == instance, "closing one link disturbed the other");
+    b.dispose();
+    Sys.println("PASS: links share one verified service, refuse one that does not match, and close independently");
   }
 
-  /**
-    The folder's default state is served by another build's manager (args: root, this build's launcher). The client
-    attaches without offering it an update, starts its own from a copy, switches back, and never starts its build on a
-    state folder that is not its own.
-  **/
-  static function managerChoice(runtime:Runtime, processes:ProcessManager, clock:Void->Float, root:String, launcher:String):Void {
-    var choices = new workspace.client.WorkspaceManagerChoices(null);
-    var client = new LocalWorkspaceClient(runtime.events, processes, launcher, clock, null, choices);
-    var machine = new workspace.client.MachineWorkspaces(processes, launcher, clock);
-    var tick = function() {
-      runtime.events.wait(0.005);
-      for (_ in 0...128) if (!runtime.events.poll()) break;
-      client.poll();
-      machine.poll();
-    };
-    function until(condition:Void->Bool, timeout:Float, message:String):Void {
-      var deadline = clock() + timeout;
-      while (!condition() && clock() < deadline) tick();
-      require(condition(), message + (client.error == null ? "" : ": " + client.error));
-    }
-    function list():workspace.client.MachineWorkspaces.MachineListing {
-      var revision = machine.revision;
-      machine.refresh();
-      until(function() return machine.revision != revision, 30000, "Machine listing did not finish");
-      require(machine.error == null && machine.listing != null, "Machine listing failed: " + machine.error);
-      return machine.listing;
-    }
-    client.select(root);
-    until(function() return client.ready, 60000, "Did not attach to the other build's manager");
-    var other = client.serviceGeneration();
-    require(client.managerFromOtherBuild(), "Another build's manager was not recognized");
-    require(!client.serviceUpdateAvailable(), "Another build's manager was offered an update");
-    require(client.statusLabel() == "Workspace connected (another build)", "Status hides the other build: " + client.statusLabel());
-
-    client.refreshTerminals(true);
-    until(function() return client.terminalCatalog() != null, 10000, "Terminal catalog did not load");
-    var created = false;
-    client.changeGroup(other, {id: "copied", name: "Copied", cwd: null, revision: 0, parent: null, order: 5}, "Copied", null, null, 5, true,
-      function(group, error) created = group != null);
-    until(function() return [for (group in client.view()) group.id].indexOf("copied") >= 0, 10000, "Group was not created");
-
-    var listing = list();
-    require(listing.managers.length == 1 && listing.managers[0].generation == other && listing.managers[0].defaultState,
-      "Listing does not show the other build's manager on the default state");
-    require(workspace.client.MachineWorkspaces.buildLabel(listing.managers[0].launcher, listing.launcher) == "other build",
-      "Other build label: " + workspace.client.MachineWorkspaces.buildLabel(listing.managers[0].launcher, listing.launcher));
-    var defaultState = listing.managers[0].stateDir;
-
-    choices.chooseCopy(root, workspace.client.MachineWorkspaces.ownState(listing, root, launcher), defaultState);
-    until(function() return client.ready && client.serviceGeneration() != other, 90000, "Did not move to a manager on this build");
-    var own = client.serviceGeneration();
-    require(!client.managerFromOtherBuild() && client.attachedState() != null, "The new manager is not this build's own");
-    require([for (group in client.view()) group.id].indexOf("copied") >= 0, "The copy lost the other manager's groups");
-    require(choices.seedFor(root) == null, "The copy is still requested after connecting");
-    listing = list();
-    require(listing.managers.length == 2, "Listing does not show both managers: " + listing.managers.length);
-
-    choices.choose(root, null);
-    until(function() return client.ready && client.serviceGeneration() == other, 30000, "Did not return to the default state");
-    choices.choose(root, haxe.io.Path.join([haxe.io.Path.directory(defaultState), "stopped-other-build"]));
-    until(function() return client.error != null, 30000, "Started this build on a state folder that is not its own");
-    require(client.error.indexOf("Machine view") >= 0, "Unexpected refusal: " + client.error);
-    choices.choose(root, null);
-    until(function() return client.ready && client.serviceGeneration() == other, 30000, "Did not recover after choosing again");
-
-    machine.dispose(); client.dispose(); processes.shutdown(); runtime.dispose();
-    Sys.println("PASS: the editor uses, copies and switches between this machine's managers for one folder (own " + own + ")");
+  static function restart(direct:DirectService, target:WorkspaceServiceTarget):Void {
+    var needed = new WorkspaceLink(runtime.events, clock, direct.open, target);
+    var rows = new WorkspaceLink(runtime.events, clock, direct.open, target);
+    rows.revive = function() return false;
+    until([needed, rows], function() return needed.ready && rows.ready, 90000, "links ready");
+    var before = needed.instance;
+    var log = sys.io.File.getContent(haxe.io.Path.join([DirectService.stateOf(target.workspace), "service.log"]));
+    var pid = Std.parseInt(log.substr(log.lastIndexOf(", pid ") + 6));
+    require(pid != null && pid > 0, "no service pid in its log");
+    if (Sys.systemName() == "Windows") Sys.command("taskkill", ["/F", "/PID", Std.string(pid)]);
+    else Sys.command("kill", ["-9", Std.string(pid)]);
+    until([needed, rows], function() return rows.ended && needed.ready && needed.instance != before, 90000,
+      "the needed link on a new service, the rows link ended", function() return "rows: ended " + rows.ended + " ready " + rows.ready
+        + " error " + rows.error + "; needed: ready " + needed.ready + " same " + (needed.instance == before) + " error " + needed.error
+        + " status " + needed.statusLabel());
+    needed.dispose();
+    rows.dispose();
+    Sys.println("PASS: a needed link connects to the next service, a link kept for rows ends with its service");
   }
 
-  /**
-    Two folders of one workspace, as the editor's terminals reach them (args: first folder, launcher, second folder,
-    phase, the previous run's service generation). Both roots attach to one service keyed by the workspace id, whose
-    groups outlive the service; with EXOSUIT_WORKSPACE_IDENTITY=folder each folder has a service of its own.
-  **/
-  static function workspaceIdentity(runtime:Runtime, processes:ProcessManager, clock:Void->Float, first:String, launcher:String,
-      second:String, phase:String, previous:String):Void {
-    var enabled = workspace.client.WorkspaceServiceTarget.enabled();
-    var resolve = function(folder:String):Null<workspace.client.WorkspaceServiceTarget> {
-      return enabled && (folder == first || folder == second) ? workspace.client.WorkspaceServiceTarget.forWorkspace("ws1", [first, second], null) : null;
-    };
-    var pool = new workspace.client.LocalTerminalWorkspacePool(runtime.events, processes, launcher, clock, resolve);
-    var tick = function() {
-      runtime.events.wait(0.005);
-      for (_ in 0...128) if (!runtime.events.poll()) break;
-      pool.poll();
-    };
-    var one:LocalWorkspaceClient = cast pool.endpoint(first), two:LocalWorkspaceClient = cast pool.endpoint(second);
-    require(enabled ? one == two : one != two, "Roots of a workspace share a service only with the flag: " + enabled);
-    var deadline = clock() + 100000;
-    while ((!one.ready || !two.ready) && clock() < deadline) {
-      require(one.error == null && two.error == null, "Attachment failed: " + one.error + " / " + two.error);
-      tick();
+  static function hold(direct:DirectService, target:WorkspaceServiceTarget):Void {
+    var a = new WorkspaceLink(runtime.events, clock, direct.open, target);
+    var b = new WorkspaceLink(runtime.events, clock, direct.open, target);
+    until([a, b], function() return a.ready && b.ready, 90000, "links ready");
+    var holdUntil = clock() + 12000;
+    var closed = false;
+    while (clock() < holdUntil) {
+      if (!closed && clock() >= holdUntil - 6000) { a.dispose(); closed = true; }
+      step(closed ? [b] : [a, b]);
+      require(b.ready && b.error == null, "a linked client lost its service during the idle time");
     }
-    require(one.ready && two.ready, "Did not attach to the workspace's service");
-    var same = workspace.client.MachineWorkspaces.normalPath;
-    require(same(one.rootPath()) == same(first), "The service did not start in the first folder: " + one.rootPath());
-    var generation = one.serviceGeneration();
-    require(phase != "check" || generation != previous, "The service did not restart");
-    if (phase == "create") {
-      one.refreshTerminals(true);
-      deadline = clock() + 10000;
-      while (one.terminalCatalog() == null && clock() < deadline) tick();
-      require(one.terminalCatalog() != null, "Terminal catalog did not load");
-      var created = false;
-      one.changeGroup(generation, {id: "kept", name: "Kept", cwd: null, revision: 0, parent: null, order: 5}, "Kept", null, second, 5, true,
-        function(group, error) created = group != null);
-      deadline = clock() + 10000;
-      while (!created && clock() < deadline) tick();
-      require(created, "Group was not created");
-    }
-    var kept = [for (group in one.view()) if (group.id == "kept") group];
-    require(kept.length == 1 && same(kept[0].cwd) == same(second), "Group did not survive: " + kept.length);
-    // Roots keep their client while they stay in use, and the workspace's service goes when none is.
-    if (enabled) {
-      pool.retainRoots([second]);
-      require(one.rpcConnection() != null, "A workspace's service was released while a root of it is in use");
-      pool.retainRoots([]);
-      require(one.rpcConnection() == null, "An unused workspace's client was kept");
-    }
-    pool.dispose(); processes.shutdown(); runtime.dispose();
-    Sys.println("GENERATION " + generation);
-    Sys.println("PASS: " + (enabled ? "both folders of the workspace attach to one service keyed by its id" : "each folder keeps a service of its own"));
+    b.dispose();
+    Sys.println("PASS: a linked client keeps its service running past its idle time");
   }
 }

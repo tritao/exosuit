@@ -11,139 +11,98 @@ import time
 import ctypes
 
 ROOT=Path(__file__).resolve().parent.parent
-from agent_test_runtime import launcher_path, manager_command, manager_environment
-from haxeon_cli import run_cli
+sys.path.insert(0,str(ROOT/'scripts'))
+from test_driver import (HAXEON_ROOT, build_test, isolated_environment, launcher_path, process_runs as pid_runs, run_tree,
+                         service_log as log_of, start_service, workspace_id)
 
-MANAGER=launcher_path(ROOT)
-MANAGER_COMMAND=manager_command(ROOT)
-MODE=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED')=='1' else []
-PROJECT=ROOT/'tests/workspace-terminals/haxeon.json'
-HAXEON_ROOT=Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon'))).resolve()
-OUTPUT=PROJECT.parent/'build/host'
-RUNNER=[str(HAXEON_ROOT/'.tools/hashlink'/('hl.exe' if os.name=='nt' else 'hl')),str(OUTPUT/'main.hl')]
+# The agent bytecode: the services' program, and what a client program (testing.DirectService) starts one with.
+SERVICE=launcher_path(ROOT)
 if os.name!='nt':
     print('SKIP: terminal hosts have only been run on Windows'); sys.exit(0)
-if run_cli(ROOT,['build','--project',str(PROJECT),*MODE])!=0: sys.exit('build failed')
+RUNNER=build_test('workspace-terminals')
 
 kernel=ctypes.WinDLL('kernel32'); kernel.OpenProcess.restype=ctypes.c_void_p
-def kill_tree(process):
-    if process.poll() is not None: return
-    subprocess.run(['taskkill','/F','/T','/PID',str(process.pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    try: process.wait(timeout=10)
-    except subprocess.TimeoutExpired: pass
 def hosts_of(fixture):
     """Pids of the terminal hosts started for this fixture: they are detached, so no process tree holds them."""
     script="Get-CimInstance Win32_Process -Filter \"Name='hl.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('--terminal-host') -and $_.CommandLine.Contains('%s') } | ForEach-Object { $_.ProcessId }" % fixture.name
     found=subprocess.run(['powershell','-NoProfile','-Command',script],capture_output=True,text=True,timeout=60).stdout.split()
     return [int(pid) for pid in found if pid.isdigit()]
-def run_tree(command,environment,timeout=60):
-    process=subprocess.Popen(command,env=environment)
-    try: status=process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        kill_tree(process); raise
-    if status: raise subprocess.CalledProcessError(status,command)
+def environment_of(state,**extra):
+    """A service's and a client's environment, all state under `state` (test_driver.isolated_environment). A service a
+    client starts (testing.DirectService, when the one `begin` started idled out meanwhile) idles out as `begin`'s do."""
+    return dict(isolated_environment(state,SERVICE,'workspace-terminals'),EXOSUIT_SERVICE_IDLE_SECONDS='8',**extra)
+def begin(environment,state,root,idle=8):
+    """Starts the service of `root`'s test workspace with idle limit `idle` and returns it once ready."""
+    return start_service(environment,state,root,idle_seconds=idle)
+def stop(service,idle=8):
+    """Stops a service the clean way there is without suit: its clients are gone, so it idles out."""
+    assert service.wait(idle+20)==0,'the service did not idle out'
+def kill(service):
+    subprocess.run(['taskkill','/F','/PID',str(service.pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    service.wait(20)
+def service_logs(state,limit=6000):
+    return ''.join('\n== '+str(path)+'\n'+path.read_text(errors='replace')[-limit:] for path in state.glob('exosuit/workspaces/*/service.log'))
 
 with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as temporary:
     fixture=Path(temporary); root=fixture/'project'; root.mkdir(); state=fixture/'state'
-    environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),EXOSUIT_AGENT_STATE_HOME=str(state/'exosuit'),
-        EXOSUIT_TERMINAL_HOST='1')
-    environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
-    libraries=[HAXEON_ROOT/'out',HAXEON_ROOT/'.tools/hashlink',*sorted(path for path in (OUTPUT/'native').iterdir() if path.is_dir())]
-    environment['PATH']=os.pathsep.join(str(path) for path in libraries)+os.pathsep+environment.get('PATH','')
-    def endpoints(): return list(state.glob('exosuit/workspaces/*/endpoint.json'))
-    def generation():
-        try: return json.loads(endpoints()[0].read_text())['generation']
-        except (IndexError,OSError,ValueError,KeyError): return None
-    def start(log,previous=None,hosts_on=True):
-        """Starts a manager and waits for its endpoint; `previous` is the generation a killed one left in its endpoint file."""
-        manager=subprocess.Popen([*MANAGER_COMMAND,str(root),'--idle-seconds','8'],env=dict(environment,EXOSUIT_TERMINAL_HOST='1' if hosts_on else '0'),
-            stdout=log,stderr=subprocess.STDOUT)
-        deadline=time.monotonic()+90
-        while generation() in (None,previous):
-            assert manager.poll() is None,'the manager exited before it was ready'
-            assert time.monotonic()<deadline,'the manager did not become ready'
-            time.sleep(.05)
-        return manager
+    environment=environment_of(state)
     def host_runs():
         code=ctypes.c_ulong(); kernel.GetExitCodeProcess(ctypes.c_void_p(handle),ctypes.byref(code))
         return code.value==259
     def logs():
-        text=(fixture/'manager.log').read_text(errors='replace')[-6000:]
-        for path in state.glob('exosuit/workspaces/*/manager.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-6000:]
+        text=service_logs(state)
         for path in state.glob('exosuit/workspaces/*/terminal-hosts/*/host.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-4000:]
         return text
-    with (fixture/'manager.log').open('w') as log:
-        manager=start(log)
+    if True:
+        service=begin(environment,state,root)
         try:
-            first=json.loads(endpoints()[0].read_text())
-            run_tree([*RUNNER,'create',str(root),str(MANAGER)],environment)
+            first=service
+            run_tree([*RUNNER,'create',str(root),str(SERVICE)],environment)
             hosts=hosts_of(fixture)
             assert len(hosts)==1,'expected one terminal host, found %r'%hosts
             handle=kernel.OpenProcess(0x1000,False,hosts[0])
             assert handle,'the terminal host could not be opened'
             assert list(state.glob('exosuit/terminal-host/*/complete')),'the host does not run from a private runtime copy'
-            # Stop the service the way suit does; the terminal's shell must outlive it.
-            (endpoints()[0].parent/'stop-request.json').write_text(json.dumps({'version':1,'generation':first['generation']})+chr(10))
-            assert manager.wait(timeout=20)==0,'the manager did not stop on request'
-            assert not endpoints(),'the stopped manager kept its endpoint'
+            # The service stops cleanly (it idles out, as when suit stops it); the terminal's shell must outlive it.
+            stop(service)
             shell=int((root/'shell-pid').read_text().strip())
             time.sleep(2)
             assert host_runs(),'the terminal host ended with its service'
             assert hosts_of(fixture)==hosts,'the terminal host is not listed any more'
-            manager=start(log)
-            second=json.loads(endpoints()[0].read_text())
-            assert second['generation']!=first['generation']
-            # A service that is killed (no stop, nothing cleaned up) leaves the terminal running as well. Killing the manager
-            # closes the job its daemon runs in.
-            subprocess.run(['taskkill','/F','/PID',str(second['managerPid'])],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            manager.wait(timeout=20)
+            second=service=begin(environment,state,root)
+            assert second.generation!=first.generation
+            # A service that is killed (no stop, nothing cleaned up) leaves the terminal running as well.
+            kill(service)
             time.sleep(2)
             assert host_runs() and hosts_of(fixture)==hosts,'the terminal host ended when its service was killed'
-            # A service without hosts cannot reach the terminal and records it as lost; the host and its program go on, and
-            # the next service with hosts takes the terminal back.
-            manager=start(log,second['generation'],hosts_on=False)
-            without=json.loads(endpoints()[0].read_text())
-            time.sleep(1)
-            (endpoints()[0].parent/'stop-request.json').write_text(json.dumps({'version':1,'generation':without['generation']})+chr(10))
-            assert manager.wait(timeout=20)==0,'the manager without hosts did not stop on request'
-            assert host_runs(),'the terminal host ended under a service that ran without hosts'
-            manager=start(log)
-            assert generation() not in (first['generation'],second['generation'],without['generation'])
+            service=begin(environment,state,root)
+            assert service.generation not in (first.generation,second.generation)
             # The existing attach check: the screen shows what the shell printed (also while no service ran), the shell has the
             # same pid and state, takes input and a resize, and its exit code arrives.
-            run_tree([*RUNNER,'attach',str(root),str(MANAGER)],environment)
+            run_tree([*RUNNER,'attach',str(root),str(SERVICE)],environment)
             deadline=time.monotonic()+15
             while hosts_of(fixture):
                 assert time.monotonic()<deadline,'the terminal host did not end after its shell exited'
                 time.sleep(.5)
-            print('PASS: a hosted terminal (shell pid %d) kept its process and screen across a stopped service, a killed one and one without hosts'%shell,flush=True)
+            print('PASS: a hosted terminal (shell pid %d) kept its process and screen across a stopped service and a killed one'%shell,flush=True)
         except Exception:
             print(logs(),file=sys.stderr)
             raise
         finally:
-            kill_tree(manager)
+            kill(service)
             for pid in hosts_of(fixture): subprocess.run(['taskkill','/F','/T','/PID',str(pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 # ---- suit and the kill switches (docs/design/terminal-host-status.md): a host is listed by suit under its workspace, is
-# kept by Quit and by bulk stops, and ends on `suit terminals end`; a service start asks hosts without a terminal record
-# to end, removes dead hosts' folders and unused runtime copies, and a service without hosts says which hosts go on.
+# kept by Quit and by bulk stops, and ends on `suit terminals end`; a service start ends no host, removes dead hosts'
+# folders and unused runtime copies.
 from suit import library_path, library_variable
 SUIT=ROOT/'suit/build/host/main.hl'
 assert SUIT.is_file(),'build suit first: %s'%SUIT
-def pid_runs(pid):
-    opened=kernel.OpenProcess(0x1000,False,pid)
-    if not opened: return False
-    code=ctypes.c_ulong(); kernel.GetExitCodeProcess(ctypes.c_void_p(opened),ctypes.byref(code)); kernel.CloseHandle(ctypes.c_void_p(opened))
-    return code.value==259
 with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as temporary:
     fixture=Path(temporary); root=fixture/'project'; root.mkdir(); state=fixture/'state'
     # Its own suit: hosts register in this home only, and suit reads no other process (EXOSUIT_SUIT_SCAN=0).
-    environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),EXOSUIT_AGENT_STATE_HOME=str(state/'exosuit'),
-        EXOSUIT_TERMINAL_HOST='1',EXOSUIT_SUIT='isolated',EXOSUIT_SUIT_HOME=str(fixture/'suit-home'),EXOSUIT_SUIT_AUTOSTART='0',
+    environment=environment_of(state,EXOSUIT_SUIT_HOME=str(fixture/'suit-home'),EXOSUIT_SUIT_AUTOSTART='0',
         EXOSUIT_SUIT_TRAY='0',EXOSUIT_SUIT_SCAN='0',EXOSUIT_TERMINAL_HOST_CHECK_SECONDS='1')
-    environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
-    libraries=[HAXEON_ROOT/'out',HAXEON_ROOT/'.tools/hashlink',*sorted(path for path in (OUTPUT/'native').iterdir() if path.is_dir())]
-    environment['PATH']=os.pathsep.join(str(path) for path in libraries)+os.pathsep+environment.get('PATH','')
     suit_environment=dict(environment,EXOSUIT_SUIT_LAUNCHER=str(SUIT))
     suit_environment[library_variable()]=library_path(SUIT,Path(RUNNER[0]),HAXEON_ROOT,environment['PATH'])
     def suit(*arguments):
@@ -151,35 +110,23 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
         assert result.returncode==0,'suit %s failed (%d): %s%s'%(' '.join(arguments),result.returncode,result.stderr,result.stdout)
         return result.stdout
     def planned(*arguments): return {int(line.split()[0]) for line in suit(*arguments,'--dry-run').splitlines() if line.endswith('would stop')}
-    def endpoints(): return list(state.glob('exosuit/workspaces/*/endpoint.json'))
-    def start(log,hosts_on=True):
-        manager=subprocess.Popen([*MANAGER_COMMAND,str(root),'--idle-seconds','8'],env=dict(environment,EXOSUIT_TERMINAL_HOST='1' if hosts_on else '0'),
-            stdout=log,stderr=subprocess.STDOUT)
-        deadline=time.monotonic()+90
-        while not endpoints():
-            assert manager.poll() is None,'the manager exited before it was ready'
-            assert time.monotonic()<deadline,'the manager did not become ready'
-            time.sleep(.05)
+    def start(idle=8):
+        service=begin(environment,state,root,idle)
         time.sleep(1)
-        return manager
-    def stop(manager):
-        endpoint=json.loads(endpoints()[0].read_text())
-        (endpoints()[0].parent/'stop-request.json').write_text(json.dumps({'version':1,'generation':endpoint['generation']})+chr(10))
-        assert manager.wait(timeout=20)==0,'the manager did not stop on request'
+        return service
     def logs():
-        text=(fixture/'manager.log').read_text(errors='replace')[-6000:]
-        for path in state.glob('exosuit/workspaces/*/manager.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-6000:]
+        text=service_logs(state)
         for path in state.glob('exosuit/workspaces/*/terminal-hosts/*/host.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-4000:]
         return text
     suit('status')
-    with (fixture/'manager.log').open('w') as log:
-        manager=start(log)
+    if True:
+        manager=start()
         try:
-            run_tree([*RUNNER,'create',str(root),str(MANAGER)],environment)
+            run_tree([*RUNNER,'create',str(root),str(SERVICE)],environment)
             hosts=hosts_of(fixture)
             assert len(hosts)==1,'expected one terminal host, found %r'%hosts
             host=hosts[0]; shell=int((root/'shell-pid').read_text().strip())
-            workspace=endpoints()[0].parent; folders=workspace/'terminal-hosts'; copies=state/'exosuit/terminal-host'
+            workspace=log_of(state,workspace_id(root)).parent; folders=workspace/'terminal-hosts'; copies=state/'exosuit/terminal-host'
             folder=next(path for path in folders.iterdir() if (path/'host.json').is_file())
             assert json.loads((folder/'terminal.json').read_text())['terminal']=='test-terminal','the service did not say which terminal the host keeps'
             assert list(copies.glob('*/host-%d.lease'%host)),'the host holds no lease in its runtime copy'
@@ -201,22 +148,18 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             assert pid_runs(host) and pid_runs(shell),'the polite quit ended the terminal'
             # 3. Planted: a host folder with no terminal record that holds a last screen, an old one with no host and nothing
             # to collect, an old runtime copy nothing runs from and a young one.
-            unrecorded=folders/('0'*24); unrecorded.mkdir(); (unrecorded/'host.log').write_text('left behind\n'); (unrecorded/'final.bin').write_bytes(b'last')
-            dead=folders/('1'*24); dead.mkdir(); (dead/'host.log').write_text('dead\n'); (dead/'end-request.json').write_text('{"version":1,"reason":"test"}\n')
+            unrecorded=folders/('0'*24); unrecorded.mkdir(); (unrecorded/'host.log').write_text('left behind\n'); (unrecorded/'screen.bin').write_bytes(b'last')
+            dead=folders/('1'*24); dead.mkdir(); (dead/'host.log').write_text('dead\n')
             os.utime(dead,(time.time()-300,time.time()-300))
             for name,age in (('0'*16,7200),('1'*16,30)):
                 (copies/name).mkdir(); (copies/name/'hl.exe').write_bytes(b'not a program'); (copies/name/'complete').write_text('x\n')
                 os.utime(copies/name/'complete',(time.time()-age,time.time()-age))
-            # A service without hosts: the host goes on, the service says so, and the sweep still runs.
-            manager=start(log,hosts_on=False)
-            assert unrecorded.is_dir() and not (unrecorded/'end-request.json').exists(),'a host folder without a terminal record was asked to end or removed'
+            # A service start keeps the folder with a last screen, removes the folder of a host that is gone and the runtime
+            # copy no host runs from, and keeps the young copy and its own.
+            manager=start()
+            assert unrecorded.is_dir(),'a host folder that holds a last screen was removed'
             assert not dead.exists(),'the folder of a host that is gone was not removed'
-            assert (folder/'host.json').is_file() and not (folder/'end-request.json').exists(),'the recorded terminal\'s host was disturbed'
-            assert 'keep running although this service runs without hosts' in logs(),'a service without hosts did not say that hosts keep running'
-            assert pid_runs(host) and json.loads(suit('list','--json'))['terminals']==1,'the host is not visible under a service without hosts'
-            stop(manager)
-            # A service with hosts removes the runtime copy no host runs from, and keeps the young one and its own.
-            manager=start(log)
+            assert (folder/'host.json').is_file(),'the recorded terminal\'s host was disturbed'
             assert not (copies/('0'*16)).exists(),'an unused runtime copy was not removed'
             assert (copies/('1'*16)).exists(),'a runtime copy made a moment ago was removed'
             assert list(copies.glob('*/host-%d.lease'%host)) and pid_runs(host),'the running host lost its runtime copy'
@@ -226,8 +169,8 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             aside=fixture/'catalog-aside'; aside.mkdir()
             moved=list(workspace.glob('catalog.sqlite*'))
             for path in moved: path.rename(aside/path.name)
-            manager=start(log)
-            assert (folder/'host.json').is_file() and not (folder/'end-request.json').exists() and unrecorded.is_dir(),'a service with an empty terminal catalog disturbed the host folders'
+            manager=start()
+            assert (folder/'host.json').is_file() and unrecorded.is_dir(),'a service with an empty terminal catalog disturbed the host folders'
             assert 'has no terminal record in this workspace: left running' in logs(),'the service did not log the host it has no record of'
             stop(manager)
             time.sleep(1.5)
@@ -249,33 +192,24 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             if kept is None: catalog.unlink()
             else: catalog.write_text(kept)
             identity.write_text(written)
-            # Restart Terminal of a terminal whose host runs but does not answer (suspended here): the old host is asked to
-            # end and then killed; the new host owns the folder and is not ended by a later request addressed to the old one.
-            old_instance=json.loads((folder/'host.json').read_text())['instance']
+            # A host that runs but does not answer (suspended here) is lost for now, never ended: the service tries it again
+            # and takes the same shell back once it answers.
             suspended=kernel.OpenProcess(0x0800,False,host)
-            assert suspended and ctypes.WinDLL('ntdll').NtSuspendProcess(ctypes.c_void_p(suspended))==0,'the host could not be suspended'
-            manager=start(log)
+            ntdll=ctypes.WinDLL('ntdll')
+            assert suspended and ntdll.NtSuspendProcess(ctypes.c_void_p(suspended))==0,'the host could not be suspended'
+            # No client comes while the host is suspended, and a running terminal does not keep a service: a longer idle limit.
+            manager=start(idle=90)
             deadline=time.monotonic()+60
             while 'test-terminal is lost' not in logs():
-                assert time.monotonic()<deadline,'the service did not give up the host that does not answer'
+                assert time.monotonic()<deadline,'the service did not give up waiting for the host that does not answer'
                 time.sleep(.5)
-            run_tree([*RUNNER,'host-restart',str(root),str(MANAGER),'test-terminal',"'RESTARTED_'+'SHELL'",'RESTARTED_SHELL'],environment,timeout=150)
-            deadline=time.monotonic()+20
-            while pid_runs(host) or pid_runs(shell):
-                assert time.monotonic()<deadline,'the old host of the restarted terminal (or its shell) is still running'
-                time.sleep(.2)
+            assert pid_runs(host) and pid_runs(shell),'the service ended a host that did not answer'
+            assert ntdll.NtResumeProcess(ctypes.c_void_p(suspended))==0,'the host could not be resumed'
             kernel.CloseHandle(ctypes.c_void_p(suspended))
-            renewed=hosts_of(fixture)
-            assert len(renewed)==1 and renewed[0]!=host,'expected one new terminal host, found %r'%renewed
-            assert 'did not end when asked; it was killed' in logs(),'the service did not kill the old host that did not answer'
-            stop(manager)
-            (folder/'end-request.json').write_text(json.dumps({'version':2,'reason':'test: for the old host','pid':host,'instance':old_instance})+'\n')
-            time.sleep(3)
-            assert pid_runs(renewed[0]),'an end request addressed to the old host ended the new one'
-            assert not (folder/'end-request.json').exists(),'the new host did not remove a request for a host that is gone'
-            assert json.loads((folder/'host.json').read_text())['pid']==renewed[0] and not (folder/'final.bin').exists()
-            host=renewed[0]
-            # 4. The kill switch: `suit terminals end --all` ends the host and its program through the host's folder.
+            run_tree([*RUNNER,'host-type',str(root),str(SERVICE),'test-terminal','attach',"'RESUMED_'+'SHELL'",'RESUMED_SHELL'],environment,timeout=150)
+            assert hosts_of(fixture)==[host] and pid_runs(shell),'the terminal was not taken back from the same host'
+            kill(manager)  # its idle limit is long
+            # 4. The kill switch: `suit terminals end --all` kills the host and its program.
             assert planned('terminals','end','--all')=={host}
             ended=suit('terminals','end','--all')
             assert str(host) in ended,ended
@@ -283,15 +217,13 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             while pid_runs(host) or pid_runs(shell):
                 assert time.monotonic()<deadline,'`suit terminals end --all` left the host or its shell running: %s'%ended
                 time.sleep(.2)
-            assert 'asked to end by a request' in (folder/'host.log').read_text(errors='replace'),'the host was killed, not asked to end'
             assert json.loads(suit('list','--json'))['terminals']==0 and 'No terminal is kept running' in suit('terminals')
-            assert not list(copies.glob('*/host-%d.lease'%host)),'the ended host left its lease'
             # 5. A host that fails to start (its runtime copy's bytecode is broken here) leaves no spec.bin: it holds the
             # program's environment and the pipe's token.
-            manager=start(log)
+            manager=start()
             for program in copies.glob('*/terminal-host.hl'): program.write_bytes(b'not bytecode')
             # The client's own result does not matter here: what the start leaves in the host's folder does.
-            subprocess.run([*RUNNER,'host-type',str(root),str(MANAGER),'term-broken','create',"'NEVER'"],env=environment,
+            subprocess.run([*RUNNER,'host-type',str(root),str(SERVICE),'term-broken','create',"'NEVER'"],env=environment,
                 stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=120)
             broken_folder=folders/hashlib.sha256(b'term-broken').hexdigest()[:24]
             deadline=time.monotonic()+30
@@ -301,12 +233,12 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             assert broken_folder.is_dir() and not (broken_folder/'spec.bin').exists(),'spec.bin was left behind by a host that failed to start'
             assert 'exited before it was ready' in logs(),'the host did not fail the way this check expects'
             stop(manager)
-            print('PASS: suit lists a terminal host, the polite quit keeps it, kill --all includes it, `suit terminals end` ends it; a service start ends no host (an empty terminal catalog included), keeps a folder with a last screen and removes dead folders and unused runtime copies; an empty or partial machine.json ends no unattached host; Restart Terminal of a host that does not answer kills it and the new host ignores requests for the old one; a host that fails to start leaves no spec.bin',flush=True)
+            print('PASS: suit lists a terminal host, the polite quit keeps it, kill --all includes it, `suit terminals end` ends it; a service start ends no host (an empty terminal catalog included), keeps a folder with a last screen and removes dead folders and unused runtime copies; an empty or partial machine.json ends no unattached host; a host that does not answer is not ended and is taken back once it answers; a host that fails to start leaves no spec.bin',flush=True)
         except Exception:
             print(logs(),file=sys.stderr)
             raise
         finally:
-            kill_tree(manager)
+            kill(manager)
             for pid in hosts_of(fixture): subprocess.run(['taskkill','/F','/T','/PID',str(pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 # Several terminals, two workspaces: each comes back to its own view with its scrollback (also what was printed while no
@@ -316,34 +248,17 @@ with tempfile.TemporaryDirectory(prefix='exhosts-',ignore_cleanup_errors=True) a
     fixture=Path(temporary); state=fixture/'state'
     roots={'a':fixture/'project-a','b':fixture/'project-b'}
     for path in roots.values(): path.mkdir()
-    environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),EXOSUIT_AGENT_STATE_HOME=str(state/'exosuit'),
-        EXOSUIT_TERMINAL_HOST='1',EXOSUIT_SUIT='off')
-    environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
-    libraries=[HAXEON_ROOT/'out',HAXEON_ROOT/'.tools/hashlink',*sorted(path for path in (OUTPUT/'native').iterdir() if path.is_dir())]
-    environment['PATH']=os.pathsep.join(str(path) for path in libraries)+os.pathsep+environment.get('PATH','')
+    environment=environment_of(state)
     managers={}
-    def endpoint(key):
-        """The endpoint file and content of the service for workspace `key`, or (None, None) while it has none."""
-        for path in state.glob('exosuit/workspaces/*/endpoint.json'):
-            try: content=json.loads(path.read_text())
-            except (OSError,ValueError): continue
-            if os.path.normcase(os.path.realpath(content.get('root','')))==os.path.normcase(os.path.realpath(roots[key])): return path,content
-        return None,None
-    def start(key,log):
-        managers[key]=subprocess.Popen([*MANAGER_COMMAND,str(roots[key]),'--idle-seconds','8'],env=environment,stdout=log,stderr=subprocess.STDOUT)
-        deadline=time.monotonic()+90
-        while endpoint(key)[0] is None:
-            assert managers[key].poll() is None,'the manager of workspace %s exited before it was ready'%key
-            assert time.monotonic()<deadline,'the manager of workspace %s did not become ready'%key
-            time.sleep(.05)
-        return endpoint(key)[1]['generation']
-    def stop(key):
-        path,content=endpoint(key)
-        (path.parent/'stop-request.json').write_text(json.dumps({'version':1,'generation':content['generation']})+chr(10))
-        assert managers[key].wait(timeout=20)==0,'the manager of workspace %s did not stop on request'%key
-        return path.parent
+    def start(key):
+        managers[key]=begin(environment,state,roots[key])
+        return managers[key].generation
+    def stop_key(key):
+        """Stops workspace `key`'s service (it idles out) and returns its state folder."""
+        stop(managers[key])
+        return log_of(state,workspace_id(roots[key])).parent
     def client(mode,key,*arguments,timeout=90):
-        run_tree([*RUNNER,mode,str(roots[key]),str(MANAGER),*[str(value) for value in arguments]],environment,timeout)
+        run_tree([*RUNNER,mode,str(roots[key]),str(SERVICE),*[str(value) for value in arguments]],environment,timeout)
     def view(key,terminal,expected=None):
         target=fixture/('view-%s.json'%terminal)
         client('host-dump',key,terminal,target,*([expected] if expected else []))
@@ -352,17 +267,16 @@ with tempfile.TemporaryDirectory(prefix='exhosts-',ignore_cleanup_errors=True) a
     def host_folder(workspace,terminal):
         return workspace/'terminal-hosts'/hashlib.sha256(terminal.encode()).hexdigest()[:24]
     def logs():
-        text=(fixture/'manager.log').read_text(errors='replace')[-8000:]
-        for path in state.glob('exosuit/workspaces/*/manager.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-8000:]
+        text=service_logs(state,8000)
         for path in state.glob('exosuit/workspaces/*/terminal-hosts/*/host.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-3000:]
         return text
     def numbered(prefix,count,gate):
         """A command that prints `count` numbered lines, and 40 more once the file `gate` exists."""
         return ("1..%d | %% { '%s_LINE_{0:0000}' -f $_ }; '%s_'+'READY'; while (!(Test-Path '%s')) { Start-Sleep -Milliseconds 200 }; "
             "1..40 | %% { '%s_LATE_{0:00}' -f $_ }; '%s_'+'DONE'")%(count,prefix,prefix,gate,prefix,prefix)
-    with (fixture/'manager.log').open('w') as log:
+    if True:
         try:
-            generations={key:start(key,log) for key in roots}
+            generations={key:start(key) for key in roots}
             gate=fixture/'gate'; last=fixture/'last'
             client('host-type','a','term-a1','create',numbered('A1',11000,gate),'A1_READY')
             client('host-type','a','term-a2','create',numbered('A2',30,gate),'A2_READY')
@@ -375,12 +289,12 @@ with tempfile.TemporaryDirectory(prefix='exhosts-',ignore_cleanup_errors=True) a
             # paste reach the terminal. Whatever arrived must be the same after the restart.
             assert before['alternate'] and 'paste=1' in before['modes'],'the full-screen program did not set its modes before the restart: %r'%{k:v for k,v in before.items() if k!='lines'}
             frame=max(int(line.split('TUI_FRAME_')[1][:6]) for line in before['lines'] if 'TUI_FRAME_' in line)
-            workspaces={key:stop(key) for key in roots}
+            workspaces={key:stop_key(key) for key in roots}
             # Output while no service runs.
             gate.write_text('go')
             time.sleep(3)
             assert sorted(hosts_of(fixture))==sorted(hosts),'terminal hosts ended with their services'
-            restarted={key:start(key,log) for key in roots}
+            restarted={key:start(key) for key in roots}
             assert all(restarted[key]!=generations[key] for key in roots)
             a1=view('a','term-a1','A1_DONE'); body=text(a1)
             kept={line.strip() for line in a1['lines'] if 'A1_LINE_' in line}
@@ -403,56 +317,47 @@ with tempfile.TemporaryDirectory(prefix='exhosts-',ignore_cleanup_errors=True) a
             client('host-type','a','term-a2','attach',"'A2_AFTER_'+'BREAK'",'A2_AFTER_BREAK')
             again=view('a','term-a2','A2_AFTER_BREAK')
             assert again['found'] and again['state']=='running' and 'A2_LINE_0001' in text(again),'the terminal did not go on after its connection broke'
-            # The host sends its whole history again on the new connection, into the service's emulator that already holds
-            # it: the history replaces what was there instead of following it (each line once, not twice).
+            # The host sends its whole history again on the new connection: a view gets each line once, not twice.
             for marker in ('A2_LINE_0001','A2_LATE_01','A2_DONE'):
                 seen=sum(1 for line in again['lines'] if marker in line)
                 assert seen==1,'after the reconnect the view shows %s %d times:\n%s'%(marker,seen,text(again))
-            assert endpoint('a')[1]['generation']==restarted['a'],'the service was replaced instead of connecting again'
-            assert 'connected again' in (workspaces['a']/'manager.log').read_text(errors='replace'),'the service did not log the reconnect'
+            assert managers['a'].runs() and managers['a'].generation==restarted['a'],'the service was replaced instead of connecting again'
+            assert 'connected again' in (workspaces['a']/'service.log').read_text(errors='replace'),'the service did not log the reconnect'
             # A program that ends while no service is attached.
             client('host-type','b','term-b1','attach',"while (!(Test-Path '%s')) { Start-Sleep -Milliseconds 200 }; 'B1_LAST_'+'SCREEN'; exit 9"%last)
-            stop('b')
+            stop_key('b')
             last.write_text('go')
-            final=host_folder(workspaces['b'],'term-b1')/'final.bin'
+            final=host_folder(workspaces['b'],'term-b1')/'screen.bin'
             deadline=time.monotonic()+20
             while not final.exists() or len(hosts_of(fixture))!=3:
-                assert time.monotonic()<deadline,'the host of the ended program did not leave final.bin and end'
+                assert time.monotonic()<deadline,'the host of the ended program did not leave screen.bin and end'
                 time.sleep(.25)
-            start('b',log)
+            start('b')
             ended=view('b','term-b1','B1_LAST_SCREEN')
             assert ended['found'] and ended['state']=='exited' and ended['exitCode']==9,'the ended program came back as %r, exit code %r'%(ended['state'],ended['exitCode'])
             assert 'B1_LINE_0001' in text(ended),'the ended program lost its scrollback'
-            assert not final.exists(),'final.bin was not removed after the service took it'
+            assert final.exists(),'the last screen of the ended terminal was removed before the terminal was closed'
             print('PASS: four hosted terminals in two workspaces came back to their own views with %d lines of scrollback, a full-screen program kept its modes, a broken host connection was opened again, and an exit with no service kept its screen and code'%a1['scrollback'],flush=True)
         except Exception:
             print(logs(),file=sys.stderr)
             raise
         finally:
-            for manager in managers.values(): kill_tree(manager)
+            for service in managers.values(): kill(service)
             for pid in hosts_of(fixture): subprocess.run(['taskkill','/F','/T','/PID',str(pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 # A flood of coloured output: a host sends faster than the service takes it in. The service's connection holds at most
 # 1 MiB it has not read and closes when more arrives, so the host may send only what the service said it has taken
-# (TerminalHostProtocol.CREDIT). Before that, the service lost the host within seconds and its terminal turned failed.
+# (TerminalHostProtocol.CREDIT).
 with tempfile.TemporaryDirectory(prefix='exhostflood-',ignore_cleanup_errors=True) as temporary:
     fixture=Path(temporary); state=fixture/'state'; root=fixture/'project'; root.mkdir()
-    environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),EXOSUIT_AGENT_STATE_HOME=str(state/'exosuit'),
-        EXOSUIT_TERMINAL_HOST='1',EXOSUIT_SUIT='off',EXOSUIT_TEST_TERMINAL_COLUMNS='200')
-    environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
-    libraries=[HAXEON_ROOT/'out',HAXEON_ROOT/'.tools/hashlink',*sorted(path for path in (OUTPUT/'native').iterdir() if path.is_dir())]
-    environment['PATH']=os.pathsep.join(str(path) for path in libraries)+os.pathsep+environment.get('PATH','')
+    environment=environment_of(state,EXOSUIT_TEST_TERMINAL_COLUMNS='200')
     def flood_client(mode,*arguments,timeout=120):
-        run_tree([*RUNNER,mode,str(root),str(MANAGER),*[str(value) for value in arguments]],environment,timeout)
+        run_tree([*RUNNER,mode,str(root),str(SERVICE),*[str(value) for value in arguments]],environment,timeout)
     def service_log():
-        return ''.join(path.read_text(errors='replace') for path in state.glob('exosuit/workspaces/*/manager.log'))
-    with (fixture/'manager.log').open('w') as log:
-        manager=subprocess.Popen([*MANAGER_COMMAND,str(root),'--idle-seconds','8'],env=environment,stdout=log,stderr=subprocess.STDOUT)
+        return ''.join(path.read_text(errors='replace') for path in state.glob('exosuit/workspaces/*/service.log'))
+    if True:
+        manager=begin(environment,state,root)
         try:
-            deadline=time.monotonic()+90
-            while not any(state.glob('exosuit/workspaces/*/endpoint.json')):
-                assert manager.poll() is None and time.monotonic()<deadline,'the manager did not become ready'
-                time.sleep(.05)
             done=fixture/'flood-done'
             flood=("$e=[char]27; $l=-join (0..194 | %% { $e+'[38;5;'+($_ %% 200 + 16)+'m'+[char](65+$_ %% 26) }); "
                 "1..6000 | %% { ('{0:00000}' -f $_)+$l }; $e+'[0m'; 'FLOOD_'+'DONE'; 'x' > '%s'")%done
@@ -470,20 +375,16 @@ with tempfile.TemporaryDirectory(prefix='exhostflood-',ignore_cleanup_errors=Tru
             assert dump['found'] and dump['state']=='running','the flooded terminal is %r, not running:\n%s'%(dump['state'],text)
             # The rendered history a view takes is bounded to 16 MiB (terminalkit_history_copy): about 4300 of these lines.
             assert dump['scrollback']>=3000 and '06000' in '\n'.join(dump['lines']),'the flooded terminal holds %d lines above the screen'%dump['scrollback']
-            # The window holds from the service's ATTACH, before its first CREDIT arrives; this service sends CREDIT, so no
-            # host may take it for an older one that sends none and lift the window.
-            lifted=[path for path in state.glob('exosuit/workspaces/*/terminal-hosts/*/host.log') if 'sends no CREDIT' in path.read_text(errors='replace')]
-            assert not lifted,'a host took this service for one that sends no CREDIT: %s'%lifted
             print('PASS: a host printing 6000 lines of 200 coloured columns kept its connection to the service (%d lines above the screen)'%dump['scrollback'],flush=True)
         except Exception:
-            print((fixture/'manager.log').read_text(errors='replace')[-4000:]+'\n'+service_log()[-6000:],file=sys.stderr)
+            print(service_log()[-6000:],file=sys.stderr)
             for path in state.glob('exosuit/workspaces/*/terminal-hosts/*/host.log'): print('== '+str(path)+'\n'+path.read_text(errors='replace')[-3000:],file=sys.stderr)
             raise
         finally:
-            kill_tree(manager)
+            kill(manager)
             for pid in hosts_of(fixture): subprocess.run(['taskkill','/F','/T','/PID',str(pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
-# ---- Memory (docs/design/terminal-host-status.md, "Memory"): four terminals filled with 10000 lines of 200-column
+# ---- Memory: four terminals filled with 10000 lines of 200-column
 # coloured output, two of which then exit. Prints the private memory of the service and of each host while all four
 # run, right after two ended, and once the service let the ended ones go; a view of an ended terminal still gets its
 # whole scrollback (from disk), and a full live one attaches with all of it.
@@ -509,25 +410,16 @@ if os.environ.get('EXOSUIT_TERMINAL_MEMORY')!='1':
 else:
     with tempfile.TemporaryDirectory(prefix='exhostmem-',ignore_cleanup_errors=True) as temporary:
         fixture=Path(temporary); state=fixture/'state'; root=fixture/'project'; root.mkdir()
-        environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),EXOSUIT_AGENT_STATE_HOME=str(state/'exosuit'),
-            EXOSUIT_TERMINAL_HOST='1',EXOSUIT_SUIT='off',EXOSUIT_TEST_TERMINAL_COLUMNS='200')
-        environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
-        libraries=[HAXEON_ROOT/'out',HAXEON_ROOT/'.tools/hashlink',*sorted(path for path in (OUTPUT/'native').iterdir() if path.is_dir())]
-        environment['PATH']=os.pathsep.join(str(path) for path in libraries)+os.pathsep+environment.get('PATH','')
-        def endpoint_file(): return next(iter(state.glob('exosuit/workspaces/*/endpoint.json')),None)
+        environment=environment_of(state,EXOSUIT_TEST_TERMINAL_COLUMNS='200')
         def client(mode,*arguments,timeout=120):
-            run_tree([*RUNNER,mode,str(root),str(MANAGER),*[str(value) for value in arguments]],environment,timeout)
+            run_tree([*RUNNER,mode,str(root),str(SERVICE),*[str(value) for value in arguments]],environment,timeout)
         def view(terminal,expected=None):
             target=fixture/('view-%s.json'%terminal)
             client('host-dump',terminal,target,*([expected] if expected else []))
             return json.loads(target.read_text(encoding='utf-8'))
-        with (fixture/'manager.log').open('w') as log:
-            manager=subprocess.Popen([*MANAGER_COMMAND,str(root),'--idle-seconds','8'],env=environment,stdout=log,stderr=subprocess.STDOUT)
+        if True:
+            manager=begin(environment,state,root)
             try:
-                deadline=time.monotonic()+90
-                while endpoint_file() is None:
-                    assert manager.poll() is None and time.monotonic()<deadline,'the manager did not become ready'
-                    time.sleep(.05)
                 base=report('empty service',private_memory(fixture))
                 terminals=['mem-%d'%number for number in range(1,5)]
                 for terminal in terminals:
@@ -536,7 +428,7 @@ else:
                         "1..10000 | %% { ('{0:00000}' -f $_)+$l }; $e+'[0m'; 'FILL_'+'DONE'; 'x' > '%s'")%done
                     client('host-type',terminal,'create',fill)
                 deadline=time.monotonic()+600
-                # The highest the service reached while the terminals filled: the periodic history saves made it gigabytes.
+                # The highest the service reached while the terminals filled.
                 peak=0
                 while not all((fixture/('done-'+terminal)).exists() for terminal in terminals):
                     assert time.monotonic()<deadline,'the terminals did not finish printing'
@@ -567,10 +459,8 @@ else:
                 print('PASS: memory measured (service %.1f MiB with 4 full terminals, %.1f MiB once 2 ended and were let go); ended terminals came back with their whole scrollback'
                     %(live/1048576,unloaded/1048576),flush=True)
             except Exception:
-                text=(fixture/'manager.log').read_text(errors='replace')[-6000:]
-                for path in state.glob('exosuit/workspaces/*/manager.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-6000:]
-                print(text,file=sys.stderr)
+                print(service_logs(state),file=sys.stderr)
                 raise
             finally:
-                kill_tree(manager)
+                kill(manager)
                 for pid in hosts_of(fixture): subprocess.run(['taskkill','/F','/T','/PID',str(pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

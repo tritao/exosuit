@@ -9,4 +9,3 @@ if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
   self_hosted+=(--self-hosted)
 fi
 "$haxeon" run --project "$root_dir/tests/workspace-persistence/haxeon.json" "${self_hosted[@]}" -- "$directory/catalog.sqlite"
-python3 "$root_dir/scripts/test-agent-manager.py"

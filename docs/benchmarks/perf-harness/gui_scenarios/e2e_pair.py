@@ -149,34 +149,41 @@ def phone_url(config, desktop_url):
 
 def create_fake_session(config, workspace_id, folder, name, start=False):
     """Creates a fake agent session through the workspace service (the same admin tool the test host uses). `start` first
-    starts the service (a workspace the editor is not attached to); suit finds it by its state folder."""
+    starts the service (a workspace the editor is not attached to); suit finds it by its report."""
     return admin_ensure(config, workspace_id, folder, ["--ensure-session", name], start, "provider_starting")
 
 
 def admin_ensure(config, workspace_id, folder, admin_arguments, start=False, retry_on="provider_starting"):
     sys.path.insert(0, os.path.join(config["root"], "scripts"))
-    from agent_test_runtime import manager_environment, runtime_paths
+    from test_driver import runtime_paths, service_environment
     root = Path(config["root"])
     runtime, bytecode = runtime_paths(root)
-    env = manager_environment(root)
+    env = service_environment(root)
     env.update(config["editorEnv"])
 
     def hl(*arguments, program=None, timeout=90):
         return subprocess.run([str(runtime), str(program or bytecode), *arguments], env=env, cwd=folder, capture_output=True, text=True,
                               timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    log = Path(env["EXOSUIT_AGENT_STATE_HOME"]) / "workspaces" / workspace_id / "service.log"
     if start:
-        started = hl("--manager", "--workspace", workspace_id, "--folder", folder, "--detach", "--idle-seconds", "3000")
-        if started.returncode != 0:
-            raise Failure("starting the service failed (%s): %s%s" % (started.returncode, started.stderr, started.stdout))
+        # Started as suit starts it, in the background; it outlives this call and idles out.
+        subprocess.Popen([str(runtime), str(bytecode), "--workspace", workspace_id, "--folder", folder],
+                         env=dict(env, EXOSUIT_SERVICE_IDLE_SECONDS="3000"), cwd=folder, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     deadline = time.monotonic() + 60
-    while True:  # the editor starts the service when it attaches; discovery answers 4 until the endpoint exists
-        found = hl("--manager", "--workspace", workspace_id, "--discover")
-        if found.returncode == 0 and found.stdout.strip():
+    socket = None
+    while socket is None:  # the editor (through suit) starts the service when it attaches; its log names its pipe once ready
+        try:
+            ready = [line for line in log.read_text(encoding="utf-8", errors="replace").splitlines() if "service ready on " in line]
+        except OSError:
+            ready = []
+        if ready:
+            socket = ready[-1].split("service ready on ", 1)[1].partition(" for ")[0].strip()
             break
         if time.monotonic() > deadline:
-            raise Failure("discover failed (%s): %s%s" % (found.returncode, found.stderr, found.stdout))
+            raise Failure("the service of %s did not get ready (%s)" % (workspace_id, log))
         time.sleep(1)
-    socket = json.loads(found.stdout)["socket"]
     admin = config["admin"]
     deadline = time.monotonic() + 90
     while True:
@@ -249,7 +256,7 @@ def open_alpha(gui, ctx):
     phone.ensure_automation()
     # The app logs "online" only when the machine's state changes, and an earlier step may have cleared the log, so the
     # Remote list itself is the signal: an open workspace hides it until the Remote panel is chosen.
-    if phone.wait_element(r"^Alpha .*sessions", 5) is None:
+    if phone.wait_element(r"^Alpha · ", 5) is None:
         phone.tap_element(r"^Remote$", 60, after=2)
     if phone.wait_element(r"^Alpha ", 60) is None:  # the machine is online and lists Alpha
         phone.shot("failure-no-alpha")
@@ -284,7 +291,6 @@ def step_pair(gui, ctx):
     gui.step("open Remote Access in the editor")
     gui.click(gui.element("Remote Access"))
     gui.wait("the Remote Access panel", lambda s: s["state"].get("remoteAccess") is not None, 20)
-    gui.wait("the panel is the machine's", lambda s: s["state"]["remoteAccess"].get("machine"), 30)
     time.sleep(0.5)
     gui.shot_window("editor-1-remote-access")
     with open(os.path.join(gui.out, "remote-access-elements.json"), "w") as handle:
@@ -363,8 +369,8 @@ def step_pair(gui, ctx):
              if d["deviceId"] == device and [w for w in d["workspaces"] if w["workspace"] == alpha]], 30)
     gui.shot_window("editor-5-approved-alpha")
 
-    gui.step("the phone lists Alpha (and not Beta) with its session")
-    listed = phone.wait_log(r"exosuit-machine: \S.* online \[Alpha:\w+:[1-9]\]", 90)
+    gui.step("the phone lists Alpha (and not Beta)")
+    listed = phone.wait_log(r"exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+\]", 90)
     log(listed)
     time.sleep(3)
     phone.shot("2-alpha-listed")
@@ -471,7 +477,7 @@ def step_beta(gui, ctx):
     gui.click(gui.element("Save workspaces"))
     gui.wait("the device has Alpha and Beta", lambda s: [d for d in s["state"]["remoteAccess"]["devices"]
              if d["deviceId"] == device and len(d["workspaces"]) == 2], 30)
-    phone.wait_log(r"exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+,Beta:\w+:[1-9]\]", 90)
+    phone.wait_log(r"exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+,Beta:\w+:[0-9-]+\]", 90)
     time.sleep(3)
     phone.tap_element(r"^Remote$", 30, after=2)  # the Remote panel: the open workspace hides the list
     phone.wait_element(r"^Beta ", 30)
@@ -630,7 +636,7 @@ def step_keyboard(gui, ctx):
 
 def step_restart_editor(gui, ctx):
     """The editor window is closed and the editor started again (the keeper does it, see Restart-Editor in e2e-local.ps1,
-    with WM_CLOSE and no mouse). The phone, paired and showing the Claude terminal (run the `terminal` step first), must come
+    with `suitctl quit --mode prompt` and no mouse). The phone, paired and showing the Claude terminal (run the `terminal` step first), must come
     back online by itself, list Alpha, and its terminal must still take input. Prints the time from the editor being ready
     to the phone online and to the first key reaching the fake."""
     phone, config = ctx["phone"], ctx["config"]
@@ -722,7 +728,7 @@ def run(gui):
     phone = Phone(config, gui.out)
     alpha = attached(gui, "Alpha")
     beta = ws(gui.state(), "Beta")["id"]
-    fixture = os.path.abspath(os.path.join(gui.dir, "..", "fixture"))
+    fixture = os.path.abspath(os.path.join(gui.out, "..", "fixture"))
     wanted = [s for s in os.environ.get("EXOSUIT_E2E_STEPS", "all").split(",") if s]
     chosen = STEPS if wanted == ["all"] else wanted
     for name in chosen:

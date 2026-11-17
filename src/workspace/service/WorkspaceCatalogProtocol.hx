@@ -98,12 +98,11 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
 }
 
 /**
-	Permanent ids for the catalog watch (M19 Phase 0), behind the negotiated CAPABILITY. Proposed, pending the
-	mobile-app review (docs/roadmap/RPC-VECTORS.md). Never reuse ids.
+	Permanent ids for the catalog watch, behind the negotiated CAPABILITY (docs/RPC-VECTORS.md). Never reuse ids.
 
 	The listing is filtered by the connection's read grants: groups need `workspace.read`, sessions
 	`workspace.agents.read`, terminals `workspace.terminals.read`. A connection with only CAPABILITY sees the
-	workspace's own fields and no items, so the editor's pool (WorkspaceCatalogWatch) requests the three read
+	workspace's own fields and no items, so a workspace link (WorkspaceLink) requests the three read
 	capabilities with it. A catalog-only "list" grant is a possible later refinement.
 **/
 class WorkspaceCatalogProtocol {
@@ -124,6 +123,18 @@ class WorkspaceCatalogProtocol {
 		function(b:Bytes):WorkspaceCatalog return MessagePack.decode(b));
 	/** Stops this connection's notifications for the workspace; disconnecting also stops them. */
 	public static final UNWATCH = new RpcMethod<WorkspaceRef, WorkspaceRef>(171, encodeRef, decodeRef, encodeRef, decodeRef);
+
+	/**
+		The catalog a service last had, in its state folder: one reset page with every group, session and terminal
+		(status "idle"), written on change and on exit. Idle rows are drawn from it without starting anything (Step 6).
+	**/
+	public static inline final SNAPSHOT_FILE = "catalog-snapshot.bin";
+
+	public static function encodeSnapshot(value:WorkspaceCatalog):Bytes
+		return MessagePack.encode(value);
+
+	public static function decodeSnapshot(bytes:Bytes):WorkspaceCatalog
+		return MessagePack.decode(bytes);
 
 	public static function encodeRef(value:WorkspaceRef):Bytes
 		return MessagePack.encode(value);

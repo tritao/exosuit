@@ -1,5 +1,5 @@
-"""What the test drivers share, on Linux, macOS and Windows: the Haxeon CLI, a built test program, isolated state and
-stopping what a test started.
+"""What the test drivers share, on Linux, macOS and Windows: the Haxeon CLI, the built workspace agent, a built test
+program, isolated state and stopping what a test started.
 
 A driver must not start `haxeon/scripts/haxeon` itself: it is a Bash script, which Windows cannot start (WinError 193).
 `haxeon(...)` runs the CLI the way scripts/build.py does. `build_test(name)` builds tests/<name> once and returns the
@@ -8,20 +8,25 @@ command that runs it, so each step of a driver starts the program without the co
 State: `isolated_environment(state)` points every state variable at `state`. XDG_STATE_HOME alone does nothing on
 Windows, where the agent uses EXOSUIT_AGENT_STATE_HOME or %LOCALAPPDATA%\\Exosuit; with both set, a workspace's state is
 <state>/exosuit/workspaces/<key> on every platform, and the editor's own state (PRAGTICAL_PORTABLE) is <state>/portable.
+Claude Code and Codex read and write their configuration folders (CLAUDE_CONFIG_DIR, CODEX_HOME), else the user's
+~/.claude and ~/.codex: `isolated_environment` points them under `state` too (`agent_homes`).
 
-Stopping: SIGTERM lets a manager clean up on POSIX. On Windows os.kill is TerminateProcess, which leaves the endpoint
-file and, under a terminal host, the terminals; `stop_manager` writes the stop request suit writes."""
+Services: `start_service` runs a workspace service as suit does (`--workspace ID --folder ROOT`) and waits until its
+service.log says it is ready. A service stops when idle (EXOSUIT_SERVICE_IDLE_SECONDS) or when suit asks over its link;
+without suit, `stop_services` stops what is left (SIGTERM first on POSIX, a kill on Windows)."""
 from __future__ import annotations
 
+import atexit
+import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
-
-from agent_test_runtime import manager_environment
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
@@ -31,8 +36,77 @@ HL = HAXEON_ROOT / ".tools" / "hashlink" / ("hl.exe" if WINDOWS else "hl")
 LIBRARY_VARIABLE = "PATH" if WINDOWS else "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
 
 
+def runtime_paths(root: Path) -> tuple[Path, Path]:
+    """The HashLink runtime (HAXEON_HL or HL_BIN when set) and the built workspace agent's bytecode."""
+    haxeon = Path(os.environ.get("HAXEON_ROOT", root / "haxeon")).expanduser()
+    bytecode = root / "agent" / "build" / "host" / "main.hl"
+    configured = os.environ.get("HAXEON_HL") or os.environ.get("HL_BIN")
+    if configured:
+        runtime = Path(configured).expanduser()
+    else:
+        executable = "hl.exe" if WINDOWS else "hl"
+        candidates = [haxeon / ".tools" / "hashlink" / executable]
+        found = shutil.which(executable)
+        if found:
+            candidates.append(Path(found))
+        runtime = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+    if not runtime.is_file():
+        raise FileNotFoundError(f"HashLink runtime not found: {runtime}")
+    if not bytecode.is_file():
+        raise FileNotFoundError(f"Workspace agent bytecode not found: {bytecode}; build agent/haxeon.json")
+    return runtime.resolve(), bytecode.resolve()
+
+
+def service_command(root: Path) -> list[str]:
+    """The command that runs the workspace service; `--workspace ID [--folder F]... [--scratch S]` follows it."""
+    runtime, bytecode = runtime_paths(root)
+    return [str(runtime), str(bytecode)]
+
+
+def launcher_path(root: Path) -> Path:
+    """The workspace agent's bytecode: the services' program, and what a test program starts a service with."""
+    return runtime_paths(root)[1]
+
+
+_SUIT_HOME: str | None = None
+
+
+def isolated_suit(environment: dict[str, str] | None = None) -> dict[str, str]:
+    """EXOSUIT_SUIT_HOME and EXOSUIT_SUIT_AUTOSTART for a test: a suit home of the run's own, which is never started.
+    An inherited EXOSUIT_SUIT_HOME may be the user's, so it is never used; the test runners name the run's home with
+    EXOSUIT_TEST_HOME (its `suit` folder), else a temporary one is made and removed when the driver exits."""
+    global _SUIT_HOME
+    environment = os.environ if environment is None else environment
+    if environment.get("EXOSUIT_TEST_HOME"):
+        return {"EXOSUIT_SUIT_HOME": str(Path(environment["EXOSUIT_TEST_HOME"]) / "suit"), "EXOSUIT_SUIT_AUTOSTART": "0"}
+    if _SUIT_HOME is None:
+        temporary = tempfile.mkdtemp(prefix="exosuit-test-suit-")
+        atexit.register(shutil.rmtree, temporary, True)
+        _SUIT_HOME = str(Path(temporary) / "suit")
+    return {"EXOSUIT_SUIT_HOME": _SUIT_HOME, "EXOSUIT_SUIT_AUTOSTART": "0"}
+
+
+def service_environment(root: Path, launcher: Path | None = None) -> dict[str, str]:
+    """The environment of a workspace service (and of a test program that starts one): the runtime's and the agent's
+    native libraries on the library path, and a suit home of the test's own that is never started."""
+    runtime, bytecode = runtime_paths(root)
+    environment = os.environ.copy()
+    agent_root = (launcher or bytecode).parent
+    haxeon = Path(os.environ.get("HAXEON_ROOT", root / "haxeon")).expanduser()
+    libraries = [haxeon / "out", haxeon / ".tools" / "hashlink", agent_root / "native"]
+    if (agent_root / "native").is_dir():
+        libraries.extend(sorted(path for path in (agent_root / "native").iterdir() if path.is_dir()))
+    libraries.append(runtime.parent)
+    libraries = [str(path.resolve()) for path in libraries if path.is_dir()]
+    inherited = environment.get(LIBRARY_VARIABLE, "")
+    environment[LIBRARY_VARIABLE] = os.pathsep.join(libraries + ([inherited] if inherited else []))
+    # Test services talk only to a suit in a home of their own and do not start it (see suit/README.md).
+    environment.update(isolated_suit(environment))
+    return environment
+
+
 def kill_tree(process: subprocess.Popen) -> None:
-    """Stops a child and everything it started; a timeout must not leave a manager, a shell or a PTY behind."""
+    """Stops a child and everything it started; a timeout must not leave a service, a shell or a PTY behind."""
     if process.poll() is not None:
         return
     if WINDOWS:
@@ -46,6 +120,17 @@ def kill_tree(process: subprocess.Popen) -> None:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         pass
+
+
+def wait_until(condition, timeout: float, message: str, interval: float = 0.1):
+    """Polls `condition` until it returns a true value, which it returns; fails with `message` after `timeout` seconds."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = condition()
+        if value:
+            return value
+        time.sleep(interval)
+    raise AssertionError(message)
 
 
 def run_tree(command: list[str], environment: dict[str, str] | None = None, timeout: float = 120, check: bool = True, **options) -> int:
@@ -112,40 +197,144 @@ def assert_private(path: Path) -> None:
 
 
 def isolated_environment(state: Path, launcher: Path | None = None, test: str | None = None) -> dict[str, str]:
-    """The environment of a manager and of a test program that starts managers, with all state under `state` and the
-    native packages of the agent (and of tests/<test>) loadable. Managers neither register with suit nor start it."""
-    environment = manager_environment(ROOT, launcher)
+    """The environment of a service and of a test program that starts services, with all state under `state` and the
+    native packages of the agent (and of tests/<test>) loadable. Services reach only a suit home of their own and do not
+    start suit."""
+    environment = service_environment(ROOT, launcher)
     environment.update(
         XDG_STATE_HOME=str(state),
         EXOSUIT_AGENT_STATE_HOME=str(state / "exosuit"),
         PRAGTICAL_PORTABLE=str(state / "portable"),
-        EXOSUIT_SUIT="off",
+        **agent_homes(state),
     )
-    # A service that outlives its clients because the caller's environment asks for it never lets a test end.
-    environment.pop("EXOSUIT_AGENT_ALWAYS_AVAILABLE", None)
     (state / "portable").mkdir(parents=True, exist_ok=True)
     if test is not None:
         environment = with_libraries(environment, ROOT / "tests" / test / "build" / "host" / "native")
     return environment
 
 
-def endpoints(state: Path) -> list[Path]:
-    """The endpoint files of the managers running on the default state of each root under `state`."""
-    return sorted(state.glob("exosuit/workspaces/*/endpoint.json"))
+def agent_homes(folder: Path) -> dict[str, str]:
+    """CLAUDE_CONFIG_DIR and CODEX_HOME under `folder` (created), so an agent CLI a test starts, and a service reading its
+    transcripts, never use the user's ~/.claude or ~/.codex."""
+    homes = {"CLAUDE_CONFIG_DIR": folder / "claude-config", "CODEX_HOME": folder / "codex-home"}
+    for path in homes.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return {name: str(path) for name, path in homes.items()}
 
 
-def endpoint_for(state: Path, root: Path) -> Path:
-    """The endpoint file of the manager serving the folder `root`. The state folder's name is a hash of the root as the
-    agent spells it, which differs by platform; the descriptor's own `root` does not."""
-    wanted = os.path.normcase(os.path.realpath(root))
-    for endpoint in endpoints(state):
-        try:
-            served = json.loads(endpoint.read_text())["root"]
-        except (OSError, ValueError, KeyError):
+def signed_in_home(variable: str) -> str:
+    """The configuration folder a test against a real agent CLI runs with: `variable` (CLAUDE_CONFIG_DIR or CODEX_HOME)
+    must name a signed-in folder of the test's own. Exits when it is unset or is the user's own (~/.claude, ~/.codex),
+    which tests never read or write."""
+    own = Path.home() / {"CLAUDE_CONFIG_DIR": ".claude", "CODEX_HOME": ".codex"}[variable]
+    value = os.environ.get(variable, "")
+    if not value or Path(value).expanduser().resolve() == own.resolve():
+        sys.exit(f"set {variable} to a signed-in configuration folder of the test's own: the user's {own} is not used")
+    return value
+
+
+def workspace_id(root: Path | str) -> str:
+    """The test workspace of folder `root`, as testing.DirectService.idOf names it: a hash of the path as spelled."""
+    return "test-" + hashlib.sha256(str(root).encode()).hexdigest()[:16]
+
+
+def service_log(state: Path, workspace: str) -> Path:
+    return state / "exosuit" / "workspaces" / workspace / "service.log"
+
+
+class Service:
+    """A service seen ready in its service.log: its process (when this driver started it), pipe, generation, pid, root."""
+
+    def __init__(self, process, endpoint: str, generation: str, pid: int, root: str):
+        self.process, self.endpoint, self.generation, self.pid, self.root = process, endpoint, generation, pid, root
+
+    def runs(self) -> bool:
+        return process_runs(self.pid)
+
+    def wait(self, timeout: float) -> int:
+        """Waits for the service to exit; its status when this driver started it, else 0."""
+        if self.process is not None:
+            return self.process.wait(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while process_runs(self.pid):
+            if time.monotonic() > deadline:
+                raise subprocess.TimeoutExpired(str(self.pid), timeout)
+            time.sleep(0.05)
+        return 0
+
+
+def ready_services(log: Path, offset: int = 0) -> list[Service]:
+    """The services that got ready in `log` after byte `offset`, oldest first (generation and pid from the line before)."""
+    try:
+        text = log.read_bytes()[offset:].decode("utf-8", "replace")
+    except OSError:
+        return []
+    found, starting = [], None
+    for line in text.splitlines():
+        if "service starting: generation " in line:
+            generation, _, pid = line.split("service starting: generation ", 1)[1].partition(", pid ")
+            starting = (generation.strip(), int(pid.strip()))
+        elif "service ready on " in line and starting is not None:
+            endpoint, _, root = line.split("service ready on ", 1)[1].partition(" for ")
+            found.append(Service(None, endpoint.strip(), starting[0], starting[1], root.strip()))
+    return found
+
+
+IN_USE = 3
+
+
+def start_service(environment: dict[str, str], state: Path, root: Path, idle_seconds: float | None = None,
+                  timeout: float = 90, workspace: str | None = None, **options) -> Service:
+    """Starts the service of the test workspace of `root` (as suit does) and returns it once ready. `idle_seconds` sets
+    its idle limit (EXOSUIT_SERVICE_IDLE_SECONDS). When one already runs (exit 3: it holds the lock) that one is returned."""
+    workspace = workspace or workspace_id(root)
+    log = service_log(state, workspace)
+    offset = log.stat().st_size if log.exists() else 0
+    environment = dict(environment)
+    if idle_seconds is not None:
+        environment["EXOSUIT_SERVICE_IDLE_SECONDS"] = str(idle_seconds)
+    process = subprocess.Popen([*service_command(ROOT), "--workspace", workspace, "--folder", str(root)], env=environment,
+                               cwd=str(root), start_new_session=not WINDOWS, **options)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = process.poll()
+        if status == IN_USE:
+            running = ready_services(log)
+            if running and running[-1].runs():
+                return running[-1]
+            raise AssertionError(f"the service of {workspace} holds its lock but no running one is logged")
+        if status is not None:
+            raise AssertionError(f"the service exited with {status}: " + (log.read_text()[-4000:] if log.exists() else "no log"))
+        started = ready_services(log, offset)
+        if started:
+            service = started[-1]
+            service.process = process
+            return service
+        time.sleep(0.05)
+    kill_tree(process)
+    raise AssertionError(f"the service of {workspace} was not ready in {timeout} s")
+
+
+def running_services(state: Path) -> list[Service]:
+    """The services with state under `state` that still run."""
+    return [service for log in state.glob("exosuit/workspaces/*/service.log") for service in ready_services(log) if service.runs()]
+
+
+def stop_services(state: Path) -> None:
+    """Stops every service with state under `state` that still runs, including ones started before a failed assertion."""
+    for service in running_services(state):
+        if WINDOWS:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(service.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             continue
-        if os.path.normcase(os.path.realpath(served)) == wanted:
-            return endpoint
-    raise FileNotFoundError(f"no manager serves {root} under {state}")
+        try:
+            os.kill(service.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        deadline = time.monotonic() + 10
+        while service.runs() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if service.runs():
+            os.kill(service.pid, signal.SIGKILL)
 
 
 def process_runs(pid: int) -> bool:
@@ -167,49 +356,3 @@ def process_runs(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-
-
-def request_stop(endpoint: Path, descriptor: dict | None = None) -> None:
-    """Asks the manager of `endpoint` to stop and returns at once: SIGTERM, or on Windows the stop request suit writes."""
-    try:
-        descriptor = descriptor or json.loads(endpoint.read_text())
-    except (OSError, ValueError):
-        return
-    if WINDOWS:
-        (endpoint.parent / "stop-request.json").write_text(json.dumps({"version": 1, "generation": descriptor["generation"]}) + "\n")
-        return
-    try:
-        os.kill(descriptor["managerPid"], signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-
-
-def stop_manager(endpoint: Path, timeout: float = 15) -> bool:
-    """Stops the manager of `endpoint` and waits for its endpoint file to go; a manager that ignores the request is
-    killed. Returns whether it stopped on request."""
-    try:
-        descriptor = json.loads(endpoint.read_text())
-    except (OSError, ValueError):
-        return True
-    request_stop(endpoint, descriptor)
-    deadline = time.monotonic() + timeout
-    while endpoint.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    if not endpoint.exists():
-        return True
-    pid = descriptor.get("managerPid")
-    if isinstance(pid, int) and process_runs(pid):
-        if WINDOWS:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            os.kill(pid, signal.SIGKILL)
-    return False
-
-
-def stop_managers(state: Path, timeout: float = 15) -> None:
-    """Stops every manager with state under `state`, including ones started before a failed assertion."""
-    found = endpoints(state)
-    for endpoint in found:
-        request_stop(endpoint)
-    for endpoint in found:
-        stop_manager(endpoint, timeout)

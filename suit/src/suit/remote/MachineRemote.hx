@@ -7,22 +7,18 @@ import haxeon.platform.event.EventPump;
 import haxeon.rpc.MessageTransport;
 import haxeon.rpc.RpcConnectResult;
 import noisekit.NoiseSession;
-import processkit.Processes;
 import sys.FileSystem;
 import sys.io.AtomicFile;
 import sys.io.File;
 import suit.MachineCatalog;
 import suit.SuitClient;
-import suit.SuitInventory;
 import suit.SuitPaths;
 import suit.SuitRecord.SuitRecords;
 import suit.remote.MachineDeviceSession.MachineSessionHost;
-import workspace.client.WorkspaceServiceTarget;
 import workspace.runtime.WorkspaceCredentialStores;
 import workspace.runtime.WorkspaceNoiseIdentity;
 import workspace.runtime.WorkspacePairingManager;
 import workspace.runtime.WorkspaceRelayHost;
-import workspace.runtime.WorkspaceRelaySettings;
 import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineGrants;
@@ -41,13 +37,6 @@ class DeferredReply {
 
 	public function resolve(value:Dynamic):Void
 		reply = value;
-}
-
-private typedef ServiceStart = {
-	var workspace:String;
-	var stateDir:String;
-	var deadline:Float;
-	var waiters:Array<Null<String>->Null<String>->Void>;
 }
 
 /** An approval in flight: answered once the device has it, or when it fails. */
@@ -71,16 +60,15 @@ private typedef PendingApproval = {
 	here.
 **/
 class MachineRemote implements MachineSessionHost {
-	static inline final START_SECONDS:Float = 45;
 	static inline final MAX_SESSIONS = 16;
 
 	final events:EventPump;
 	final hub:NativeRpcHub;
 	final catalog:Void->MachineCatalog;
+	final services:SuitServices;
 	final allowLoopbackHttp:Bool;
 	final store:MachineDeviceStore;
 	final sessions:Array<MachineDeviceSession> = [];
-	final starts:Array<ServiceStart> = [];
 	final deferred:Array<DeferredReply> = [];
 	final approvals:Array<PendingApproval> = [];
 	var endpoint:Null<RelayMachineEndpoint> = null;
@@ -94,10 +82,12 @@ class MachineRemote implements MachineSessionHost {
 	/** True from a full quit's `cutOff` until `resumeAfterQuit`: remote access is configured but ended by the quit. */
 	var cutByQuit:Bool = false;
 
-	public function new(events:EventPump, hub:NativeRpcHub, catalog:Void->MachineCatalog) {
+	/** `services` starts and finds the workspaces' services a device opens. */
+	public function new(events:EventPump, hub:NativeRpcHub, catalog:Void->MachineCatalog, services:SuitServices) {
 		this.events = events;
 		this.hub = hub;
 		this.catalog = catalog;
+		this.services = services;
 		allowLoopbackHttp = Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") == "1";
 		// An unreadable device file (another build's version, a hand edit) turns remote access off, not suit: the file is
 		// left as it is for the build that wrote it, and nothing here writes it.
@@ -128,7 +118,7 @@ class MachineRemote implements MachineSessionHost {
 
 	/** Work that wants prompt polling. */
 	public function busy():Bool
-		return sessions.length > 0 || starts.length > 0 || deferred.length > 0 || approvals.length > 0;
+		return sessions.length > 0 || deferred.length > 0 || approvals.length > 0;
 
 	// ---- setup
 
@@ -156,7 +146,7 @@ class MachineRemote implements MachineSessionHost {
 		endpoint = target;
 		var own = new WorkspaceNoiseIdentity(id, credentials);
 		identity = own;
-		var relay = new WorkspaceRelayHost(events, hub, new WorkspaceRelaySettings(target, token), allowLoopbackHttp, null);
+		var relay = new WorkspaceRelayHost(events, hub, target, token, allowLoopbackHttp);
 		host = relay;
 		// A relay id derived from the machine key can be proven to the relay, so an id someone else registered first is taken back.
 		relay.proveIdentityWith(RelayRegistrationProver.forKey(id, own.privateKeyForHandshake(), own.publicKey));
@@ -284,7 +274,6 @@ class MachineRemote implements MachineSessionHost {
 			if (!sessions[index].isOpen())
 				sessions.splice(index, 1);
 		}
-		pollStarts();
 		var at = deferred.length;
 		while (at-- > 0) {
 			var item = deferred[at];
@@ -351,20 +340,8 @@ class MachineRemote implements MachineSessionHost {
 		version++;
 	}
 
-	/** Live remote sessions, for suit's list. */
-	public function sessionCount():Int
-		return sessions.length;
-
-	/** Whether the machine socket to the relay is open. */
-	public function relayConnected():Bool
-		return host != null && host.connected;
-
 	public function dispose():Void {
 		teardown();
-		for (start in starts)
-			for (waiter in start.waiters)
-				waiter(null, "workspace_unavailable");
-		starts.resize(0);
 	}
 
 	// ---- MachineSessionHost
@@ -372,8 +349,9 @@ class MachineRemote implements MachineSessionHost {
 	public function machineId():String
 		return catalog().state.id;
 
+	/** Changes with grants and devices (`version`), the workspaces' names and folders, and a service starting or stopping (a directory's status). */
 	public function revision():Int {
-		var total = version;
+		var total = version + services.revision;
 		for (workspace in catalog().state.workspaces)
 			total += workspace.revision;
 		return total;
@@ -388,119 +366,41 @@ class MachineRemote implements MachineSessionHost {
 		for (entry in machine.workspaces) {
 			var grants = store.grantsFor(deviceId, entry.id);
 			if (grants != null)
-				listed.push({workspace: entry.id, name: entry.name, status: running(entry.id) == null ? MachineDirectoryProtocol.IDLE : MachineDirectoryProtocol.RUNNING,
+				listed.push({workspace: entry.id, name: entry.name, status: services.serviceOf(entry.id) == null ? MachineDirectoryProtocol.IDLE : MachineDirectoryProtocol.RUNNING,
 					grants: grants});
 		}
 		// The relay id names the pairing to the device; the machine's own id is the catalog's (they differ for relays set up now).
 		return {machine: machine.id, name: machine.name, revision: revision(), workspaces: listed, relay: endpoint == null ? null : endpoint.machineId};
 	}
 
-	static function stateDirOf(workspace:String):String
-		return Path.join([MachineCatalog.agentStateBase(), "workspaces", workspace]);
-
-	/** The local endpoint of the workspace's running service, or null when it is idle. */
-	function running(workspace:String):Null<String> {
-		var found = SuitInventory.readEndpoint(stateDirOf(workspace));
-		return found != null && Processes.started(found.managerPid) != -1 ? found.socket : null;
-	}
-
-	public function openService(deviceId:String, workspace:String, grants:Array<String>, done:Null<MessageTransport>->Null<String>->Void):Void {
-		var entry:Null<MachineCatalog.MachineWorkspace> = null;
-		for (candidate in catalog().state.workspaces)
-			if (candidate.id == workspace)
-				entry = candidate;
-		if (entry == null) {
-			done(null, "unknown_workspace");
+	public function openService(deviceId:String, workspace:String, grants:Array<String>, start:Bool,
+			done:(Null<MessageTransport>, Null<workspace.client.OpenedService>, Null<String>) -> Void):Void {
+		if (!start && services.serviceOf(workspace) == null) {
+			done(null, null, "workspace_unavailable");
 			return;
 		}
-		ensureService(entry, function(socket, error) {
-			if (socket == null) {
-				done(null, error == null ? "workspace_unavailable" : error);
+		services.open(workspace, function(service, error) {
+			if (service == null) {
+				done(null, null, error == "unknown_workspace" ? error : "workspace_unavailable");
 				return;
 			}
-			connectService(socket, deviceId, grants, done);
+			try {
+				hub.connect(NativeRpcHub.local(service.endpoint), function(result) {
+					switch result {
+						case Opened(transport):
+							if (!transport.send(ForwardedStream.intro(deviceId, grants))) {
+								transport.close();
+								done(null, null, "workspace_unavailable");
+							} else
+								done(transport, service, null);
+						case Failed(_, _):
+							done(null, null, "workspace_unavailable");
+					}
+				});
+			} catch (_:Dynamic) {
+				done(null, null, "workspace_unavailable");
+			}
 		});
-	}
-
-	function connectService(socket:String, deviceId:String, grants:Array<String>, done:Null<MessageTransport>->Null<String>->Void):Void {
-		try {
-			hub.connect(NativeRpcHub.local(socket), function(result) {
-				switch result {
-					case Opened(transport):
-						if (!transport.send(ForwardedStream.intro(deviceId, grants))) {
-							transport.close();
-							done(null, "workspace_unavailable");
-						} else
-							done(transport, null);
-					case Failed(_, _):
-						done(null, "workspace_unavailable");
-				}
-			});
-		} catch (_:Dynamic) {
-			done(null, "workspace_unavailable");
-		}
-	}
-
-	/** Finds the workspace's running service, or starts it and waits for it (at most START_SECONDS). */
-	function ensureService(entry:MachineCatalog.MachineWorkspace, done:Null<String>->Null<String>->Void):Void {
-		var socket = running(entry.id);
-		if (socket != null) {
-			done(socket, null);
-			return;
-		}
-		for (start in starts)
-			if (start.workspace == entry.id) {
-				start.waiters.push(done);
-				return;
-			}
-		try spawn(entry) catch (error:Dynamic) {
-			done(null, "workspace_unavailable");
-			return;
-		}
-		starts.push({workspace: entry.id, stateDir: stateDirOf(entry.id), deadline: Sys.time() + START_SECONDS, waiters: [done]});
-	}
-
-	function pollStarts():Void {
-		var index = starts.length;
-		while (index-- > 0) {
-			var start = starts[index];
-			var socket = running(start.workspace);
-			if (socket == null && Sys.time() < start.deadline)
-				continue;
-			starts.splice(index, 1);
-			for (waiter in start.waiters)
-				waiter(socket, socket == null ? "workspace_unavailable" : null);
-		}
-	}
-
-	/** The agent bytecode beside suit's own (a source build's agent/build/host/main.hl, or a bundle's tools/exosuit-agent.hl). */
-	public static function agentLauncher():Null<String> {
-		var configured = Sys.getEnv("EXOSUIT_AGENT_LAUNCHER");
-		if (configured != null && configured.length > 0)
-			return FileSystem.exists(configured) ? FileSystem.fullPath(configured) : null;
-		var own = SuitClient.findLauncher();
-		if (own == null)
-			return null;
-		var directory = Path.directory(own);
-		for (candidate in [Path.join([Path.directory(Path.directory(Path.directory(directory))), "agent", "build", "host", "main.hl"]),
-			Path.join([directory, "exosuit-agent.hl"])])
-			if (FileSystem.exists(candidate))
-				return FileSystem.fullPath(candidate);
-		return null;
-	}
-
-	/** Starts the workspace's service as an editor would, detached, in its folders (or its scratch folder). */
-	function spawn(entry:MachineCatalog.MachineWorkspace):Void {
-		var launcher = agentLauncher();
-		if (launcher == null)
-			throw "The workspace agent is not installed";
-		var scratch = entry.scratch;
-		if (entry.folders.length == 0 && scratch == null)
-			scratch = catalog().scratch(entry.id);
-		var target = WorkspaceServiceTarget.forWorkspace(entry.id, entry.folders, scratch);
-		var child = sys.io.Process.spawn(Sys.executablePath(), [launcher].concat(target.managerArguments()).concat(["--detach"]),
-			Path.directory(launcher), [SuitClient.libraryVariable(), "EXOSUIT_AGENT_LAUNCHER"], [SuitClient.nativePath(launcher), launcher], true);
-		child.close();
 	}
 
 	// ---- control requests
@@ -576,10 +476,12 @@ class MachineRemote implements MachineSessionHost {
 					version++;
 					return {ok: true, devices: devices().devices};
 				case "remote-reject":
-					var rejected = requireManager().reject(SuitRecords.stringField(request, "deviceId"));
-					return rejected ? {ok: true} : {ok: false, error: "pairing_not_found"};
+					var id = SuitRecords.stringField(request, "deviceId");
+					return id != null && requireManager().reject(id) ? {ok: true} : {ok: false, error: "pairing_not_found"};
 				case "remote-revoke":
 					var revoked = SuitRecords.stringField(request, "deviceId");
+					if (revoked == null)
+						return {ok: false, error: "device_not_found"};
 					var pairing = requireManager();
 					return later(function(finish) {
 						pairing.revoke(revoked, function(error) {

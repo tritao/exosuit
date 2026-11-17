@@ -45,7 +45,9 @@ def main() -> int:
             status = ensure_language_server(root_dir)
             if status != 0:
                 return status
-        for project in projects:
+        # The terminal host is built on its own beside the agent: a small program starts much faster (TerminalHosts).
+        builds = [part for project in projects for part in ([project, "agent/terminal-host"] if project == "agent" else [project])]
+        for project in builds:
             arguments = ["build", "--project", str(root_dir / project / "haxeon.json")]
             if self_hosted:
                 arguments.append("--self-hosted")

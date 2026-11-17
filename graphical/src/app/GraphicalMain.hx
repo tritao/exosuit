@@ -13,16 +13,18 @@ import ui.ExosuitPalette;
 /**
 	Hosted desktop entry. UIKit owns the window, GPU, and frame loop.
 
-	`main` runs the loop itself. `haxeon run --watch --live` instead calls `start`, then `tick` until it
-	returns 0, then `close`, and patches changed functions between ticks without restarting the editor.
+	`main` runs the loop itself, after handing its paths to an open window when one takes them (LaunchForwarding).
+	`haxeon run --watch --live` instead calls `start`, then `tick` until it returns 0, then `close`, and patches changed
+	functions between ticks without restarting the editor; a live run always opens its own window.
 **/
 class GraphicalMain {
 	static var session:Null<DesktopUiHostSession> = null;
 	static var app:Null<ExosuitApp> = null;
-	static var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
+	static var workspaceLinks:Null<workspace.client.WorkspaceLinks> = null;
 	static var allocationProfile:Null<String> = null;
 	static var inspection:Null<devtools.InspectionAgent> = null;
-	static var automation:Null<devtools.AutomationProbe> = null;
+	/** The window's side of suit's control plane: the methods suit routes here, and synthetic input. */
+	static var control:Null<ui.control.EditorControl> = null;
 	static var devtoolsProcess:Null<sys.io.ChildProcess> = null;
 	static final devtoolsOutput:haxe.io.Bytes = haxe.io.Bytes.alloc(4096);
 	/** Where the window was last time; null for benchmark and capture runs, which keep the system's placement. */
@@ -30,7 +32,9 @@ class GraphicalMain {
 	static var placementReader:Null<Void->Null<haxeon.ui.host.WindowPlacement>> = null;
 
 	static function main():Int {
-		open(Sys.args());
+		var launch = LaunchForwarding.forward(Sys.args());
+		if (launch == null) return 0;
+		open(launch.arguments, launch.positions);
 		while (tick() != 0) {}
 		return close();
 	}
@@ -52,15 +56,19 @@ class GraphicalMain {
 		placementReader = null;
 		session = null;
 		app = null;
-		suit.SuitClient.unregister();
+		if (control != null) { control.dispose(); control = null; }
+		// suit learns that this window closed from its link closing.
+		var link = suit.SuitLink.instance;
+		if (link != null) link.dispose();
 		if (inspection != null) {
 			var target:devtools.InspectionAgent = cast inspection;
 			var endpoint = target.path;
 			inspection.dispose(); inspection = null; devtools.DevToolsEndpoint.cleanup(endpoint);
 		}
-		var workspaces = terminalWorkspaces;
-		terminalWorkspaces = null;
-		if (workspaces != null) workspaces.dispose();
+		// The window's links close with it (ExosuitApp.dispose); a second dispose is a no-op.
+		var links = workspaceLinks;
+		workspaceLinks = null;
+		if (links != null) links.dispose();
 		var profile = allocationProfile;
 		if (profile != null) {
 			hl.Gc.censusStop();
@@ -90,8 +98,10 @@ class GraphicalMain {
 		if (current != null) current.requestFrame();
 	}
 
-	static function open(arguments:Array<String>):Void {
-		// Startup in the connect timeline (seconds since the process began): window, app built, first frame.
+	/** Opens the window; `positions` puts the cursor on the line the command line gave for a path (LaunchForwarding). */
+	static function open(arguments:Array<String>, ?positions:Array<LaunchForwarding.LaunchPath>):Void {
+		// Startup in the connect timeline (seconds since the process began), by phase: startup-main, window-open,
+		// app-constructed, workspace-clients, context-started, app-built, first-frame.
 		workspace.client.ConnectTimeline.mark("startup-main");
 		var startupMemory = Sys.getEnv("EXOSUIT_STARTUP_MEMORY_DIR");
 		if (startupMemory != null) StartupMemory.sample(startupMemory, "01-runtime");
@@ -136,10 +146,6 @@ class GraphicalMain {
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
-		// Settle EXOSUIT_SUIT once, before anything is spawned, then tell the per-user suit daemon (the tray
-		// icon) this editor is running; never blocks or throws.
-		suit.SuitClient.resolve();
-		suit.SuitClient.announceEditor();
 		var host = new DesktopUiHostOptions();
 		var stableChannel = Sys.getEnv("EXOSUIT_CHANNEL") == "stable";
 		host.applicationId = stableChannel ? "Exosuit.Stable" : "Exosuit.Desktop";
@@ -166,6 +172,7 @@ class GraphicalMain {
 		var memoryFrames = 0;
 		host.captureReady = function() {
 			workspace.client.ConnectTimeline.markOnce("startup-first-frame", "first-frame");
+			workspace.client.ConnectTimeline.frameDrawn();
 			if (inspection != null) inspection.recordFrame();
 			if (startupMemory != null) {
 				memoryFrames++;
@@ -198,42 +205,40 @@ class GraphicalMain {
 			placementReader = context.windowPlacement;
 			workspace.client.ConnectTimeline.mark("window-open");
 			var dark = prefersDark(themeChoice);
-			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
+			// Input and dialogs a program driving this window over suit's control plane goes through (EditorControl).
+			var input = new ui.control.SyntheticInput(context.events, context.window);
+			var dialogs = new ui.control.DrivenDialogs(new NativeDesktopServices(context), input.driven);
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
-				new NativeDesktopServices(context), dark, ui.TerminalPane.open,
+				dialogs, dark, ui.TerminalPane.open,
 				(Sys.systemName() == "Linux" || Sys.systemName() == "Windows") ? function(id,cwd,restored,requestFrame,palette,group,directory)
-					return ui.TerminalPane.openRemote(function() return terminalWorkspaces == null ? null : terminalWorkspaces.endpoint(cwd),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
+					return ui.TerminalPane.openRemote(function() return app == null ? null : app.terminalEndpoint(cwd),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
+			workspace.client.ConnectTimeline.mark("app-constructed");
 			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows") {
 				try {
-					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
-						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
-					terminalWorkspaces = new workspace.client.LocalTerminalWorkspacePool(context.events, instance.application.processes,
-						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000,
-						function(root) return instance.terminalServiceTarget(root), function() return instance.machineWorkspacesPending());
-					terminalWorkspaces.shared = workspaceClient;
-					instance.attachWorkspace(workspaceClient);
-					instance.attachWorkbench(workspaceClient);
-					instance.attachRemoteAccess(workspaceClient);
-					instance.attachWorkspaceConnections(workspace.client.WorkspaceConnections.native(context.events, function() return NativeKit.nk_time_seconds() * 1000),
-						new workspace.client.WorkspaceStarter(instance.application.processes, workspace.client.LocalWorkspaceClient.findLauncher(),
-							function() return NativeKit.nk_time_seconds() * 1000));
-					instance.attachMachineWorkspaces(new workspace.client.MachineClient(context.events,
-						function() return NativeKit.nk_time_seconds() * 1000));
-					instance.attachMachine(new workspace.client.MachineWorkspaces(instance.application.processes,
-						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000), workspaceClient);
+					var clock = function() return NativeKit.nk_time_seconds() * 1000;
+					// The window's link to suit (the tray daemon), which it starts when it does not answer; never blocks. suit
+					// starts the workspaces' services and names their pipes (`workspace.open`).
+					var link = suit.SuitLink.start(context.events);
+					var machine = new workspace.client.MachineClient(link);
+					// One link per workspace the window uses: the one it shows, expanded rows, terminals.
+					workspaceLinks = new workspace.client.WorkspaceLinks(context.events, clock, machine.open);
+					instance.attachLinks(workspaceLinks);
+					instance.attachMachineWorkspaces(machine);
+					control = new ui.control.EditorControl(instance, link, input, dialogs);
 				}
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));
 			}
-			instance.startInContext(startContext);
-			// Folders given on the command line join the restored workspace, as they always did.
-			for (index in 1...openPaths.length) {
-				if (sys.FileSystem.exists(openPaths[index]) && sys.FileSystem.isDirectory(openPaths[index])) instance.application.attachFolder(openPaths[index]);
-				else instance.application.openArgument(openPaths[index]);
-			}
-			if (openTerminal) instance.openTerminal();
-			if (openTerminalBrowser) instance.openWorkspaceTerminals();
+			workspace.client.ConnectTimeline.mark("workspace-clients");
+			instance.contexts.startInContext(startContext);
+			workspace.client.ConnectTimeline.mark("context-started");
+			// More paths on the command line: files open in tabs; a folder opens as its workspace (the last one shown wins).
+			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
+			if (positions != null)
+				for (item in positions) instance.openArgument(item.path, item.line, item.column);
+			if (openTerminal) instance.terminalTabs.openTerminal();
+			if (openTerminalBrowser) instance.terminalTabs.openWorkspaceTerminals();
 			if (openWorkbench) instance.showSidebarMode("workbench");
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
@@ -257,10 +262,8 @@ class GraphicalMain {
 						toolArguments, projectRoot);
 				} catch (error:Dynamic) instance.application.reportError("devtools", Std.string(error));
 			}));
-			var automationDirectory = devtools.AutomationProbe.directoryFromEnvironment();
-			if (automationDirectory != null) automation = new devtools.AutomationProbe(automationDirectory, instance.context(), instance.automationState);
 			context.onPoll = function() {
-				if (automation != null) automation.poll();
+				if (control != null) control.poll();
 				if (inspection != null) inspection.poll();
 				if (devtoolsProcess != null) {
 					devtoolsProcess.readStdout(devtoolsOutput, 0, devtoolsOutput.length);
@@ -272,9 +275,9 @@ class GraphicalMain {
 						if (code != 0) instance.application.reportError("devtools", "DevTools exited with status " + code);
 					}
 				}
-				if (terminalWorkspaces != null) terminalWorkspaces.poll();
 				if (applicationPoll != null) applicationPoll();
-				if (terminalWorkspaces != null) terminalWorkspaces.retainRoots(
+				// Terminal tabs keep their workspaces' links (and services) in use.
+				if (workspaceLinks != null) instance.useTerminalRoots(
 					[for (terminal in instance.host.allTerminalTabs()) if (terminal.remote && !terminal.disposed) terminal.workspaceRoot]);
 			};
 			if (arguments.indexOf("--open-devtools") >= 0) instance.context().commands.execute("devtools.open");

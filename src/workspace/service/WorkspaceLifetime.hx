@@ -7,9 +7,8 @@ class WorkspaceLifetime {
   final idleMilliseconds:Int;
   var idleSince:Null<Float>;
 
-  /** Zero explicitly opts into always-available mode. */
-  public function new(idleMilliseconds:Int = 60000) {
-    if (idleMilliseconds < 0) throw "Invalid workspace idle timeout";
+  public function new(idleMilliseconds:Int) {
+    if (idleMilliseconds <= 0) throw "Invalid workspace idle timeout";
     this.idleMilliseconds = idleMilliseconds;
   }
 
@@ -19,9 +18,13 @@ class WorkspaceLifetime {
    * wait to ten times the idle limit, at most ten minutes: closing the editor for a rebuild or switching to another
    * workspace and back keeps the processes as they are.
    */
+  /**
+   * `activeSessions` counts what must not be cut off: busy agent turns and remote connections. Terminals are not among
+   * them: their hosts keep them while no service runs.
+   */
   public function shouldStop(now:Float, clients:Int, activeSessions:Int, liveSessions:Int = 0):Bool {
     if (clients < 0 || activeSessions < 0 || liveSessions < 0) throw "Invalid workspace activity count";
-    if (idleMilliseconds == 0 || clients > 0 || activeSessions > 0) {
+    if (clients > 0 || activeSessions > 0) {
       idleSince = null;
       return false;
     }

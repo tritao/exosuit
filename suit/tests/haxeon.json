@@ -5,6 +5,7 @@
   "sourceRoots": ["src", "../src", "../../src"],
   "scopeSourceRoots": false,
   "dependencies": {
+    "haxeon-platform": { "path": "../../haxeon/packages/platform" },
     "processkit": { "path": "../../native-packages/processes" }
   },
   "target": "host",

@@ -38,26 +38,20 @@ typedef TerminationResult = {
 /**
 	Stops exosuit's processes the way closing them in the app would. Each kind's SuitStop says how:
 
-	- CloseWindows (editors): asked to close, so they can save or prompt. An editor still open when the
-	  grace period ends is left running and reported, never killed with unsaved work.
-	- StopRequest (workspace managers): `stop-request.json` in the state directory, the cooperative path a
-	  restart uses: the manager stops its daemon, which closes its terminals' PTYs and ConPTY sessions as
-	  closing them in the app does, removes its endpoint and releases its lock. Relay hosting ends with it;
-	  device grants and relay settings stay on disk, so nothing is revoked.
-	- ThroughManager (workspace daemons): stopped through their running manager.
-	- Kill: killed at once.
-	- EndRequest (terminal hosts): `end-request.json` in the host's folder; the host ends its program, as closing the
-	  terminal in the app does, and itself. A host that never reads it (one from an older build) is killed when the
-	  grace period ends, which closes its pseudoconsole and with it the program. Hosts are stopped only when
-	  chosen: stopping a service never reaches its hosts, which are not of a kind the sweep follows.
+	- QuitRequest (editors): asked over their suit link to quit (`ask`), so they save first. An editor still
+	  open when the grace period ends is left running and reported, never killed with unsaved work.
+	- ServiceStop (workspace services): asked over their suit link to stop (`ask`). The service ends its agent processes
+	  and releases its lock; its terminals carry on in their hosts.
+	- Kill: killed at once. Terminal hosts too, which closes their pseudoconsoles; the sweep then ends their programs'
+	  trees. Hosts are stopped only when chosen: stopping a service never reaches its hosts, which are not of a kind
+	  the sweep follows.
 
 	When the grace period ends suit kills the target if it still runs, and then sweeps. For a kind that ends its tree
 	(SuitKinds.endsTree: an agent provider, a workspace service, a live session, a worker...) the sweep ends its whole OS
 	process tree (SuitProcessTree), whether the target was killed or stopped by itself: what an agent started (MCP
 	servers, tool commands, a dev server) ends with it. Editors, what an editor runs under, and terminal hosts with
-	everything below them are never part of that tree: a terminal's program ends through its host. A terminal host
-	itself is swept only when it had to be killed (it ignored its end request): its program and what that started end
-	with it. For every target the sweep also kills the descendants of kinds exosuit starts itself, reached through such
+	everything below them are never part of that tree. A terminal host chosen for the stop is killed and swept: its
+	program and what that started end with it. For every target the sweep also kills the descendants of kinds exosuit starts itself, reached through such
 	processes alone (SuitLineage). The tree is captured when the stop begins, since a process that has exited no longer
 	links its children to the target; the target is killed before the sweep, so it cannot start more children after the
 	last snapshot; the sweep repeats with a fresh snapshot until one finds nothing left. All targets that reach their
@@ -80,8 +74,14 @@ class SuitTerminator {
 	final editors:Array<SuitProcess>;
 	/** Compiler workers a build exosuit did not start uses (SuitProcess.shared): never swept, as no bulk stop ends them. */
 	final shared:Array<SuitProcess>;
+	final ask:SuitProcess->Bool;
 
-	public function new(inventory:SuitInventory, processes:Array<SuitProcess>) {
+	/**
+		`ask` asks an editor to quit, or a workspace service to stop, over its link to suit, and returns false when it has
+		none: the daemon asks directly, the CLI through the daemon, which holds the links (`askThroughDaemon`).
+	**/
+	public function new(inventory:SuitInventory, processes:Array<SuitProcess>, ask:SuitProcess->Bool) {
+		this.ask = ask;
 		var now = Sys.time();
 		var chosen = new Map<Int, Bool>();
 		self = Sys.getPid();
@@ -90,11 +90,6 @@ class SuitTerminator {
 		var whole = new SuitProcessTree(inventory.snapshot, isEditor);
 		for (process in processes) {
 			var target = process;
-			if (SuitKinds.stop(process.kind) == ThroughManager) {
-				var manager = inventory.find(process.parent);
-				if (manager != null && SuitKinds.stop(manager.kind) == StopRequest)
-					target = manager;
-			}
 			if (target.pid == self || chosen.exists(target.pid))
 				continue;
 			chosen.set(target.pid, true);
@@ -111,8 +106,8 @@ class SuitTerminator {
 				tree: inventory.exosuitDescendants(target.pid, target.started),
 				whole: SuitKinds.endsTree(target.kind) || target.kind == SuitKind.TerminalHost ? whole.descendants(target.pid, target.started, self) : [],
 				endsTree: false,
-				deadline: waits ? Math.POSITIVE_INFINITY : now + (graceful ? (strategy == CloseWindows ? EDITOR_GRACE_SECONDS : SERVICE_GRACE_SECONDS) : 0.0),
-				forceAtDeadline: strategy != CloseWindows,
+				deadline: waits ? Math.POSITIVE_INFINITY : now + (graceful ? (strategy == QuitRequest ? EDITOR_GRACE_SECONDS : SERVICE_GRACE_SECONDS) : 0.0),
+				forceAtDeadline: strategy != QuitRequest,
 				done: false,
 				hosted: hosted
 			});
@@ -144,8 +139,8 @@ class SuitTerminator {
 			// The target first: once it is gone it cannot start children the sweep's last snapshot misses.
 			if (alive)
 				Processes.terminate(target.process.pid, target.process.started);
-			// A terminal host that ended by itself ended its program through its own end path: nothing below it is suit's
-			// to end. One that had to be killed takes its program's tree with it.
+			// A terminal host that ended by itself (its program ended) leaves nothing below it that is suit's to end. One
+			// suit kills takes its program's tree with it.
 			target.endsTree = SuitKinds.endsTree(target.process.kind) || (alive && target.process.kind == SuitKind.TerminalHost);
 			if (!target.endsTree)
 				target.whole = [];
@@ -159,8 +154,8 @@ class SuitTerminator {
 
 	/**
 		Starts the stop of a target that hosts editors (a live session, `scripts/run.py`, a terminal host with the editor
-		running under them) once the editors under it have exited: its graceful stop is requested then (a terminal host's
-		end request; a session ends by itself when its editor exits), and it has the service grace period before it is
+		running under them) once the editors under it have exited: its graceful stop is requested then (a session ends by
+		itself when its editor exits; a terminal host is killed at once), and it has the service grace period before it is
 		killed. While one of them is still open once every other target is done (one kept open over unsaved work, or one
 		this stop did not choose), it is left running, so that editor keeps its session.
 	**/
@@ -260,33 +255,21 @@ class SuitTerminator {
 		results.push({pid: target.process.pid, kind: target.process.kind, outcome: outcome});
 	}
 
+
 	/** Starts a graceful stop. Returns false when there is none and the process must simply be killed. */
-	static function requestStop(process:SuitProcess, strategy:SuitStop):Bool {
+	function requestStop(process:SuitProcess, strategy:SuitStop):Bool {
 		switch strategy {
-			case CloseWindows:
-				return Processes.requestClose(process.pid, process.started) == ProcessKitConstants.PROCESSKIT_OK;
-			case StopRequest:
-				if (process.stateDir == null || process.generation == null)
-					return false;
-				try {
-					WorkspaceStopRequest.write(process.stateDir, process.generation);
-					return true;
-				} catch (_:Dynamic) {
-					return false;
-				}
-			case EndRequest:
-				var host = process.terminal;
-				if (host == null)
-					return false;
-				try {
-					// For this process only: the folder may already belong to a newer host of the same terminal.
-					TerminalHostFolder.requestEnd(host.directory, "suit: end terminal", process.pid, host.pid == process.pid ? host.instance : null);
-					return true;
-				} catch (_:Dynamic) {
-					return false;
-				}
-			case ThroughManager | Kill:
+			case QuitRequest | ServiceStop:
+				return ask(process);
+			case Kill:
 				return false;
 		}
+	}
+
+	/** Asks the running daemon, which holds the links, to quit an editor (`editor-quit`) or stop a service (`service-stop`). */
+	public static function askThroughDaemon(process:SuitProcess):Bool {
+		var reply = SuitControl.request(process.kind == SuitKind.Editor ? {op: "editor-quit", pid: process.pid, mode: "prompt"}
+			: {op: "service-stop", pid: process.pid});
+		return reply != null && Reflect.field(reply, "ok") == true;
 	}
 }

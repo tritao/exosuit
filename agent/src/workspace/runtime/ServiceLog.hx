@@ -1,18 +1,30 @@
 package workspace.runtime;
 
 /**
-	Dated lines saying why a service or one of its terminals started or ended. The daemon's standard output is copied
-	into the workspace's `manager.log` by its manager, so the lines survive the service and can be counted later.
+	Dated lines saying why a service or one of its terminals started or ended, appended to the workspace's
+	`service.log` (in its state folder) once the service has opened it, so they survive the service and can be counted
+	later. Before that, and in a process with no such file, they go to standard error.
 **/
 class ServiceLog {
+	static var path:Null<String> = null;
+
 	public static function line(message:String):String
 		return "[" + now() + "] " + message;
 
-	/** Never throws: the manager at the other end of the pipe may be gone. */
+	/** From now on lines go to the file at `file`. */
+	public static function open(file:String):Void
+		path = file;
+
+	/** Never throws: a log that cannot be written must not stop the service. */
 	public static function note(message:String):Void {
 		try {
-			Sys.println(line(message));
-			Sys.stdout().flush();
+			var file = path;
+			if (file != null)
+				sys.io.File.appendContent(file, line(message) + "\n");
+			else {
+				Sys.stderr().writeString(line(message) + "\n");
+				Sys.stderr().flush();
+			}
 		} catch (_:Dynamic) {}
 	}
 

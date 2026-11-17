@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-terminal-host"
+  },
+  "entry": "app.TerminalHostEntry",
+  "sourceRoots": [
+    "src",
+    "../src",
+    "../../src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "haxeon-platform": {
+      "path": "../../haxeon/packages/platform"
+    },
+    "terminalsession": {
+      "path": "../../native-packages/terminal/session"
+    }
+  },
+  "target": "host",
+  "outputDir": "../build/terminal-host"
+}
