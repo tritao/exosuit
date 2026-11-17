@@ -26,8 +26,8 @@ if ($problems.Count -eq 0) {
 foreach ($tool in 'cmake', 'ninja') {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { $problems += "$tool is not on PATH" }
 }
-foreach ($path in 'out/haxeon-cli.hl', '.tools/hashlink/hl.exe') {
-    if (-not (Test-Path (Join-Path $HaxeonRoot $path))) { $problems += "haxeon/$path is missing: build haxeon first (scripts/build-windows.ps1)" }
+foreach ($path in $Cli, $Hl) {
+    if (-not (Test-Path $path)) { $problems += "$path is missing: build haxeon first (scripts/build-windows.ps1)" }
 }
 if ($problems.Count -gt 0) {
     $problems | ForEach-Object { Write-Host "missing: $_" }

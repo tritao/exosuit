@@ -28,7 +28,7 @@ class LocalPtyBackend implements TerminalBackend {
             throw "Terminal size is outside PTY limits";
         var opened = NativeKit.nk_pty_spawn(profile.program, profile.arguments,
             profile.cwd, profile.childEnvironment(), columns, rows);
-        if (opened.status != 0) throw 'PTY spawn failed: ${NativeKit.nk_last_error()}';
+        if (opened.status != Result.Ok) throw 'PTY spawn failed: ${NativeKit.nk_last_error()}';
         return new LocalPtyBackend(opened.out_pty);
     }
 
@@ -41,7 +41,7 @@ class LocalPtyBackend implements TerminalBackend {
         if (columns < 1 || columns > 65535 || rows < 1 || rows > 65535)
             throw "Terminal size is outside PTY limits";
         var opened = NativeKit.nk_pty_spawn(program, arguments, cwd, environment, columns, rows);
-        if (opened.status != 0) throw 'PTY spawn failed: ${NativeKit.nk_last_error()}';
+        if (opened.status != Result.Ok) throw 'PTY spawn failed: ${NativeKit.nk_last_error()}';
         return new LocalPtyBackend(opened.out_pty);
     }
 
@@ -53,7 +53,7 @@ class LocalPtyBackend implements TerminalBackend {
         var sent = 0;
         if (writes.length == 0) {
             var result = NativeKit.nk_pty_write(pty.borrow(), bytes, bytes.length);
-            if (result.status != 1) {
+            if (result.status != Result.Pending) {
                 check(result.status, "write");
                 sent = haxe.Int64.toInt(result.out_written);
             }
@@ -78,7 +78,7 @@ class LocalPtyBackend implements TerminalBackend {
         var drained = false;
         for (_ in 0...4) {
             var read = NativeKit.nk_pty_read(pty.borrow(), readBuffer, readBuffer.length);
-            if (read.status == 1 || read.status == -12) { drained = true; break; }
+            if (read.status == Result.Pending || read.status == Result.ErrorNotFound) { drained = true; break; }
             check(read.status, "read");
             var count = haxe.Int64.toInt(read.out_read);
             if (count <= 0) { drained = true; break; }
@@ -88,10 +88,10 @@ class LocalPtyBackend implements TerminalBackend {
         // Exit status must follow all queued output, including a final burst beyond this poll budget.
         if (!exited && drained) {
             var result = NativeKit.nk_pty_exit_status(pty.borrow());
-            if (result.status == 0) {
+            if (result.status == Result.Ok) {
                 exited = true;
                 emit(TerminalEvent.status("exited", result.out_code));
-            } else if (result.status != 1) check(result.status, "exit status");
+            } else if (result.status != Result.Pending) check(result.status, "exit status");
         }
     }
     public function requestReplay(offset:haxe.Int64):Void {
@@ -114,7 +114,7 @@ class LocalPtyBackend implements TerminalBackend {
         while (writes.length > 0) {
             var bytes = writes[0];
             var sent = NativeKit.nk_pty_write(pty.borrow(), bytes, bytes.length);
-            if (sent.status == 1) return;
+            if (sent.status == Result.Pending) return;
             check(sent.status, "write");
             var count = haxe.Int64.toInt(sent.out_written);
             if (count <= 0) return;
@@ -126,7 +126,7 @@ class LocalPtyBackend implements TerminalBackend {
     private function ensureOpen():Void {
         if (closed) throw "PTY backend is closed";
     }
-    private static function check(result:Int, operation:String):Void {
-        if (result != 0) throw 'PTY $operation failed: ${NativeKit.nk_last_error()}';
+    private static function check(result:Result, operation:String):Void {
+        if (result != Result.Ok) throw 'PTY $operation failed: ${NativeKit.nk_last_error()}';
     }
 }

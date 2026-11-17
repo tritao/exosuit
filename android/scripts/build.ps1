@@ -4,7 +4,7 @@ Builds the Android app: the Haxe module (ExosuitApp on NativeKit), the native li
   pwsh -NoProfile -File android/scripts/build.ps1 [-Abi x86_64,arm64-v8a] [-SkipHaxe] [-SkipNative] [-SkipApk]
 
 Output: android/app/build/outputs/apk/debug/app-debug.apk
-Needs the toolchain from scripts/bootstrap.ps1 and a built haxeon (haxeon/out/haxeon-cli.hl, haxeon/.tools/hashlink).
+Needs the toolchain from scripts/bootstrap.ps1 and a built haxeon (the VM and haxeon-cli.hl in the directory `python scripts/haxeon_paths.py` prints).
 #>
 param(
     [ValidateSet('x86_64', 'arm64-v8a')][string[]]$Abi = @('x86_64', 'arm64-v8a'),

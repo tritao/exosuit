@@ -38,8 +38,9 @@ if [[ ! -f "$emsdk_dir/emsdk_env.sh" ]]; then
 	echo "build.sh: Emscripten is not installed; run nativekit/tools/setup-web.sh" >&2
 	exit 1
 fi
-if [[ ! -x "$haxeon_dir/.tools/hashlink/hl" ]]; then
-	echo "build.sh: the Haxeon toolchain is missing; run haxeon/scripts/bootstrap-tools.sh" >&2
+hashlink_dir=$("$haxeon_dir/scripts/hashlink-path.sh")
+if [[ ! -x "$hashlink_dir/hl" ]]; then
+	echo "build.sh: the Haxeon toolchain is missing; run haxeon/scripts/bootstrap-tools.sh and haxeon/scripts/build-native.sh" >&2
 	exit 1
 fi
 mkdir -p "$build_dir" "$site_dir/assets"
@@ -71,16 +72,14 @@ cat > "$contract" <<JSON
   "memory_size": $memory_size
 }
 JSON
-# The compiler runs as HashLink bytecode; rebuild it when its sources change.
-compiler="$build_dir/haxeon-compiler.hl"
-"$haxeon_dir/.tools/haxe/haxe" --cwd "$haxeon_dir" -cp src -hl "$compiler" -main compiler.tools.HaxeonCompiler
+# The compiler runs as HashLink bytecode: Haxeon's tool cache builds it again when its sources change.
+compiler=$("$haxeon_dir/scripts/haxeon" dev tool-path compiler.tools.HaxeonCompiler)
 python3 "$app_dir/web/generate-manifest.py"
 python3 "$materia_dir/tools/web/guest-arguments.py" "$app_dir/web/haxeon.json" "$build_dir/hxi" > "$build_dir/guest-arguments.txt"
 mapfile -t guest_arguments < "$build_dir/guest-arguments.txt"
-(cd "$haxeon_dir" && LD_LIBRARY_PATH="$haxeon_dir/out:$haxeon_dir/.tools/hashlink${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-	HAXEON_WASM_LEGACY_EXCEPTIONS=1 \
-	"$haxeon_dir/.tools/hashlink/hl" "$compiler" --target="$guest_target" --output="$guest" --entry=app.WebMain \
-	--wasm-import-memory --wasm-memory-contract="$contract" \
+(cd "$haxeon_dir" && LD_LIBRARY_PATH="$haxeon_dir/out:$hashlink_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+	"$hashlink_dir/hl" "$compiler" --target="$guest_target" --output="$guest" --entry=app.WebMain \
+	--wasm-import-memory --wasm-memory-contract="$contract" --wasm-legacy-exceptions \
 	"${guest_arguments[@]}") > "$build_dir/guest-compile.log" 2>&1
 echo "Guest compiled; see $build_dir/guest-compile.log"
 
