@@ -4,7 +4,7 @@ import view.View;
 import view.LayoutKind;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import commandview.CommandViewProvider;
 import completion.CompletionItem;
 import core.DocumentManager;
@@ -196,9 +196,9 @@ class ModelWorkbenchHost implements WorkbenchHost {
 		return tabs.add(view);
 	}
 
-	public function splitActive(kind:LayoutKind, newFirst:Bool = false):Bool {
+	public function splitActive(kind:LayoutKind, ?newFirst:Bool):Bool {
 		if (kind == LayoutKind.Leaf) return false;
-		var sourceView = tabs.activeView, created = activeLeaf.split(kind, newFirst);
+		var sourceView = tabs.activeView, created = activeLeaf.split(kind, newFirst == true);
 		if (sourceView != null) {
 			var document = sourceView.getDocument();
 			if (document != null)
@@ -224,7 +224,7 @@ class ModelWorkbenchHost implements WorkbenchHost {
 		return true;
 	}
 
-	public function closeActiveTab(force:Bool = false):Bool {
+	public function closeActiveTab(force:Bool):Bool {
 		var view = tabs.activeView;
 		if (view == null || !tabs.close(view, force)) return false;
 		var document = view.getDocument();
@@ -267,7 +267,7 @@ class ModelWorkbenchHost implements WorkbenchHost {
 			|| containsDocumentExcept(current.requireSecond(), document, excluded);
 	}
 
-	public function closeActivePane(force:Bool = false):Bool {
+	public function closeActivePane(force:Bool):Bool {
 		if (activeLeaf == node) return false;
 		for (view in activeLeaf.tabs.views)
 			if (view.isDirty() && !force) return false;
@@ -759,7 +759,7 @@ class ModelWorkbenchHost implements WorkbenchHost {
 	public function setBuildDiagnosticHandler(handler:BuildDiagnostic->Void):Void
 		buildDiagnosticHandler = handler;
 
-	public function showBuildOutput(title:String, output:BuildOutput):Void {
+	public function showBuildOutput(title:String, output:BuildLog):Void {
 		var view = new ModelBuildOutputView(output, metrics, theme, activeLeaf.width, activeLeaf.height, buildDiagnosticHandler);
 		view.setTitle(title);
 		openAuxiliary(view);

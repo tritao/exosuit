@@ -53,7 +53,7 @@ class DirectService {
 		if (target == null) { done(null, "unknown test workspace " + id); return; }
 		var log = Path.join([stateOf(id), "service.log"]);
 		var before = FileSystem.exists(log) ? File.getContent(log).length : 0;
-		var child = sys.io.Process.spawn(Sys.executablePath(), [launcher].concat(target.serviceArguments()), target.root(),
+		var child = sys.io.ChildProcess.spawn(Sys.executablePath(), [launcher].concat(target.serviceArguments()), target.root(),
 			[exohost.ExohostClient.libraryVariable()], [exohost.ExohostClient.nativePath(launcher)], true);
 		var deadline = Sys.time() + START_SECONDS;
 		while (Sys.time() < deadline) {

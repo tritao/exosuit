@@ -175,6 +175,8 @@ class StatusBarTestMain {
 		require(highestBadge && tintedName, "explorer row did not render the highest-priority child badge and tint");
 		var before = model.revision();
 		registry.removeOwner("smoke");
+		// The app applies decoration changes to its tree models before each build.
+		model.prepareBuild();
 		root = row();
 		var badgeRemains = false, restoredName = false;
 		root.walk(function(node) {

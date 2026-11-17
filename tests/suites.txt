@@ -55,6 +55,7 @@ tab-tooltip               all      haxeon   300      -                  tests/ta
 quick-picker              all      haxeon   300      -                  tests/quick-picker/haxeon.json
 narrow-tabs               all      haxeon   300      -                  tests/narrow-tabs/haxeon.json
 status-bar                all      haxeon   300      -                  tests/status-bar/haxeon.json
+port-probes               all      haxeon   120      -                  tests/port-probes/haxeon.json
 terminal-context-menu     all      haxeon   300      portable           tests/terminal-context-menu/haxeon.json
 phone-last-view           all      haxeon   300      portable           tests/phone-last-view/haxeon.json
 sidebar-layout            all      haxeon   300      -                  tests/sidebar-layout/haxeon.json

@@ -130,6 +130,10 @@ class CatalogTestMain {
 	}
 
 	/** Reads every page of a read, following `more` like a client would. */
+	/** The resume token the last page of a full read ends with. */
+	static function lastToken(pages:Array<WorkspaceCatalog>):String
+		return pages[pages.length - 1].token;
+
 	static function readAll(resume:Null<String>):Array<WorkspaceCatalog> {
 		var pages:Array<WorkspaceCatalog> = [];
 		var token = resume;
@@ -292,7 +296,7 @@ class CatalogTestMain {
 
 	/** Hints reach a watcher only for what its grants let it see, and no faster than ten a second. */
 	static function hints():Void {
-		var token = readAll(null).pop().token;
+		var token = lastToken(readAll(null));
 		connect([WorkspaceCatalogProtocol.CAPABILITY, WorkspaceProtocol.READ]);
 		changes = [];
 		page(token, true);
@@ -338,15 +342,15 @@ class CatalogTestMain {
 
 	/** Removals spread over several refreshes outgrow the ring: older tokens reset, newer ones still resume. */
 	static function ringOverflow():Void {
-		var oldest = readAll(null).pop().token;
+		var oldest = lastToken(readAll(null));
 		var first = [for (i in 0...600) terminal("r" + i)], second = [for (i in 0...600) terminal("q" + i)];
 		for (t in first) terminals.push(t);
 		for (t in second) terminals.push(t);
-		var both = readAll(null).pop().token;
+		var both = lastToken(readAll(null));
 		terminals.splice(terminals.length - 1200, 600);
-		var afterFirst = readAll(null).pop().token;
+		var afterFirst = lastToken(readAll(null));
 		terminals.splice(terminals.length - 600, 600);
-		var afterSecond = readAll(null).pop().token;
+		var afterSecond = lastToken(readAll(null));
 		check(page(oldest).reset, "ring: a token from before every removal resets");
 		check(page(both).reset, "ring: so does one whose removals have left the ring");
 		var resumed = readAll(afterFirst), removedCount = 0;
