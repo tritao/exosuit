@@ -54,10 +54,21 @@ def run(gui):
     time.sleep(1.0)
 
     begin(gui, "scm")
+    # A repository must be trusted before its Git changes are read ("Trust repositories to enable Git changes."): that is
+    # a person's click, so the scenario clicks the row's Trust button, then waits for the repository to leave "Restricted".
+    trust = gui.element(None, pattern=r"^Trust repository ", role="1", timeout=15)
+    click(gui, trust)
+    gui.check("trusting the repository lifts the restriction", lambda s: not gui.find(s, pattern=r"^Trust repository ") and not gui.find(s, "Restricted"), 10,
+              detail=lambda s: [e["label"][:60] for e in right_side(s)][:30])
     mark(gui, "change a1.txt outside")
     with open(os.path.join(os.path.dirname(gui.out), "fixture", "alpha", "a1.txt"), "a") as f:
         f.write("changed outside the editor\n")
-    gui.check("Changes lists a1.txt after a change made outside", lambda s: any(e["label"].endswith("a1.txt") for e in right_side(s)), 20,
+    listed = lambda s: any(e["label"].endswith("a1.txt") for e in right_side(s))
+    # The Changes group starts collapsed on the baseline (its row shows only the count 1): open it, unless it is open.
+    gui.check("the Changes group counts the change made outside", lambda s: listed(s) or any(e["label"] == "1" for e in right_side(s)), 20)
+    if not listed(gui.snapshot()):
+        click(gui, gui.element(None, pattern=r"^group:", timeout=5), fx=0.3)
+    gui.check("Changes lists a1.txt after a change made outside", listed, 10,
               detail=lambda s: [e["label"][:60] for e in right_side(s)][:30])
     gui.shot("changes")
 
