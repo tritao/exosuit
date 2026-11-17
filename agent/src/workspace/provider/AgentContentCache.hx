@@ -16,7 +16,7 @@ class AgentContentCache {
  static function find(key:String):Null<ContentEntry> { for (entry in entries) if (entry.key == key) return entry; return null; }
  static function retain(entry:ContentEntry):Void {
   entries.remove(entry); entries.push(entry);
-  while (entries.length > 128 || used > MAX_TOTAL) { var old = entries.shift(); used -= old.bytes.length; }
+  while (entries.length > 128 || used > MAX_TOTAL) { var old = entries.shift() ?? throw "Content cache is empty"; used -= old.bytes.length; }
  }
  static function prefix(bytes:Bytes, limit:Int):Bytes {
   if (bytes.length <= limit) return bytes;

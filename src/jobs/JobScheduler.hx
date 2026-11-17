@@ -41,7 +41,7 @@ class JobScheduler {
 		if (maxSteps == 0 || maxMillis == 0) return 0;
 		var performed = 0, deadline = Sys.time() + maxMillis / 1000.0;
 		while (performed < maxSteps && jobs.length > 0) {
-			var job = jobs.shift(), complete = job.task.step();
+			var job = jobs.shift() ?? throw "No job", complete = job.task.step();
 			performed++;
 			if (!complete) jobs.push(job);
 			if (Sys.time() >= deadline) break;

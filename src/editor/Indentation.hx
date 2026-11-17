@@ -176,7 +176,7 @@ private class IndentationContext {
 			} else if (["}", "]", ")"].indexOf(c) >= 0) {
 				var expected = c == "}" ? "{" : c == "]" ? "[" : "(";
 				if (frames.length > 0 && frames[frames.length - 1].opener == expected) {
-					var frame = frames.pop();
+					var frame = frames.pop() ?? throw "No open frame";
 					if (c == ")" && frame.control && priorFrames.indexOf(frame) >= 0 && StringTools.trim(trimmed.substring(i + 1)).length == 0) { pending.push(frame.base); lastControl = frame.base; lastControlDepth = frames.length; }
 					if (c == "}") { lastBase = frame.base; if (frame.control) { lastControl = frame.base; lastControlDepth = frames.length; } }
 				}

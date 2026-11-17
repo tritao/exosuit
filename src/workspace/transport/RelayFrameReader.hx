@@ -99,7 +99,7 @@ class RelayFrameReader {
 	public function take():Null<RelayFrame> {
 		if (queued.length == 0)
 			return null;
-		var value = queued.shift();
+		var value = queued.shift() ?? throw "No queued frame";
 		queuedBytes -= value.payload.length;
 		return value;
 	}

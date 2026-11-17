@@ -176,7 +176,7 @@ class ExohostLogin {
 		}
 		if (queued.length == 0)
 			return false;
-		var next = queued.shift();
+		var next = queued.shift() ?? throw "No queued reg command";
 		try {
 			job = {child: spawnReg(next), deadline: Sys.time() + REG_TIMEOUT_SECONDS, arguments: next};
 		} catch (_:Dynamic) {

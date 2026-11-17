@@ -174,7 +174,7 @@ class ExohostLink {
 					send({version: VERSION, kind: "event", sequence: ++sequence, event: "exosuit.state", data: stateData()});
 				}
 				while (queue.length > 0) {
-					var request = queue.shift();
+					var request = queue.shift() ?? throw "Request queue is empty";
 					sent.set(request.id, request);
 					send({version: VERSION, kind: "request", id: request.id, method: request.method, params: request.params});
 				}

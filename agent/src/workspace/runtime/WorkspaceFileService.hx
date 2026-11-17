@@ -468,7 +468,7 @@ private class WorkspaceFileBinding {
 					state.scanComplete = true;
 					break;
 				}
-				state.currentPath = state.pendingDirectories.pop();
+				state.currentPath = state.pendingDirectories.pop() ?? throw "No pending directory";
 				state.directoriesVisited++;
 				try {
 					state.currentDirectory = service.rootHandle(state.root).openDirectory(state.currentPath);

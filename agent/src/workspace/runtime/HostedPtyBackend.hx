@@ -122,7 +122,7 @@ class HostedPtyBackend {
 	function flush():Void {
 		var link = transport;
 		if (link == null) return;
-		while (outgoing.length > 0 && link.send(outgoing[0])) outgoingBytes -= outgoing.shift().length;
+		while (outgoing.length > 0 && link.send(outgoing[0])) outgoingBytes -= (outgoing.shift() ?? throw "No outgoing message").length;
 		if (outgoingBytes < 0) outgoingBytes = 0;
 	}
 

@@ -84,7 +84,7 @@ class ExohostCtl {
 			}
 			if (words.length == 0)
 				throw new Usage("no command");
-			var command = words.shift();
+			var command = words.shift() ?? throw new Usage("no command");
 			switch command {
 				case "list":
 					var result = call("exosuit.instances", {}, null);

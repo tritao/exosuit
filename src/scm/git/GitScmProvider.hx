@@ -223,7 +223,7 @@ private class GitDetectTask implements JobTask {
 		if (phase == "scan") {
 			if (scanDirectory == null) {
 				if (candidates.length == 0) return finish(handles, null);
-				var next = candidates.shift();
+				var next = candidates.shift() ?? throw "No candidate directory";
 				if (next.depth >= maxDepth) return false;
 				scanDirectory = next;
 				scanEntryCursor = 0;

@@ -123,7 +123,7 @@ class AgentLineTransport {
 				offset += written;
 				if (offset == line.length) {
 					queue.shift();
-					queued -= sizes.shift();
+					queued -= sizes.shift() ?? 0;
 					offset = 0;
 				}
 			}
