@@ -151,6 +151,19 @@ class ExosuitPalette {
 			[StyleValue.background(tokens.surfaceHover)]);
 		sheet.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Pressed),
 			[StyleValue.background(tokens.surfaceSunken)]);
+
+		// Problems rows are flat and square: only hover and selection fill them, selection over hover. A press keeps the
+		// hover fill while the pointer is over the row and shows none once it leaves; focus keeps the framework outline.
+		sheet.rule(StyleSelector.widget("button").className("problem-row"), [
+			StyleValue.background(transparent),
+			StyleValue.radius(StyleProperty.RadiusTopLeft, 0),
+			StyleValue.radius(StyleProperty.RadiusTopRight, 0),
+			StyleValue.radius(StyleProperty.RadiusBottomLeft, 0),
+			StyleValue.radius(StyleProperty.RadiusBottomRight, 0)
+		]);
+		sheet.rule(StyleSelector.widget("button").className("problem-row").state(StyleState.Pressed), [StyleValue.background(transparent)]);
+		sheet.rule(StyleSelector.widget("button").className("problem-row").state(StyleState.Hovered), [StyleValue.background(tokens.surfaceHover)]);
+		sheet.rule(StyleSelector.widget("button").className("problem-row").state(StyleState.Selected), [StyleValue.background(tokens.selection)]);
 	}
 
 	public static function lightEditor():style.Theme {
