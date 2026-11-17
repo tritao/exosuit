@@ -358,14 +358,19 @@ class EditorPane implements View {
 		onEdited();
 	}
 
-	/** One layout bridge applies the retained dimensions atomically after shaping. */
-	function applySourceGeometry(node:Null<haxeon.ui.core.RenderNode>):Bool {
+	/**
+	 * One layout bridge applies the retained dimensions atomically after shaping. The node is in the submitted tree, so the
+	 * edit is announced (willEditRetained): otherwise the feedback pass does not send it to native layout, which keeps the old
+	 * size and trailing space until the pane is built again.
+	 */
+	function applySourceGeometry(context:haxeon.ui.core.BuildContext, node:Null<haxeon.ui.core.RenderNode>):Bool {
 		if (node == null) return false;
 		var latest = haxeon.ui.core.RenderNode.latest(node), style = latest.layout.style;
 		var changed = style.width.sizing != haxeon.ui.LayoutSizing.Fixed || style.height.sizing != haxeon.ui.LayoutSizing.Fixed ||
 			Math.abs(style.width.value - viewportGeometry.contentWidth) > 0.01 || Math.abs(style.height.value - viewportGeometry.contentHeight) > 0.01 ||
 			Math.abs(style.padding.right - viewportGeometry.rightPadding()) > 0.01 || Math.abs(style.padding.bottom - viewportGeometry.trailingSpace()) > 0.01;
 		if (changed) {
+			context.willEditRetained(latest);
 			style.width = LayoutAxis.fixed(viewportGeometry.contentWidth); style.height = LayoutAxis.fixed(viewportGeometry.contentHeight);
 			style.padding = new Insets(0, 0, viewportGeometry.rightPadding(), viewportGeometry.trailingSpace());
 		}
@@ -415,7 +420,7 @@ class EditorPane implements View {
 			var metrics = layout.measure();
 			viewportGeometry.resolveSource(metrics.width, metrics.height,
 				layout.paragraphStyle.lineHeight == null ? Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight);
-			if (applySourceGeometry(editorNode)) { context.requestLayoutFeedback(); return; }
+			if (applySourceGeometry(context, editorNode)) { context.requestLayoutFeedback(); return; }
 			if (Math.abs(scrollController.contentHeight - viewportGeometry.contentHeight) > 0.01 ||
 				Math.abs(scrollController.contentWidth - viewportGeometry.contentWidth) > 0.01) { context.requestLayoutFeedback(); return; }
 			if (applyRestoredScroll()) { context.requestLayoutFeedback(); return; }
