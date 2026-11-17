@@ -23,7 +23,6 @@ import haxeon.ui.widgets.controls.CountBadge;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.KeyedView;
-import haxeon.ui.widgets.overlays.Tooltip;
 import haxeon.ui.widgets.layout.Row;
 import plugin.PluginStatusItem;
 import plugin.PluginStatusSide;
@@ -47,9 +46,13 @@ class StatusBarView implements View {
 			var rightItems = itemGroup(statusItems, Right, context);
 			var leftItemsWidth = contributionWidth(statusItems, Left);
 			var rightItemsWidth = contributionWidth(statusItems, Right);
-			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread, hasIndentation,
-				leftItemsWidth, rightItemsWidth, cursorWidth(cursorText));
-			var remoteNode:RenderNode = null, remoteButton:RenderNode = null, remoteLabel:RenderNode = null;
+			// The bar's width at the last layout. Every slot is sized from it here, including the buttons, whose render
+			// scopes rebuild from their constructor inputs on hover and press; a resize the root's onResolved writes is a
+			// tracked change that rebuilds the bar in the same frame.
+			var resolvedWidth = context.state(context.id("status-bar-width"), -1.0);
+			var sizes = allocate(resolvedWidth.value > 0 ? resolvedWidth.value : context.viewportWidth, remote, showToast, data.unread,
+				hasIndentation, leftItemsWidth, rightItemsWidth, cursorWidth(cursorText));
+			var remoteNode:RenderNode = null;
 			var dismissNode:RenderNode = null;
 
 			var style = new LayoutStyle();
@@ -63,19 +66,17 @@ class StatusBarView implements View {
 			WorkbenchBoundary.top(context, root);
 
 			if (remote) {
-				var connectionStyle = controlStyle(sizes.remote, HEIGHT);
+				var connectionStyle = slotStyle(sizes.remote, HEIGHT);
 				connectionStyle.padding = new Insets(8, 0, 8, 0);
-				var connection = new Button("Remote", connectionStyle, data.openRemote, "status-remote", null,
+				connectionStyle.childGap = 6;
+				// Compact, the button is its icon alone.
+				var connection = new Button(sizes.compact ? "" : "Remote", connectionStyle, data.openRemote, "status-remote", null,
 					ButtonVariant.Navigation, null, ["status-remote"], null, null,
 					new Icon("remote-icon", IconName.Remote, 16, context.theme.tokens.accent), null,
-					new Text("Remote", null, null,
+					sizes.compact ? null : new Text("Remote", null, null,
 						new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary)),
 					null, null, data.remoteDetails + ". Open Remote Access");
 				remoteNode = tooltip("remote", connection, data.remoteDetails).build(context);
-				remoteNode.layout.style.width = LayoutAxis.fixed(sizes.remote);
-				// Without hover tooltips (touch hosts) the tooltip draws only its anchor: the node is the button itself.
-				remoteButton = Tooltip.hoverEnabled ? remoteNode.children[0] : remoteNode;
-				remoteLabel = remoteButton.children[1];
 				root.add(remoteNode);
 			}
 			var leftItemsNode:Null<RenderNode> = null;
@@ -119,13 +120,15 @@ class StatusBarView implements View {
 			messageNode.layout.style.width = LayoutAxis.fixed(sizes.message);
 			root.add(messageNode);
 			if (showToast) {
-				var dismiss = new Button("", controlStyle(sizes.dismiss, 22), data.dismissNotification, "notification-toast-dismiss", null,
+				var dismiss = new Button("", slotStyle(sizes.dismiss, 22), data.dismissNotification, "notification-toast-dismiss", null,
 					ButtonVariant.Navigation, null, null, IconName.Close, null, null, null, null, null, 12, "Hide notification");
 				dismissNode = dismiss.build(context);
 				root.add(dismissNode);
 			}
+			// Compact, the bell has no count badge.
 			var bell = new Button("", controlStyle(sizes.bell, 22), data.toggleNotifications, "notifications-toggle", null,
-				ButtonVariant.Navigation, null, null, IconName.Bell, null, null, data.unread > 0 ? new CountBadge(data.unread) : null,
+				ButtonVariant.Navigation, null, null, IconName.Bell, null, null,
+				data.unread > 0 && !sizes.compact ? new CountBadge(data.unread) : null,
 				null, null, 16, "Notifications, " + data.unread + " unread");
 			var bellNode = bell.build(context);
 			root.add(bellNode);
@@ -134,47 +137,16 @@ class StatusBarView implements View {
 				rightItemsNode = rightItems.build(context);
 				root.add(rightItemsNode);
 			}
-			var apply = function(next:StatusBarSizes, announce:Bool) {
-				// Once mounted these nodes belong to the submitted tree: announce each in-place edit (BuildContext.willEditRetained).
-				if (announce) {
-					for (node in [root, documentNode, messageNode, cursorNode, indentationNode, bellNode, remoteNode,
-							remoteButton, remoteLabel, dismissNode, leftItemsNode, rightItemsNode])
-						if (node != null) context.willEditRetained(node);
-					if (data.unread > 0) context.willEditRetained(bellNode.children[1]);
-				}
-				root.layout.style.childGap = next.gap;
-				root.layout.style.padding = new Insets(next.left, 0, next.right, 0);
-				sizeSlot(documentNode, next.document);
-				sizeSlot(messageNode, next.message);
-				if (cursorNode != null) sizeSlot(cursorNode, next.cursor);
-				if (indentationNode != null) { sizeSlot(indentationNode, next.indentation); indentationNode.layout.style.visible = next.indentation > 0; }
-				bellNode.layout.style.width = LayoutAxis.fixed(next.bell);
-				bellNode.layout.style.childGap = next.compact ? 0 : 8;
-				if (data.unread > 0) {
-					var badge = bellNode.children[1];
-					badge.layout.style.visible = !next.compact;
-					badge.layout.style.width = next.compact ? LayoutAxis.fixed(0) : LayoutAxis.fit(22);
-				}
-				if (remoteNode != null && remoteLabel != null) {
-					sizeSlot(remoteNode, next.remote);
-					remoteButton.layout.style.childGap = next.compact ? 0 : 6;
-					remoteLabel.layout.style.visible = !next.compact;
-					remoteLabel.layout.style.width = next.compact ? LayoutAxis.fixed(0) : LayoutAxis.fit();
-				}
-				if (dismissNode != null) {
-					sizeSlot(dismissNode, next.dismiss);
-				}
-				if (leftItemsNode != null) sizeSlot(leftItemsNode, next.leftItems);
-				if (rightItemsNode != null) sizeSlot(rightItemsNode, next.rightItems);
-			};
-			apply(sizes, false);
-			var lastWidth = context.viewportWidth;
+			// The slots that are not buttons: sized on the built nodes, which this build owns.
+			sizeSlot(documentNode, sizes.document);
+			sizeSlot(messageNode, sizes.message);
+			if (cursorNode != null) sizeSlot(cursorNode, sizes.cursor);
+			if (indentationNode != null) { sizeSlot(indentationNode, sizes.indentation); indentationNode.layout.style.visible = sizes.indentation > 0; }
+			if (remoteNode != null) sizeSlot(remoteNode, sizes.remote);
+			if (leftItemsNode != null) sizeSlot(leftItemsNode, sizes.leftItems);
+			if (rightItemsNode != null) sizeSlot(rightItemsNode, sizes.rightItems);
 			root.onResolved(function(geometry) {
-				if (lastWidth == geometry.width) return;
-				lastWidth = geometry.width;
-				apply(allocate(geometry.width, remote, showToast, data.unread, hasIndentation,
-					leftItemsWidth, rightItemsWidth, cursorWidth(cursorText)), true);
-				context.requestLayoutFeedback();
+				if (resolvedWidth.value != geometry.width) resolvedWidth.update(geometry.width);
 			});
 			return root;
 		});
@@ -257,6 +229,14 @@ class StatusBarView implements View {
 		node.layout.style.visible = width > 0;
 		// Hidden controls retain intrinsic icon sizes; exclude them from flow.
 		node.layout.style.positioning = width > 0 ? LayoutPositioning.Flow : LayoutPositioning.Absolute;
+	}
+
+	/** A button's style for a slot that is hidden and out of flow at width 0, as sizeSlot does for other slots. */
+	static function slotStyle(width:Float, height:Float):LayoutStyle {
+		var style = controlStyle(width, height);
+		style.visible = width > 0;
+		style.positioning = width > 0 ? LayoutPositioning.Flow : LayoutPositioning.Absolute;
+		return style;
 	}
 
 	static function controlStyle(width:Float, height:Float):LayoutStyle {
