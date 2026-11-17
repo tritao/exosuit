@@ -13,6 +13,7 @@ steps 4–7), with no input to the window at all:
 - last, `exohostctl quit --mode recover` closes the window."""
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -33,10 +34,10 @@ def exohostctl(*arguments, timeout=30):
 def editor_environment():
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     from exohost import library_path, library_variable
+    from haxeon_paths import hl as haxeon_hl
     haxeon = os.environ.get("HAXEON_ROOT", os.path.join(ROOT, "haxeon"))
-    hl = os.path.join(haxeon, ".tools", "hashlink", "hl.exe")
+    hl = str(haxeon_hl(Path(haxeon)))
     bytecode = os.path.join(ROOT, "graphical", "build", "host", "main.hl")
-    from pathlib import Path
     env = dict(os.environ)
     env[library_variable()] = library_path(Path(bytecode), Path(hl), Path(haxeon), env.get(library_variable(), ""))
     return hl, bytecode, env

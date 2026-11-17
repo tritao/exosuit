@@ -670,7 +670,7 @@ def render(A, B, notes, a_path, b_path):
     lines_m.append(f'  NK[("haxeon/vendor/nativekit<br/>full tree configured {len(nk_where)}×")]')
     if nk_where:
         lines_m.append("  NK -.-> " + " & ".join(nk_where))
-    lines_m.append('  HL["hl.exe (haxeon/.tools/hashlink)<br/>loads main.hl, .hdll, DLLs via PATH"]')
+    lines_m.append('  HL["hl.exe (haxeon/out/cmake/windows-msvc/hashlink-runtime)<br/>loads main.hl, .hdll, DLLs via PATH"]')
     for app in APPS:
         lines_m.append(f"  {app.upper()} --> HL")
     deps = f"""

@@ -6,7 +6,7 @@ On Windows a crashed or misconfigured program often does not exit. It shows a mo
 press OK, so an unattended build, test or capture hangs with no output. Seen here:
 
 - "The code execution cannot proceed because nativekit.dll was not found" (loader; the DLL's directory is not on PATH)
-- HashLink "Fatal Error: Failed to load library ..." (`haxeon\out` or `haxeon\.tools\hashlink` not on PATH)
+- HashLink "Fatal Error: Failed to load library ..." (`haxeon\out` not on PATH, or the native package's own DLL folder)
 - MSVC Debug CRT "Debug Error! abort() has been called" and assert boxes
 - Windows Error Reporting "... has stopped working"
 
@@ -20,7 +20,8 @@ Rules:
 - Prefer running a test executable directly through the guard over `ctest`: `ctest` starts tests with the default error
   mode, so a loader error there is drawn on the user's desktop before the guard can close it.
 - Exit code -1073741515 (0xC0000135) means a DLL was not found. Fix PATH; it is not a test failure. Every `hl.exe` run
-  needs `haxeon\out` and `haxeon\.tools\hashlink` on PATH.
+  needs `haxeon\out` on PATH, and `hl.exe` itself is run from the VM directory that `python scripts/haxeon_paths.py`
+  prints (`haxeon\out\cmake\windows-msvc\hashlink-runtime`), which scripts/build-windows.ps1 builds.
 - Build native tests Release or RelWithDebInfo, not Debug: Debug CRT asserts and `abort()` raise dialogs.
 - If something seems stuck, look for a dialog before waiting longer:
   `Import-Module docs/benchmarks/perf-harness/guard.psm1; [PerfHarness.Windows]::Visible() | ? ClassName -eq '#32770'`

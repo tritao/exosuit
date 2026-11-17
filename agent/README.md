@@ -10,7 +10,7 @@ editor's exohost link) or a paired device needs it. By hand:
 
 ```sh
 python3 scripts/build.py
-haxeon/.tools/hashlink/hl agent/build/host/main.hl --workspace ID [--folder F]... [--scratch S]
+"$(python scripts/haxeon_paths.py)/hl" agent/build/host/main.hl --workspace ID [--folder F]... [--scratch S]
 ```
 
 exohost finds the bytecode through `EXOSUIT_AGENT_LAUNCHER`, or beside its own (a checkout's `agent/build/host/main.hl`,

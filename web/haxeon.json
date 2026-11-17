@@ -13,8 +13,8 @@
   "sources": [
     "src/app/WebMain.hx",
     "../src/build/BuildDiagnostic.hx",
-    "../src/build/BuildOutput.hx",
-    "../src/build/BuildOutputLine.hx",
+    "../src/build/BuildLog.hx",
+    "../src/build/BuildLogLine.hx",
     "../src/build/BuildTask.hx",
     "../src/build/BuildTaskCodec.hx",
     "../src/command/Command.hx",
