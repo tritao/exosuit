@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-port-probes" },
+  "entry": "app.PortProbesMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": { "haxeon-ui": { "path": "../../haxeon/packages/ui" } },
+  "target": "host",
+  "outputDir": "build"
+}
