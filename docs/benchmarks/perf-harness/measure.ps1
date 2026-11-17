@@ -54,6 +54,12 @@ $lock = [System.Threading.Mutex]::new($false, 'Global\exosuit-perf-gui')
 Note "waiting for the screen lock (one GUI measurement at a time)"
 try { $acquired = $lock.WaitOne([TimeSpan]::FromMinutes($LockWaitMinutes)) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
 if (-not $acquired) { Note "screen lock not free after $LockWaitMinutes min"; exit 124 }
+# A previous capture's exohost daemon (idle timeout 150 s) or editor of this checkout still running makes this run's
+# exohost start fail; the lock is ours, so nothing of this checkout belongs to a running capture. Compiler workers stay.
+$rootPattern = [regex]::Escape(($root -replace '\\', '/'))
+Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object {
+	$_.CommandLine -and (($_.CommandLine -replace '\\', '/') -match $rootPattern) -and $_.CommandLine -notmatch 'compiler'
+} | ForEach-Object { Note "stopping leftover hl.exe $($_.ProcessId)"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 $exit = 0
 function Get-CpuLoad { [int]((Get-Counter '\Processor(_Total)\% Processor Time' -SampleInterval 1 -MaxSamples 3).CounterSamples | Measure-Object CookedValue -Average).Average }
 try {
