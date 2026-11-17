@@ -1,6 +1,5 @@
 package exohost;
 
-import build.HashLinkPath;
 import haxe.io.Path;
 import exohost.ExohostRecord.ExohostRecords;
 import exohost.ExohostRecord.ExohostWorkspace;
@@ -137,8 +136,8 @@ class ExohostClient {
 
 		1. every directory under `<launcher dir>/native` (exohost's own native packages)
 		2. `lib` beside the launcher's directory (a bundle keeps tools/ and lib/ side by side)
-		3. the directory of the HashLink runtime that runs exohost
-		4. `out` and the VM directory of Haxeon's path table under the Haxeon checkout (`HAXEON_HOME`; scripts/exohost.py uses `HAXEON_ROOT`)
+		3. the directory of the HashLink runtime that runs exohost (Haxeon's VM directory, which holds no libraries now)
+		4. `out` under the Haxeon checkout (`HAXEON_HOME`; scripts/exohost.py uses `HAXEON_ROOT`)
 		5. the inherited value
 	**/
 	public static function nativePath(launcher:String):String {
@@ -159,12 +158,9 @@ class ExohostClient {
 				directories.push(path);
 		var haxeonHome = nonempty(Sys.getEnv("HAXEON_HOME"));
 		if (haxeonHome != null) {
-			var paths = [Path.join([haxeonHome, "out"])];
-			if (FileSystem.exists(Path.join([haxeonHome, "cmake", "hashlink-output-paths.txt"])))
-				paths.push(HashLinkPath.directory(haxeonHome));
-			for (path in paths)
-				if (FileSystem.exists(path))
-					directories.push(path);
+			var haxeonOut = Path.join([haxeonHome, "out"]);
+			if (FileSystem.exists(haxeonOut))
+				directories.push(haxeonOut);
 		}
 		var inherited = Sys.getEnv(libraryVariable());
 		if (inherited != null && inherited.length > 0)
