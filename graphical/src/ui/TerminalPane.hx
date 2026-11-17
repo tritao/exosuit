@@ -245,6 +245,11 @@ class TerminalPane implements AgentTerminalPanel {
 
 	public function poll():Void {
 		if (closed) return;
+		if (inputFailure != null) {
+			var failure = inputFailure;
+			inputFailure = null;
+			throw failure;
+		}
 		if (foreground != palette.foreground || background != palette.background) {
 			foreground = palette.foreground;
 			background = palette.background;
@@ -616,8 +621,7 @@ class TerminalPane implements AgentTerminalPanel {
 			if (text.length > 0) session.emulator.paste(Bytes.ofString(text));
 			else if (passControlV) session.write(Bytes.ofString("\x16"));
 			else return;
-			session.flushInput();
-			session.pollEvents();
+			sendInput();
 			invalidate();
 		}) catch (e:Dynamic) {}
 	}
@@ -995,8 +999,7 @@ class TerminalPane implements AgentTerminalPanel {
 					// No text (an image, say): pass ^V through so programs read the clipboard themselves.
 					else if (controlV) session.write(Bytes.ofString("\x16"));
 					else return;
-					session.flushInput();
-					session.pollEvents();
+					sendInput();
 					invalidate();
 				}) catch (e:Dynamic) {}
 			} else handleKey(event);
@@ -1072,6 +1075,21 @@ class TerminalPane implements AgentTerminalPanel {
 		invalidate();
 	}
 
+	/**
+		A terminal's failure surfaces once, from poll(), where TerminalTabs shows it. Input runs in event handlers
+		and clipboard callbacks, where an exception ends the window, so the failure waits there for the next poll.
+	**/
+	var inputFailure:Null<Dynamic> = null;
+
+	function sendInput():Void {
+		try {
+			session.flushInput();
+			session.pollEvents();
+		} catch (error:Dynamic) {
+			if (inputFailure == null) inputFailure = error;
+		}
+	}
+
 	/** UIKit button/modifier values differ from the terminal wire protocol. */
 	function reportMouse(event:UiEvent, button:Int, kind:Int):Bool {
 		if (!canSendInput()) return false;
@@ -1081,8 +1099,7 @@ class TerminalPane implements AgentTerminalPanel {
 		if (event.modifiers.contains(UiModifier.Alt)) modifiers |= 8;
 		if (event.modifiers.contains(UiModifier.Control)) modifiers |= 16;
 		if (!session.emulator.mouse(cell.column, cell.row, button, kind, modifiers)) return false;
-		session.flushInput();
-		session.pollEvents();
+		sendInput();
 		event.preventDefault();
 		event.stopPropagation();
 		invalidate();
@@ -1187,8 +1204,7 @@ class TerminalPane implements AgentTerminalPanel {
 		};
 		if (name != null) prepareInput();
 		if (name != null && session.emulator.key(name, terminalModifiers(event.modifiers))) {
-			session.flushInput();
-			session.pollEvents();
+			sendInput();
 			event.preventDefault();
 			return;
 		}
