@@ -15,9 +15,8 @@ def run(gui):
     gui.click(gui.element("w:" + alpha), count=2)  # a double click opens the workspace in this window
     opened = gui.check("a double click on a workspace row opens it", lambda s: s["state"]["openWorkspace"] == alpha, 15,
                        detail=lambda s: s["state"]["openWorkspace"])
-    if not opened:  # the right-click menu's Open does the same; carry on with the rest of the checks
-        gui.click(gui.element("w:" + alpha), button="right")
-        gui.click(gui.element("Open", role="16"))
+    if not opened:  # a single click does the same; carry on with the rest of the checks
+        gui.click(gui.element("w:" + alpha))
     attached(gui, "Alpha")
     sequence(gui, alpha, folder_start=False)
 

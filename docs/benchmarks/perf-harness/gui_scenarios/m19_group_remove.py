@@ -9,10 +9,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m19_common import *  # noqa: F401,F403
 from m19_folders import menu, open_by_double_click
-from m19_sessions_drag import ELLIPSIS
 
 FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"],
-    "settings": {"workbench/agents/session_mode": "integrated"}, "env": {
+    "settings": {"workbench/agents/session_mode": "integrated", "workbench/agents/default_provider": "codex"}, "env": {
     "EXOSUIT_CODEX_BIN": "{python}", "EXOSUIT_CODEX_SCRIPT": "{root}/tests/workspace-agents/fake-codex.py",
     "EXOSUIT_CODEX_PROXY_LAUNCHER": "{root}/scripts/run-codex-proxy.py"}}
 
@@ -27,10 +26,7 @@ def run(gui):
 
     gui.step("an agent session in the workspace root (a fake Codex stands in for the provider)")
     before = {a["id"] for a in gui.state()["agents"]}
-    menu(gui, "w:" + alpha, "New Agent Session" + ELLIPSIS)
-    gui.element(pattern="Codex", timeout=10)
-    gui.shot("chooser")
-    gui.chord("enter")
+    menu(gui, "w:" + alpha, "New Agent Session")
     root_session = gui.wait("a new agent session", lambda s: next((a["id"] for a in s["state"]["agents"] if a["id"] not in before), None), 30)
     gui.check("the session is in the workspace root", lambda s: next(a for a in s["state"]["agents"] if a["id"] == root_session)["group"] in (None, ""), 5,
               detail=lambda s: s["state"]["agents"])
@@ -54,7 +50,7 @@ def run(gui):
 
     gui.step("remove the focused group")
     show_workbench(gui)
-    menu(gui, "g:" + work, "Remove Group")
+    menu(gui, open_row(gui, "g", work), "Remove Group")
     gui.check("Work is gone from the catalog", lambda s: not any(g["id"] == work for g in s["state"]["groups"]), 15,
               detail=lambda s: s["state"]["groups"])
     gui.check("the window moved to the workspace root", lambda s: s["state"]["contextKind"] == "Workspace" and s["state"]["context"] == root_context, 10,

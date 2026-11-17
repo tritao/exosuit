@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.Int64;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
@@ -44,18 +45,18 @@ class SubgroupDropTest {
    }
    ctx.respond({record:agent,activity:"",requests:[],error:null});
   });
-  var client=new RpcWorkspaceWorkbenchClient(new SubgroupEndpoint(connection),clock);
+  var endpoint=new TestEndpoint(connection);endpoint.root="/workspace";endpoint.generation="owner";endpoint.events=false;
+  var client=new RpcWorkspaceWorkbenchClient(endpoint,clock);
   function pump():Void {for(_ in 0...2) {client.poll();server.poll();connection.poll();}}
   pump();client.refreshTerminals(true);client.refreshAgents();pump();
   var menuItems:Array<haxeon.ui.widgets.overlays.MenuItem>=[];
   var created:Array<String>=[];
-  var panel=new ui.WorkbenchPanel(client,function(_) { return true; },function(group) { created.push(group); },function(_,_) {},function(_) {},
-   function(_) { return []; },function() {},function(_) {},function(items,_,_) {menuItems=items;},function(_) {},function(_,_) {},
+  var panel=new ui.WorkbenchPanel(function() return client,function(_,_) { return true; },function(_,group) { created.push(group); },function(_,_,_) {},
+   function(_,_) { return []; },function() {},function(_) {},function(items,_,_) {menuItems=items;},function(_,_,_) {},function(_,_) {},
    function(_,group) { created.push(group); },function() { return true; });
   var view:ui.WorkbenchMachineView={machine:{id:"m",name:"cube",workspaces:[{id:"resume",name:"resume-2026",folders:["/workspace"],scratch:null,revision:1},
-   {id:"elsewhere",name:"elsewhere",folders:["/elsewhere"],scratch:null,revision:1}]},error:null,openWorkspace:"resume",openRoots:["/workspace"],revision:1};
-  panel.machine={view:function() { return view; },busy:function() { return false; },open:function(_) {},start:function(_) {},create:function() {},
-   rename:function(_) {},attachFolder:function(_) {},detachFolder:function(_) {},remove:function(_) {}};
+   {id:"elsewhere",name:"elsewhere",folders:["/elsewhere"],scratch:null,revision:1}]},error:null,openWorkspace:"resume",revision:1,manages:true};
+  var actions=new FakeWorkbenchActions(view,client);panel.actions=actions;
   var fonts=haxeon.ui.FontCollection.create();fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
   var context=new UiContext(null,fonts),frame=new haxeon.ui.LayoutFrame(320,600);
   var root:RenderNode=null;
@@ -70,50 +71,49 @@ class SubgroupDropTest {
    context.pointerDown(120,source.y+source.height/2,0);context.pointerMove(120,target.y+target.height/2);submit();
    context.pointerUp(120,target.y+target.height/2,0);pump();submit();
   }
-  submit();panel.tree.setExpanded("g:sub",true);submit();
-  var machinePicker=false;
-  root.walk(function(node) {var sem=node.semantics;if(sem!=null && sem.label=="Machine") machinePicker=true;});
-  require(machinePicker && panel.model.rootKeyAt(0)=="w:resume","the machine is not chosen above a tree of workspaces");
-  require(panel.model.openRow=="w:resume" && panel.model.groupParent=="w:resume","groups did not sit under the open workspace");
-  for(target in ["g:sub","w:elsewhere","n:new-workspace"]) {
-   drag("t:term",target);drag("a:agent",target);
+  submit();panel.tree.setExpanded("g:resume|sub",true);submit();
+  require(panel.model.rootKeyAt(0)=="w:resume","the workspaces are not the tree's roots");
+  function rows():ui.WorkbenchRows {var shown=panel.model.rows("resume");if(shown==null) throw "no rows";return shown;}
+  require(panel.model.openRow=="w:resume" && rows().live,"groups did not sit under the open workspace");
+  for(target in ["g:resume|sub","w:elsewhere","n:new-workspace"]) {
+   drag("t:resume|term",target);drag("a:resume|agent",target);
    require(renames.length==0 && moves.length==0,"drop onto "+target+" was accepted");
   }
-  holdRename=true;drag("t:term","g:work");
+  holdRename=true;drag("t:resume|term","g:resume|work");
   require(renames.join(",")=="work" && heldRename!=null && client.terminalCatalogBusy(),"terminal did not move to the top-level group");
-  drag("a:agent","g:work");
+  drag("a:resume|agent","g:resume|work");
   require(moves.length==0,"session moved while the terminal catalog was busy");
   holdRename=false;var held=heldRename;if(held!=null) held.respond(terminal);
   now+=2000;client.refreshTerminals(true);pump();submit();
-  var moved=panel.model.terminals.get("term");
+  var moved=rows().terminals.get("term");
   require(moved!=null && moved.group=="work" && !client.terminalCatalogBusy(),"moved terminal did not reach its new group");
-  panel.tree.select("a:agent");submit();
+  panel.tree.select("a:resume|agent");submit();
   context.key(UiEventKind.KeyDown,haxeon.ui.core.UiKey.F2);submit();
   var renaming=false;
   root.walk(function(node) {var sem=node.semantics;if(sem!=null && sem.label=="Workbench label") renaming=true;});
   require(renaming,"F2 did not start the session rename");
   context.text(UiEventKind.TextInput,"Unsaved");submit();
   // Pressing another row ends the rename unsaved, as a click does, so the drag that follows goes ahead.
-  drag("t:term","g:other");
+  drag("t:resume|term","g:resume|other");
   var editor=false;
   root.walk(function(node) {var sem=node.semantics;if(sem!=null && sem.label=="Workbench label") editor=true;});
   require(!editor && agent.name=="Codex" && renames.join(",")=="work,other","drag past an open rename saved it or did not move");
-  drag("a:agent","g:work");
+  drag("a:resume|agent","g:resume|work");
   require(moves.join(",")=="work" && agent.group=="work","session did not move to the top-level group");
   now+=2000;client.refreshAgents();pump();submit();
-  drag("a:agent","g:work");
+  drag("a:resume|agent","g:resume|work");
   require(moves.length==1,"drop onto the session's own group was accepted");
   // The open workspace's row is the workspace root: no group.
-  drag("t:term","w:resume");drag("a:agent","w:resume");
+  drag("t:resume|term","w:resume");drag("a:resume|agent","w:resume");
   require(renames.join(",")=="work,other," && moves.join(",")=="work,","drop onto the workspace row did not move to the root");
   now+=2000;client.refreshTerminals(true);client.refreshAgents();pump();submit();
-  require(panel.model.childKeyAt("w:resume",panel.model.childCount("w:resume")-1)=="a:agent","root items did not follow the groups");
-  drag("t:term","w:resume");drag("a:agent","w:resume");
+  require(panel.model.childKeyAt("w:resume",panel.model.childCount("w:resume")-1)=="a:resume|agent","root items did not follow the groups");
+  drag("t:resume|term","w:resume");drag("a:resume|agent","w:resume");
   require(renames.length==3 && moves.length==2,"drop onto the workspace row accepted an item already at the root");
-  drag("t:term","g:sub");
+  drag("t:resume|term","g:resume|sub");
   require(renames.join(",")=="work,other,,sub","item did not move from the root into a sub-group");
   now+=2000;client.refreshTerminals(true);client.refreshAgents();pump();submit();
-  // New terminal and New Codex create in the selected row's group, else at the workspace root.
+  // New terminal and New agent session create in the selected row's group, else at the workspace root.
   function press(styleKey:String):Void {
    var actions=context.submit(panel.headerActions(300),frame),found:RenderNode=null;
    actions.walk(function(node) { if(node.styleKey==styleKey) found=node; });
@@ -121,22 +121,10 @@ class SubgroupDropTest {
    var box=found.globalBounds();
    context.pointerDown(box.x+box.width/2,box.y+box.height/2,0);context.pointerUp(box.x+box.width/2,box.y+box.height/2,0);submit();
   }
-  for(key in ["a:agent","t:term","g:work","w:resume"]) {panel.tree.select(key);press("workbench-new-terminal");press("workbench-new-codex");}
+  for(key in ["a:resume|agent","t:resume|term","g:resume|work","w:resume"]) {panel.tree.select(key);press("workbench-new-terminal");press("workbench-new-agent");}
   require(created.join(",")==",,sub,sub,work,work,,","new items did not follow the selection to its group or the root: "+created.join(","));
   context.dispose();fonts.dispose();client.dispose();connection.close();server.close();
   trace("PASS: sub-group terminal and session drops onto a top-level group; the workspace row as root; own group, other rows and a busy catalog refused; a press ends an open rename unsaved; new items go to the selected group or the root");
  }
 }
 
-private class SubgroupEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final connection:RpcConnection;
- public function new(connection:RpcConnection) this.connection=connection;
- public function rootPath():Null<String> return "/workspace";
- public function serviceGeneration():String return "owner";
- public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return null;
- public function rpcConnection():Null<RpcConnection> return connection;
- public function failureReason():Null<String> return null;
- public function supportsWorkspaceGroups():Bool return true;
- public function workspaceEpoch():Null<String> return "epoch";
- public function hasCapability(capability:String):Bool return true;
-}

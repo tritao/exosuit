@@ -2,7 +2,7 @@
 with Open in New Window) open different files and each keeps its own tabs; both see the same terminal, and what is typed
 into it in one window shows in the other, in both directions.
 
-The second window's automation folder is EXOSUIT_NEW_WINDOW_AUTOMATION_DIR (set by the fixture)."""
+The second window is driven over suit's control plane, found by its pid."""
 import os
 import subprocess
 import sys
@@ -13,8 +13,7 @@ from gui_driver import Gui
 from m19_folders import menu, open_by_double_click
 from m19_sessions_drag import create, new_terminal
 
-FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"],
-           "env": {"EXOSUIT_NEW_WINDOW_AUTOMATION_DIR": "{out}/automation-2"}}
+FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"]}
 
 
 def documents(state):
@@ -35,19 +34,19 @@ def run(gui):
         open_by_double_click(gui, alpha, "Alpha")
         show_workbench(gui)
         work = ensure_group(gui, alpha)
-        # Work has the workspace's folder and so shares the root's context key; a group of its own has a key of its own.
-        create(gui, "g:" + work, "New group", "Second", "groups")
+        # A group only this scenario uses, so no tab of the setup is in it.
+        create(gui, open_row(gui, "g", work), "New Group", "Second", "groups")
         second = next(g["id"] for g in gui.state()["groups"] if g["name"] == "Second")
-        gui.click(gui.element("g:" + work))
+        gui.click(gui.element(open_row(gui, "g", work)))
         quick_switch(gui, "Second")
         gui.check("window 1 is on the group Second", lambda s: s["state"]["context"].endswith("/" + second), 10, detail=lambda s: s["state"]["context"])
 
         gui.step("Open in New Window on the group Second: window 2 on the same group")
         reveal(gui, work, second)
-        menu(gui, "g:" + second, "Open in New Window")
+        menu(gui, open_row(gui, "g", second), "Open in New Window")
         second_pid = gui.wait("window 2 registered on Second",
                               lambda s: next((w["pid"] for w in s["state"]["otherWindows"] if w["context"].endswith("/" + second)), None), 60)
-        two = Gui(second_pid, os.path.join(os.path.dirname(gui.dir), "automation-2"), os.path.join(gui.out, "window2"),
+        two = Gui(second_pid, os.path.join(gui.out, "window2"),
                   max(10, gui.deadline - time.monotonic()), 30)
         two.wait("window 2 attached to Alpha", lambda s: is_attached(s["state"], alpha), 40)
         two.check("window 2 is on the same group as window 1", lambda s: s["state"]["context"].endswith("/" + second), 5,
@@ -69,15 +68,15 @@ def run(gui):
 
         gui.step("one terminal in the group; window 1 types into it, window 2 sees it")
         gui.focus()
-        terminal = new_terminal(gui, "g:" + second)
+        terminal = new_terminal(gui, open_row(gui, "g", second))
         gui.check("window 1 has the terminal tab", lambda s: any(t["kind"] == "terminal" for p in s["state"]["panes"] for t in p["tabs"]), 10)
         two.wait("window 2 lists the terminal", lambda s: any(t["id"] == terminal for t in s["state"]["terminals"]), 20)
         two.focus()
         reveal(two, work, second)
-        if not two.find(two.snapshot(), "t:" + terminal):
-            two.click(two.element("g:" + second))
+        if not two.find(two.snapshot(), open_row(two, "t", terminal)):
+            two.click(two.element(open_row(two, "g", second)))
             two.chord("right")
-        two.click(two.element("t:" + terminal))
+        two.click(two.element(open_row(two, "t", terminal)))
         two.check("window 2 opened the terminal in a tab", lambda s: any(t["kind"] == "terminal" for p in s["state"]["panes"] for t in p["tabs"]), 10)
         time.sleep(2)  # both shells' prompts
         gui.focus()
@@ -92,7 +91,7 @@ def run(gui):
         two.click(two.element("Take control"))
         two.check("window 2 controls the terminal now", lambda s: not two.find(s, "Take control"), 10)
         gui.check("window 1 is a viewer now", lambda s: gui.find(s, "Take control"), 10)
-        two.click(two.element("t:" + terminal))  # the click hands the keyboard to the terminal
+        two.click(two.element(open_row(two, "t", terminal)))  # the click hands the keyboard to the terminal
         two.shot("before-typing")
         two.type_text("echo FROM-TWO-2222")
         two.chord("enter")

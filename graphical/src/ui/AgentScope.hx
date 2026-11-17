@@ -30,11 +30,13 @@ class AgentScope {
 		surviving parent group takes over. Before any group was chosen, or when none of those groups is left, the first
 		top-level group stands in, so the panel never shows the editor's own workspace folders. A session or terminal at the
 		workspace root, or the workspace's row, scopes to the workspace's first folder; that scope stays like a group's.
+		Only the workspace the window shows has a scope: a row of another one counts as no selection.
 	**/
 	public static function resolve(model:WorkbenchTreeModel, selectedKey:Null<String>, previous:Null<AgentScope>):Null<AgentScope> {
+		if (selectedKey != null && model.workspaceOfRow(selectedKey) != model.openWorkspace) selectedKey = null;
 		// A session or terminal at the workspace root, or the workspace's row, works in the workspace itself.
-		var atRoot = selectedKey != null && selectedKey == model.groupParent;
-		var row = WorkbenchRowKey.parse(selectedKey);
+		var atRoot = selectedKey != null && selectedKey == model.openRow;
+		var row = WorkbenchRowKey.parse(selectedKey), rows = model.open(), groups = rows == null ? new Map<String, WorkspaceGroup>() : rows.groups;
 		if (row != null && row.kind != WorkbenchRowKind.Group && WorkspaceProtocol.isRoot(WorkbenchRowKey.parentGroupId(model, selectedKey)))
 			atRoot = true;
 		if (previous != null && WorkspaceProtocol.isRoot(previous.groupId) && WorkbenchRowKey.groupOf(model, selectedKey) == null)
@@ -44,16 +46,16 @@ class AgentScope {
 		var selected = scopeFor(model, WorkbenchRowKey.groupOf(model, selectedKey));
 		if (selected != null) return selected;
 		if (previous != null) {
-			if (model.groups.exists(previous.groupId)) {
-				var refreshed = scopeFor(model, model.groups.get(previous.groupId));
+			if (groups.exists(previous.groupId)) {
+				var refreshed = scopeFor(model, groups.get(previous.groupId));
 				return refreshed != null ? refreshed : previous;
 			}
 			for (id in previous.ancestors) {
-				var parent = scopeFor(model, model.groups.get(id));
+				var parent = scopeFor(model, groups.get(id));
 				if (parent != null) return parent;
 			}
 		}
-		for (key in model.groupRoots) {
+		if (rows != null) for (key in rows.top) {
 			var first = scopeFor(model, WorkbenchRowKey.groupOf(model, key));
 			if (first != null) return first;
 		}
@@ -62,21 +64,23 @@ class AgentScope {
 
 	/** The workspace root's scope: the workspace's first folder, named after the workspace. */
 	static function rootScope(model:WorkbenchTreeModel):Null<AgentScope> {
-		var directory = model.firstFolder();
+		var directory = model.firstFolder(model.openWorkspace);
 		if (directory == null || directory.length == 0) return null;
-		var owner = model.groupWorkspace();
+		var owner = model.workspaces.get(model.openWorkspace);
 		return new AgentScope(WorkspaceProtocol.ROOT_GROUP, owner == null ? "Workspace" : owner.name, directory);
 	}
 
+	/** A group of the open workspace's scope. */
 	static function scopeFor(model:WorkbenchTreeModel, group:Null<WorkspaceGroup>):Null<AgentScope> {
-		if (group == null) return null;
-		var directory = model.directory(group);
+		var rows = model.open();
+		if (group == null || rows == null) return null;
+		var directory = model.directory(model.openWorkspace, group);
 		if (directory == null || directory.length == 0) return null;
 		var ancestors:Array<String> = [], visited:Map<String, Bool> = [group.id => true], parent = group.parent;
 		while (parent != null && !visited.exists(parent)) {
 			visited.set(parent, true);
 			ancestors.push(parent);
-			var next = model.groups.get(parent);
+			var next = rows.groups.get(parent);
 			parent = next == null ? null : next.parent;
 		}
 		return new AgentScope(group.id, group.name, directory, ancestors);
@@ -91,10 +95,12 @@ class AgentScope {
 	**/
 	public static function workspaceFolders(model:WorkbenchTreeModel, attached:Array<String>, normalize:String->String):Array<String> {
 		var result = attached.copy();
-		var groups = [for (group in model.groups) if (!WorkspaceProtocol.isRoot(group.id)) group];
+		var rows = model.open(), id = model.openWorkspace;
+		if (rows == null || id == null) return result;
+		var groups = [for (group in rows.groups) if (!WorkspaceProtocol.isRoot(group.id)) group];
 		groups.sort(function(a, b) return a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 		for (group in groups) {
-			var directory = model.directory(group);
+			var directory = model.directory(id, group);
 			if (directory == null || directory.length == 0) continue;
 			var folder = normalize(directory);
 			if (!Lambda.exists(result, function(root) return PathKey.within(root, folder))) result.push(folder);

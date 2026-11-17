@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import haxeon.ui.core.UiContext;
@@ -44,12 +45,15 @@ class WorkbenchFeedbackTest {
    }
    ctx.respond({record:agent,activity:"",requests:[],error:null});
   });
-  var client=new RpcWorkspaceWorkbenchClient(new FeedbackEndpoint(connection),clock);
+  var endpoint=new TestEndpoint(connection);endpoint.root="/workspace";endpoint.generation="owner";endpoint.events=false;
+  var client=new RpcWorkspaceWorkbenchClient(endpoint,clock);
   function pump():Void {client.poll();server.poll();connection.poll();}
   pump();client.refreshTerminals(true);client.refreshAgents();pump();
   var menuItems:Array<haxeon.ui.widgets.overlays.MenuItem>=[];
-  var panel=new ui.WorkbenchPanel(client,function(_) return true,function(_) {},function(_,_) {},function(_) {},function(_) return [],
-   function() {},function(_) {},function(items,_,_) menuItems=items,function(_) {},function(_,_) {},function(_,_) {},function() return true);
+  var panel=new ui.WorkbenchPanel(function() return client,function(_,_) return true,function(_,_) {},function(_,_,_) {},function(_,_) return [],
+   function() {},function(_) {},function(items,_,_) menuItems=items,function(_,_,_) {},function(_,_) {},function(_,_) {},function() return true);
+  panel.actions=new FakeWorkbenchActions({machine:{id:"m",name:"m",workspaces:[{id:"",name:"work",folders:[],scratch:null,revision:1}]},
+   error:null,openWorkspace:"",revision:1,manages:true},client);
   var center=new feedback.NotificationCenter();
   panel.onError=function(message) center.publish(message,feedback.NotificationKind.Error,"workbench");
   var fonts=haxeon.ui.FontCollection.create();fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
@@ -62,7 +66,7 @@ class WorkbenchFeedbackTest {
    require(result!=null,"missing workbench row "+label);return result.globalBounds();
   }
   function drop():Void {
-   var from=row("a:agent"),target=row("g:other");
+   var from=row("a:|agent"),target=row("g:|other");
    context.pointerDown(120,from.y+15,0);context.pointerMove(120,target.y+15);submit();
    context.pointerUp(120,target.y+15,0);pump();submit();
   }
@@ -75,14 +79,14 @@ class WorkbenchFeedbackTest {
   require(requests==0 && center.entries.length==1 && center.entries[0].message.indexOf("Native session renaming is unavailable")>=0,
    "legacy service received a native rename or silently used local rename");
   center.clear();
-  var initialY=row("g:work").y;drop();
+  var initialY=row("g:|work").y;drop();
   require(requests==0 && center.entries.length==1,"legacy daemon received unsupported move or missing notification");
-  require(center.entries[0].message.indexOf("Update the workspace service")>=0,"legacy move showed native resume error");
-  require(row("g:work").y==initialY,"error displaced workbench tree: "+initialY+" -> "+row("g:work").y);
+  require(center.entries[0].message.indexOf("cannot move agent sessions")>=0,"legacy move showed native resume error");
+  require(row("g:|work").y==initialY,"error displaced workbench tree: "+initialY+" -> "+row("g:|work").y);
   center.dismissToast();submit();require(center.entries.length==1 && center.current()==null,"sticky error republished after dismissal");
   supported=true;now+=2000;client.refreshAgents();pump();submit();drop();
   require(requests==1 && agent.group=="other","updated service could not move disconnected Claude session");
-  var agentBounds=row("a:agent");
+  var agentBounds=row("a:|agent");
   context.pointerDown(120,agentBounds.y+15,1);context.pointerUp(120,agentBounds.y+15,1);submit();
   var rename:haxeon.ui.widgets.overlays.MenuItem=null;
   for(item in menuItems) if(item.key=="rename-agent") rename=item;
@@ -111,7 +115,7 @@ class WorkbenchFeedbackTest {
   require(requests==2 && agent.name=="Design session","Escape saved cancelled rename");
   context.key(haxeon.ui.core.UiEventKind.KeyDown,haxeon.ui.core.UiKey.F2);submit();
   context.text(haxeon.ui.core.UiEventKind.TextInput,"Unsaved blur");submit();
-  var group=row("g:work");context.pointerDown(120,group.y+15,0);context.pointerUp(120,group.y+15,0);submit();
+  var group=row("g:|work");context.pointerDown(120,group.y+15,0);context.pointerUp(120,group.y+15,0);submit();
   var editorAfterBlur=false;
   root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Workbench label") editorAfterBlur=true;});
   require(!editorAfterBlur && requests==2 && agent.name=="Design session","leaving rename editor saved or stranded the draft: editor="+editorAfterBlur+", requests="+requests+", name="+agent.name+", selected="+panel.tree.selectedKey);
@@ -125,7 +129,7 @@ class WorkbenchFeedbackTest {
   require(current!=null && ui.UiEditorTabs.syncAgentNames([pane,second],current),"tab titles did not synchronize");
   require(firstTab.title=="Design session" && secondTab.title=="Design session" && foreignTab.title=="Foreign",
    "rename missed a view or changed another workspace's tab");
-  panel.tree.select("a:agent");
+  panel.tree.select("a:|agent");
   var sidebar=new haxeon.ui.widgets.sidebar.SidebarModel();
   sidebar.register("workbench",function() return panel,new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench"));
   for (width in [160.0,190.0,220.0,320.0,180.0,300.0]) {
@@ -144,12 +148,11 @@ class WorkbenchFeedbackTest {
    require(more!=null && actions==(width>=260 ? 4 : width>=210 ? 3 : width>=170 ? 2 : 1),"header actions did not adapt to width");
    var box=more.globalBounds();context.pointerDown(box.x+12,box.y+12,0);context.pointerUp(box.x+12,box.y+12,0);
    function hasAction(label:String):Bool {for(item in menuItems) if(item.label==label) return true;return false;}
-   require(hasAction("New Terminal…"),"overflow lost terminal creation");
-   if(width<210) require(hasAction("New Codex"),"overflow lost the hidden Codex action");
+   require(hasAction("New Terminal") && hasAction("New Agent Session"),"overflow lost terminal or session creation");
    if(width<260) require(hasAction("Remove from Workbench"),"overflow lost selected-session removal");
   }
   nativeSupported=true;now+=2000;client.refreshAgents();pump();submit();
-  var nativeBounds=row("a:agent");
+  var nativeBounds=row("a:|agent");
   context.pointerDown(120,nativeBounds.y+15,1);context.pointerUp(120,nativeBounds.y+15,1);submit();
   var nativeRename:haxeon.ui.widgets.overlays.MenuItem=null,localRename:haxeon.ui.widgets.overlays.MenuItem=null;
   for(item in menuItems) {
@@ -172,15 +175,3 @@ class WorkbenchFeedbackTest {
  }
 }
 
-private class FeedbackEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final connection:RpcConnection;
- public function new(connection:RpcConnection) this.connection=connection;
- public function rootPath():Null<String> return "/workspace";
- public function serviceGeneration():String return "owner";
- public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return null;
- public function rpcConnection():Null<RpcConnection> return connection;
- public function failureReason():Null<String> return null;
- public function supportsWorkspaceGroups():Bool return true;
- public function workspaceEpoch():Null<String> return "epoch";
- public function hasCapability(capability:String):Bool return true;
-}

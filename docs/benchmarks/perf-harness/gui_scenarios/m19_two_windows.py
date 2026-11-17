@@ -2,7 +2,7 @@
 row (Open in New Window); the second window is driven with its own driver. Each window's tree marks what the other has
 open, each sees the other's new group and terminal live, and closing the second window leaves the services running.
 
-The second window's automation folder is EXOSUIT_NEW_WINDOW_AUTOMATION_DIR (set by the fixture)."""
+The second window is driven over suit's control plane, found by its pid."""
 import os
 import subprocess
 import sys
@@ -13,8 +13,7 @@ from gui_driver import Gui
 from m19_folders import menu, open_by_double_click
 from m19_sessions_drag import create, new_terminal
 
-FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"],
-           "env": {"EXOSUIT_NEW_WINDOW_AUTOMATION_DIR": "{out}/automation-2"}}
+FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"]}
 
 
 def watched(state, workspace):
@@ -43,7 +42,7 @@ def run(gui):
         gui.check("window 1 knows window 2's focus (suit's windows list)", lambda s: others(s["state"], beta), 5)
         gui.check("starting the window blocked the frame under 50 ms", lambda s: 0 < s["state"]["newWindowMs"] < 50, 5,
                   detail=lambda s: s["state"]["newWindowMs"])
-        two = Gui(second_pid, os.path.join(os.path.dirname(gui.dir), "automation-2"), os.path.join(gui.out, "window2"),
+        two = Gui(second_pid, os.path.join(gui.out, "window2"),
                   max(10, gui.deadline - time.monotonic()), 30)
         two.wait("window 2 attached to Beta", lambda s: is_attached(s["state"], beta), 40)
         two.check("window 2 opened on Beta, not on the last workspace", lambda s: s["state"]["contextWorkspace"] == beta, 5,
@@ -63,8 +62,8 @@ def run(gui):
         gui.focus()
         before = watched(two.state(), alpha)
         groups0, terms0 = (before["groups"], before["terminals"]) if before and before["groups"] >= 0 else (0, 0)
-        create(gui, "g:" + work, "New group", "Second", "groups")
-        new_terminal(gui, "g:" + work)
+        create(gui, open_row(gui, "g", work), "New Group", "Second", "groups")
+        new_terminal(gui, open_row(gui, "g", work))
         two.check("window 2 sees Alpha's new group", lambda s: (watched(s["state"], alpha) or {}).get("groups", -1) > groups0, 20,
                   detail=lambda s: (watched(s["state"], alpha), groups0))
         two.check("window 2 sees Alpha's new terminal", lambda s: (watched(s["state"], alpha) or {}).get("terminals", -1) > terms0, 20,
@@ -73,9 +72,18 @@ def run(gui):
         gui.step("window 2 makes a group in Beta; window 1 sees it")
         two.focus()
         bwork = ensure_group(two, beta)
+        # Window 1 follows another workspace's catalog through a link, which it holds while that row is expanded.
+        gui.focus()
+        show_workbench(gui)
+        if not gui.find(gui.snapshot(), row_key("g", beta, bwork)):
+            row_ = gui.element("w:" + beta)
+            gui.click(row_, fx=min(0.04, 10.0 / row_["w"]))
+        gui.wait("window 1 shows Beta's rows from its link", lambda s: (watched(s["state"], beta) or {}).get("live") is True
+                 and gui.find(s, row_key("g", beta, bwork)), 20)
+        two.focus()
         before = watched(gui.state(), beta)
         bgroups0 = before["groups"] if before and before["groups"] >= 0 else 0
-        create(two, "g:" + bwork, "New group", "Third", "groups")
+        create(two, open_row(two, "g", bwork), "New Group", "Third", "groups")
         gui.check("window 1 sees Beta's new group", lambda s: (watched(s["state"], beta) or {}).get("groups", -1) > bgroups0, 20,
                   detail=lambda s: (watched(s["state"], beta), bgroups0))
 

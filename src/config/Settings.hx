@@ -23,6 +23,8 @@ class Settings {
 	public var activityBar:String = "";
 	/** Launch mode for newly created agent sessions across providers. */
 	public var agentSessionMode:String = "terminal";
+	/** The provider New Agent Session starts at once (claude, codex or pi); the others are one submenu away. */
+	public var defaultAgentProvider:String = "claude";
 	/** Codex defaults used when Workbench creates a new thread. */
 	public var codexDefaultModel:String = "";
 	public var codexDefaultEffort:String = "model-default";
@@ -99,6 +101,7 @@ class Settings {
 		result.layoutMode = layoutMode;
 		result.activityBar = activityBar;
 		result.agentSessionMode = agentSessionMode;
+		result.defaultAgentProvider = defaultAgentProvider;
 		result.codexDefaultModel = codexDefaultModel;
 		result.codexDefaultEffort = codexDefaultEffort;
 		result.codexDefaultPermissions = codexDefaultPermissions;

@@ -3,22 +3,25 @@ package ui;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 
 /**
-	A Workbench tree row: what it shows and that thing's id. The tree stores rows as strings (`g:`, `t:` or `a:` plus the
-	id); this is the one place that writes and reads that spelling. Above the groups, the machine's rows use `w:` plus a
-	workspace id, `s:` (a status line) and `n:` (New Workspace…); `parse` returns null for them, so group, session and
-	terminal code ignores them.
+	A Workbench tree row: what it shows, the workspace it belongs to and that thing's id there. The tree stores rows as
+	strings; this is the one place that writes and reads that spelling. Every workspace's groups, sessions and terminals
+	are spelled alike: `g:`, `a:` or `t:`, the workspace id, `|` and the item's id (the workspace id is empty in a window
+	without this machine's workspaces, the phone's or the browser's, which shows one workspace). Above them, the machine's
+	rows use `w:` plus a workspace id, `s:` (a status line) and `n:` (New Workspace…); `parse` returns null for them, so
+	group, session and terminal code ignores them.
 **/
 class WorkbenchRowKey {
 	public final kind:WorkbenchRowKind;
+	public final workspace:String;
 	public final id:String;
 
-	public function new(kind:WorkbenchRowKind, id:String) {
-		this.kind = kind; this.id = id;
+	public function new(kind:WorkbenchRowKind, workspace:String, id:String) {
+		this.kind = kind; this.workspace = workspace; this.id = id;
 	}
 
-	public static function group(id:String):String return "g:" + id;
-	public static function terminal(id:String):String return "t:" + id;
-	public static function agent(id:String):String return "a:" + id;
+	public static function group(workspace:String, id:String):String return "g:" + workspace + "|" + id;
+	public static function terminal(workspace:String, id:String):String return "t:" + workspace + "|" + id;
+	public static function agent(workspace:String, id:String):String return "a:" + workspace + "|" + id;
 
 	/** The last of the machine's rows. */
 	public static inline final NEW_WORKSPACE = "n:new-workspace";
@@ -29,54 +32,46 @@ class WorkbenchRowKey {
 	public static function workspaceId(key:Null<String>):Null<String>
 		return key != null && StringTools.startsWith(key, "w:") && key.length > 2 ? key.substring(2) : null;
 
-	/** The kind of an `s:` status row, else null. */
-	public static function statusKind(key:Null<String>):Null<String>
-		return key != null && StringTools.startsWith(key, "s:") && key.length > 2 ? key.substring(2) : null;
+	/** The kind of an `s:` status row (a workspace's note included), else null. */
+	public static function statusKind(key:Null<String>):Null<String> {
+		if (key == null || !StringTools.startsWith(key, "s:") || key.length <= 2) return null;
+		var bar = key.indexOf("|");
+		return bar < 0 ? key.substring(2) : key.substring(2, bar);
+	}
+
+	/**
+		A workspace's note kinds: nothing in it yet, its rows still loading (its service runs or is starting), its
+		service not running, or this window could not connect to it.
+	**/
+	public static inline final NOTE_EMPTY = "none";
+	public static inline final NOTE_LOADING = "loading-rows";
+	public static inline final NOTE_IDLE = "not-running";
+	public static inline final NOTE_FAILED = "failed";
+
+	/** The one row under an expanded workspace that has no other rows, saying why: `s:` plus its kind, `|` and the workspace id. */
+	public static function note(kind:String, workspace:String):String return "s:" + kind + "|" + workspace;
+
+	/** The workspace of a note row, else null. */
+	public static function noteWorkspace(key:Null<String>):Null<String> {
+		if (key == null || !StringTools.startsWith(key, "s:")) return null;
+		var bar = key.indexOf("|");
+		return bar < 0 ? null : key.substring(bar + 1);
+	}
 
 	/** True for the machine's rows: its workspaces, status lines and New Workspace…. */
 	public static function isMachineRow(key:Null<String>):Bool
 		return key != null && key.length > 2 && key.charAt(1) == ":" && "wsn".indexOf(key.charAt(0)) >= 0;
 
-	/**
-		A row of a workspace this window is not attached to, from its catalog (M19 Phase 6): `f:` plus a kind letter
-		(`g`, `t` or `a`), the workspace id, `|` and the item's id. `parse` returns null for them, so the group, session
-		and terminal code that works on the attached workspace ignores them.
-	**/
-	public static function foreign(kind:WorkbenchRowKind, workspace:String, id:String):String
-		return "f:" + kindLetter(kind) + workspace + "|" + id;
-
-	static function kindLetter(kind:WorkbenchRowKind):String
-		return switch kind {
-			case WorkbenchRowKind.Group: "g";
-			case WorkbenchRowKind.Terminal: "t";
-			case WorkbenchRowKind.Agent: "a";
-		};
-
-	public static function isForeign(key:Null<String>):Bool
-		return key != null && key.length > 4 && StringTools.startsWith(key, "f:") && key.indexOf("|") > 3;
-
-	/** The workspace and item of an `f:` row, else null. */
-	public static function parseForeign(key:Null<String>):Null<ForeignRow> {
-		if (!isForeign(key) || key == null) return null;
-		var bar = key.indexOf("|");
-		var kind:Null<WorkbenchRowKind> = switch key.charAt(2) {
-			case "g": WorkbenchRowKind.Group;
-			case "t": WorkbenchRowKind.Terminal;
-			case "a": WorkbenchRowKind.Agent;
-			default: null;
-		};
-		if (kind == null) return null;
-		return new ForeignRow(kind, key.substring(3, bar), key.substring(bar + 1));
-	}
-
-	/** The row a tree key names, or null for a key that is not a Workbench row. */
+	/** The row a tree key names, or null for a key that is not a group, session or terminal row. */
 	public static function parse(key:Null<String>):Null<WorkbenchRowKey> {
-		if (key == null || key.length < 3 || key.charAt(1) != ":") return null;
-		var id = key.substring(2);
+		if (key == null || key.length < 4 || key.charAt(1) != ":") return null;
+		var bar = key.indexOf("|", 2);
+		if (bar < 0 || bar == key.length - 1) return null;
+		var workspace = key.substring(2, bar), id = key.substring(bar + 1);
 		return switch key.charAt(0) {
-			case "g": new WorkbenchRowKey(WorkbenchRowKind.Group, id);
-			case "t": new WorkbenchRowKey(WorkbenchRowKind.Terminal, id);
-			case "a": new WorkbenchRowKey(WorkbenchRowKind.Agent, id);
+			case "g": new WorkbenchRowKey(WorkbenchRowKind.Group, workspace, id);
+			case "t": new WorkbenchRowKey(WorkbenchRowKind.Terminal, workspace, id);
+			case "a": new WorkbenchRowKey(WorkbenchRowKind.Agent, workspace, id);
 			default: null;
 		};
 	}
@@ -89,46 +84,26 @@ class WorkbenchRowKey {
 
 	public static function isKind(key:Null<String>, kind:WorkbenchRowKind):Bool return idOf(key, kind) != null;
 
-	/** The group a row belongs to: a group row is its own group, a session or terminal row its parent's. */
+	/** The group a row belongs to in its workspace: a group row is its own group, a session or terminal row its parent's. */
 	public static function groupOf(model:WorkbenchTreeModel, key:Null<String>):Null<WorkspaceGroup> {
-		var row = parse(key);
-		return row == null ? null : row.owningGroup(model);
+		var row = parse(key), rows = row == null ? null : model.rows(row.workspace);
+		if (row == null || rows == null) return null;
+		var groupId:Null<String> = row.kind == WorkbenchRowKind.Group ? row.id : rows.itemGroup(row.kind, row.id);
+		return groupId == null ? null : rows.groups.get(groupId);
 	}
 
 	/** The id of the group this row sits in: a group's parent, a session's or terminal's group. */
 	public static function parentGroupId(model:WorkbenchTreeModel, key:Null<String>):Null<String> {
-		var row = parse(key);
-		if (row == null) return null;
-		return switch row.kind {
-			case WorkbenchRowKind.Group: var group = model.groups.get(row.id); group == null ? null : group.parent;
-			case WorkbenchRowKind.Terminal: var terminal = model.terminals.get(row.id); terminal == null ? null : terminal.group;
-			case WorkbenchRowKind.Agent: var agent = model.agents.get(row.id); agent == null ? null : agent.group;
-		};
-	}
-
-	function owningGroup(model:WorkbenchTreeModel):Null<WorkspaceGroup> {
-		var groupId:Null<String> = switch kind {
-			case WorkbenchRowKind.Group: id;
-			case WorkbenchRowKind.Terminal: var terminal = model.terminals.get(id); terminal == null ? null : terminal.group;
-			case WorkbenchRowKind.Agent: var agent = model.agents.get(id); agent == null ? null : agent.group;
-		};
-		return groupId == null ? null : model.groups.get(groupId);
+		var row = parse(key), rows = row == null ? null : model.rows(row.workspace);
+		if (row == null || rows == null) return null;
+		if (row.kind != WorkbenchRowKind.Group) return rows.itemGroup(row.kind, row.id);
+		var group = rows.groups.get(row.id);
+		return group == null ? null : group.parent;
 	}
 
 	public function toString():String return switch kind {
-		case WorkbenchRowKind.Group: group(id);
-		case WorkbenchRowKind.Terminal: terminal(id);
-		case WorkbenchRowKind.Agent: agent(id);
+		case WorkbenchRowKind.Group: group(workspace, id);
+		case WorkbenchRowKind.Terminal: terminal(workspace, id);
+		case WorkbenchRowKind.Agent: agent(workspace, id);
 	};
-}
-
-/** An item of a workspace this window is not attached to: what it is, which workspace holds it, and its id there. */
-class ForeignRow {
-	public final kind:WorkbenchRowKind;
-	public final workspace:String;
-	public final id:String;
-
-	public function new(kind:WorkbenchRowKind, workspace:String, id:String) {
-		this.kind = kind; this.workspace = workspace; this.id = id;
-	}
 }

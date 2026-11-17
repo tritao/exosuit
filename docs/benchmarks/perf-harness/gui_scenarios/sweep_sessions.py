@@ -1,5 +1,5 @@
-"""Everyday sweep, sessions: a terminal from every place that offers one (the empty state's button, the workspace
-row's menu, a group row's menu, the Workbench toolbar, the command palette with the terminal focused), the agent chooser from the menus, then rename,
+"""Everyday sweep, sessions: a terminal from every place that offers one (the empty workspace row's menu, the workspace
+row's menu, a group row's menu, the Workbench toolbar, the command palette with the terminal focused), New Agent Session With… from the menus, then rename,
 close the tab and reopen it from its row, Close Terminal, and a group made, renamed and removed.
 
 Real input only. Each flow is its own stage, so one broken flow does not hide the others."""
@@ -24,21 +24,18 @@ def run(gui):
     made = {}
     dump(gui, "opened")
 
-    def from_empty_state():
-        gui.check("the empty state offers its three starts", lambda s: gui.find(s, "New terminal in this workspace", role="1")
-                  and gui.find(s, "New group", role="1") and gui.find(s, pattern="^New agent session", role="1"), 5)
+    def from_empty_row():
+        expand(gui, wrow)  # a click opened it; the chevron shows its rows
+        gui.check("the empty workspace's row says so", lambda s: gui.find(s, "s:none|" + alpha), 5)
         before = terminal_ids(gui.state())
-        gui.click(gui.element("New terminal in this workspace", role="1"))
-        time.sleep(0.8)
-        if gui.state()["commandViewActive"]:
-            gui.chord("enter")
-        made["e"] = fresh_terminal(gui, before, "empty state: New terminal makes a terminal")
+        menu(gui, "s:none|" + alpha, "New Terminal")
+        made["e"] = fresh_terminal(gui, before, "empty row: New Terminal makes a terminal")
         gui.check("its tab is open", lambda s: kinds(s["state"]).count("terminal") == 1, 5, detail=lambda s: s["state"]["panes"])
         dump(gui, "first-terminal")
-    stage(gui, "terminal from the empty state's button", from_empty_state)
+    stage(gui, "terminal from the empty row's menu", from_empty_row)
 
     def first_group():
-        menu(gui, wrow, "New Group" + ELLIPSIS)
+        menu(gui, wrow, "New Group")
         time.sleep(0.6)
         gui.type_text("Work")
         gui.chord("enter")
@@ -46,22 +43,18 @@ def run(gui):
                   detail=lambda s: (s["state"]["groups"], s["state"]["notifications"][-2:]))
     stage(gui, "group from the workspace row's menu", first_group)
     work = (by_name(gui.state(), "groups", "Work") or {}).get("id", "missing")
-    grow = "g:" + work
+    grow = row_key("g", alpha, work)
 
     def from_workspace_menu():
         before = terminal_ids(gui.state())
-        menu(gui, wrow, "New Terminal" + ELLIPSIS)
-        gui.wait("New Terminal prompt", lambda s: s["state"]["commandViewActive"], 5)
-        gui.chord("enter")
+        menu(gui, wrow, "New Terminal")
         made["w"] = fresh_terminal(gui, before, "workspace row menu: New Terminal makes a terminal")
         gui.check("its tab is open", lambda s: kinds(s["state"]).count("terminal") == 2, 5, detail=lambda s: s["state"]["panes"])
     stage(gui, "terminal from the workspace row's menu", from_workspace_menu)
 
     def from_group_menu():
         before = terminal_ids(gui.state())
-        menu(gui, grow, "New Terminal" + ELLIPSIS)
-        gui.wait("New Terminal prompt", lambda s: s["state"]["commandViewActive"], 5)
-        gui.chord("enter")
+        menu(gui, grow, "New Terminal")
         made["g"] = fresh_terminal(gui, before, "group row menu: New Terminal makes a terminal")
         gui.check("the group's terminal is in Work", lambda s: next(t for t in s["state"]["terminals"] if t["id"] == made["g"])["group"] == work, 5,
                   detail=lambda s: s["state"]["terminals"])
@@ -97,27 +90,27 @@ def run(gui):
     stage(gui, "terminal from the command palette", from_palette)
     dump(gui, "five-terminals")
     def rows_in_order(s):
-        ys = [gui.find(s, "t:" + made[k])[0]["y"] for k in ("e", "w", "t", "p") if made.get(k) and gui.find(s, "t:" + made[k])
+        ys = [gui.find(s, row_key("t", alpha, made[k]))[0]["y"] for k in ("e", "w", "t", "p") if made.get(k) and gui.find(s, row_key("t", alpha, made[k]))
               and next(t for t in s["state"]["terminals"] if t["id"] == made[k])["group"] == ""]
         return len(ys) >= 2 and ys == sorted(ys)
     gui.check("the workspace's terminals are listed in the order they were made", rows_in_order, 2,
-              detail=lambda s: [(t["name"], gui.find(s, "t:" + t["id"])[0]["y"]) for t in s["state"]["terminals"] if gui.find(s, "t:" + t["id"])])
+              detail=lambda s: [(t["name"], gui.find(s, row_key("t", alpha, t["id"]))[0]["y"]) for t in s["state"]["terminals"] if gui.find(s, row_key("t", alpha, t["id"]))])
     no_errors(gui, "after creating terminals")
 
-    def agent_choosers():
+    def agent_providers():
         for row, name in ((wrow, "workspace"), (grow, "group")):
-            menu(gui, row, "New Agent Session" + ELLIPSIS)
-            gui.check("%s row menu: the agent chooser lists providers" % name, lambda s: gui.find(s, pattern="Codex|Claude"), 8,
+            menu(gui, row, "New Agent Session With" + ELLIPSIS)
+            gui.check("%s row menu: New Agent Session With… lists the other providers and Change Folder…" % name,
+                      lambda s: gui.find(s, "Codex", role="16") and gui.find(s, "Pi", role="16") and gui.find(s, "Change Folder" + ELLIPSIS, role="16"), 8,
                       detail=lambda s: [e["label"] for e in s["elements"] if e["role"] == "16"][:20])
             if name == "group":
-                dump(gui, "agent-chooser")
+                dump(gui, "agent-providers")
             gui.chord("escape")
-            gui.wait("chooser closed", lambda s: not s["state"]["commandViewActive"], 5)
-    stage(gui, "agent session chooser from the menus", agent_choosers)
+    stage(gui, "New Agent Session With… from the menus", agent_providers)
 
     def rename_terminal():
         tid = made.get("g") or next(iter(terminal_ids(gui.state())))
-        menu(gui, "t:" + tid, "Rename Terminal" + ELLIPSIS)
+        menu(gui, row_key("t", alpha, tid), "Rename Terminal" + ELLIPSIS)
         time.sleep(0.6)
         dump(gui, "rename-terminal")
         gui.type_text("builds")  # the current name is selected, so typing replaces it
@@ -130,14 +123,14 @@ def run(gui):
 
     def close_and_reopen_tab():
         tid = made.get("g") or next(iter(terminal_ids(gui.state())))
-        gui.click(gui.element("t:" + tid))
+        gui.click(gui.element(row_key("t", alpha, tid)))
         gui.check("a click on the row shows its tab", lambda s: active_title(s["state"]) == "builds", 5, detail=lambda s: (active_title(s["state"]), titles(s["state"])))
         count = len(titles(gui.state()))
-        focus_tree(gui, "t:" + tid)
+        focus_tree(gui, row_key("t", alpha, tid))
         palette(gui, "Close Tab")
         gui.check("the tab closed, the terminal is still in the catalog", lambda s: len(titles(s["state"])) == count - 1 and tid in terminal_ids(s["state"]), 6,
                   detail=lambda s: (titles(s["state"]), s["state"]["terminals"]))
-        gui.click(gui.element("t:" + tid))
+        gui.click(gui.element(row_key("t", alpha, tid)))
         gui.check("a click on its row opens the tab again", lambda s: len(titles(s["state"])) == count and active_title(s["state"]) == "builds", 8,
                   detail=lambda s: (active_title(s["state"]), titles(s["state"])))
     stage(gui, "close a terminal's tab and reopen it from its row", close_and_reopen_tab)
@@ -145,33 +138,33 @@ def run(gui):
     def close_terminal():
         tid = made.get("w") or next(iter(terminal_ids(gui.state())))
         count = len(titles(gui.state()))
-        menu(gui, "t:" + tid, "Close Terminal")
+        menu(gui, row_key("t", alpha, tid), "Close Terminal")
         time.sleep(0.6)
         dump(gui, "close-terminal")
         if gui.state()["commandViewActive"]:
             gui.chord("enter")
         gui.check("Close Terminal removes it from the catalog", lambda s: tid not in terminal_ids(s["state"]), 10, detail=lambda s: s["state"]["terminals"])
         gui.check("and closes its tab", lambda s: len(titles(s["state"])) == count - 1, 5, detail=lambda s: titles(s["state"]))
-        gui.check("and its row is gone", lambda s: not gui.find(s, "t:" + tid), 5)
+        gui.check("and its row is gone", lambda s: not gui.find(s, row_key("t", alpha, tid)), 5)
     stage(gui, "Close Terminal from the row's menu", close_terminal)
 
     def group_life():
-        create(gui, grow, "New group", "Second", "groups")
+        create(gui, grow, "New Group", "Second", "groups")
         second = by_name(gui.state(), "groups", "Second")["id"]
         reveal(gui, work, second)
-        menu(gui, "g:" + second, "Rename group")
+        menu(gui, row_key("g", alpha, second), "Rename Group")
         time.sleep(0.6)
         gui.type_text("Renamed")  # the old name is selected, so typing replaces it
         gui.chord("enter")
         gui.check("the group is called Renamed", lambda s: by_name(s["state"], "groups", "Renamed"), 10, detail=lambda s: s["state"]["groups"])
         dump(gui, "group-renamed")
-        menu(gui, "g:" + second, "Remove Group")
+        menu(gui, row_key("g", alpha, second), "Remove Group")
         time.sleep(0.6)
         if gui.state()["commandViewActive"]:
             dump(gui, "remove-group-prompt")
             gui.chord("enter")
         gui.check("the group is removed", lambda s: not any(g["id"] == second for g in s["state"]["groups"]), 10, detail=lambda s: s["state"]["groups"])
-        gui.check("and its row is gone", lambda s: not gui.find(s, "g:" + second), 5)
+        gui.check("and its row is gone", lambda s: not gui.find(s, row_key("g", alpha, second)), 5)
     stage(gui, "make, rename and remove a group", group_life)
     no_errors(gui, "at the end")
     dump(gui, "end")

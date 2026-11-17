@@ -34,12 +34,10 @@ def create(gui, row_key, item, name, kind):
 
 
 def new_terminal(gui, row_key):
-    """New Terminal… on the row `row_key` (the open workspace's row "w:<id>" for a terminal at its root, or a group's
-    row "g:<id>" from ensure_group) opens a command view ("Open terminal" first); Enter takes it. Returns the new terminal's id."""
+    """New Terminal on the row `row_key` (the open workspace's row "w:<id>" for a terminal at its root, or a group's
+    row, row_key("g", workspace, id), from ensure_group) makes the terminal at once. Returns the new terminal's id."""
     before = {t["id"] for t in gui.state()["terminals"]}
-    menu(gui, row_key, "New Terminal" + ELLIPSIS)
-    time.sleep(0.8)
-    gui.chord("enter")
+    menu(gui, row_key, "New Terminal")
     fresh = gui.wait("a new terminal", lambda s: next((t["id"] for t in s["state"]["terminals"] if t["id"] not in before), None), 20)
     gui.check("terminal created from the menu", lambda s: True)
     return fresh
@@ -53,21 +51,21 @@ def run(gui):
     work = ensure_group(gui, alpha)
 
     gui.step("groups and sessions from the menus")
-    create(gui, "g:" + work, "New group", "Second", "groups")
+    create(gui, open_row(gui, "g", work), "New Group", "Second", "groups")
     second = by_name(gui.state(), "groups", "Second")["id"]
-    t1 = new_terminal(gui, "g:" + work)
-    t2 = new_terminal(gui, "g:" + work)
-    t3 = new_terminal(gui, "g:" + work)
+    t1 = new_terminal(gui, open_row(gui, "g", work))
+    t2 = new_terminal(gui, open_row(gui, "g", work))
+    t3 = new_terminal(gui, open_row(gui, "g", work))
     gui.check("the three terminals are in Work, in creation order", lambda s: sorted(order_in(s["state"], work)) == sorted([t1, t2, t3]), 10,
               detail=lambda s: order_in(s["state"], work))
     gui.shot("created")
-    gui.step("New Agent Session opens its provider chooser (providers need credentials, so it is cancelled)")
-    menu(gui, "g:" + work, "New Agent Session" + ELLIPSIS)
-    gui.check("agent chooser lists providers", lambda s: gui.find(s, pattern="Codex|Claude"), 10)
+    gui.step("New Agent Session With… lists the other providers (providers need credentials, so it is cancelled)")
+    menu(gui, open_row(gui, "g", work), "New Agent Session With" + ELLIPSIS)
+    gui.check("the providers submenu lists Codex", lambda s: gui.find(s, "Codex", role="16"), 10)
     gui.chord("escape")
 
     gui.step("drag t-two into the group Second")
-    gui.drag(gui.element("t:" + t2), gui.element("g:" + second))
+    gui.drag(gui.element(open_row(gui, "t", t2)), gui.element(open_row(gui, "g", second)))
     gui.check("t-two moved into Second", lambda s: next(t for t in s["state"]["terminals"] if t["id"] == t2)["group"] == second, 10,
               detail=lambda s: s["state"]["terminals"])
     gui.check("Work keeps t-one, t-three", lambda s: sorted(order_in(s["state"], work)) == sorted([t1, t3]), 10,
@@ -75,17 +73,17 @@ def run(gui):
     gui.shot("dragged-into-group")
 
     gui.step("drag between rows: t-three above t-one")
-    gui.drag(gui.element("t:" + t3), gui.element("t:" + t1), target_fy=0.08)
+    gui.drag(gui.element(open_row(gui, "t", t3)), gui.element(open_row(gui, "t", t1)), target_fy=0.08)
     gui.check("t-three now before t-one", lambda s: order_in(s["state"], work) == [t3, t1], 10,
               detail=lambda s: order_in(s["state"], work))
     gui.shot("reordered")
 
     gui.step("Alt+Down nudges t-three back down")
     # Order now [t3, t1]. Select t1 with one click (it also opens the terminal tab), then nudge it up and down.
-    gui.click(gui.element("t:" + t1))
+    gui.click(gui.element(open_row(gui, "t", t1)))
     time.sleep(0.5)
     # The click handed focus to the terminal, which swallows keys; right-click and Escape put focus back on the tree row.
-    gui.click(gui.element("t:" + t1), button="right")
+    gui.click(gui.element(open_row(gui, "t", t1)), button="right")
     time.sleep(0.4)
     gui.chord("escape")
     gui.chord("alt+up")
@@ -100,14 +98,10 @@ def run(gui):
     before = order_in(gui.state(), work)
     show_workbench(gui)
     beta = ws(gui.state(), "Beta")["id"]
-    gui.click(gui.element("w:" + beta), count=1)
-    time.sleep(2)
-    gui.click(gui.element("w:" + beta), button="right")
-    gui.click(gui.element("Open", role="16"))
+    gui.click(gui.element("w:" + beta))  # a click opens the workspace
     attached(gui, "Beta")
     show_workbench(gui)
-    gui.click(gui.element("w:" + alpha), button="right")
-    gui.click(gui.element("Open", role="16"))
+    gui.click(gui.element("w:" + alpha))
     attached(gui, "Alpha")
     gui.check("order after returning to Alpha is unchanged", lambda s: order_in(s["state"], work) == before, 20,
               detail=lambda s: (before, order_in(s["state"], work)))

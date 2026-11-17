@@ -24,7 +24,7 @@ typedef Placement = {
 }
 
 /**
-	Re-ordering policy: pure functions of the tree model and the current catalogs, evaluated at release as well as while
+	Re-ordering policy: pure functions of one workspace's rows and its current catalogs, evaluated at release as well as while
 	dragging. Positions are spaced `STEP` apart, so a move writes only the moved rows, at the middle between their new
 	neighbours. Siblings are renumbered with that spacing only when no gap is left there, or a neighbour has no position
 	yet, and then only the rows whose group or number changes are written. Only rows the client may write are planned;
@@ -48,35 +48,35 @@ class WorkbenchOrder {
 		every row is already in place. Rows that cannot move (a session of another workspace, a group into its own
 		contents) are left out and counted in `skipped`.
 	**/
-	public static function plan(model:WorkbenchTreeModel, catalog:TerminalCatalog, agents:Null<AgentCatalog>, keys:Array<String>, anchor:String,
+	public static function plan(rows:WorkbenchRows, catalog:TerminalCatalog, agents:Null<AgentCatalog>, keys:Array<String>, anchor:String,
 			after:Bool, writable:String->Bool):Null<Placement> {
-		var destination = model.groupOfRow(anchor);
+		var destination = rows.groupOfRow(anchor);
 		if (destination == null || !WorkspaceProtocol.knownGroup(destination, catalog.groups)) return null;
 		var parent = WorkspaceProtocol.parentFor(destination), moving:Array<String> = [];
 		for (key in keys) {
 			if (key == anchor || moving.indexOf(key) >= 0) continue;
-			if (writable(key) && canPlace(model, catalog, agents, key, destination, parent)) moving.push(key);
+			if (writable(key) && canPlace(rows, catalog, agents, key, destination, parent)) moving.push(key);
 		}
 		var skipped = Lambda.count(keys, function(key) return key != anchor) - moving.length;
 		if (moving.length == 0) return null;
-		var current = model.siblings(destination);
+		var current = rows.siblings(destination);
 		var shown = sequence(current, moving, anchor, after);
 		var first = shown.indexOf(moving[0]);
 		var left = first > 0 ? shown[first - 1] : null, right = first + moving.length < shown.length ? shown[first + moving.length] : null;
 		var steps:Array<PlaceStep> = [];
-		var targets = gap(model, left, right, moving.length);
+		var targets = gap(rows, left, right, moving.length);
 		if (targets != null) {
-			if (inPlace(model, destination, moving, current, shown, left, right)) return null;
+			if (inPlace(rows, destination, moving, current, shown, left, right)) return null;
 			for (index in 0...moving.length) {
 				var key = moving[index];
-				if (model.groupOfRow(key) != destination || model.orderOfRow(key) != targets[index]) steps.push({key: key, group: destination, order: targets[index]});
+				if (rows.groupOfRow(key) != destination || rows.orderOfRow(key) != targets[index]) steps.push({key: key, group: destination, order: targets[index]});
 			}
 		} else {
 			// No room between the neighbours, or one has no position: number every sibling with room again.
 			var step = Std.int(Math.max(1, Math.min(STEP, WorkspaceProtocol.MAX_ORDER / Math.max(1, shown.length))));
 			for (index in 0...shown.length) {
 				var key = shown[index], order = index * step;
-				if (model.groupOfRow(key) != destination || model.orderOfRow(key) != order) steps.push({key: key, group: destination, order: order});
+				if (rows.groupOfRow(key) != destination || rows.orderOfRow(key) != order) steps.push({key: key, group: destination, order: order});
 			}
 		}
 		if (steps.length == 0) return null;
@@ -91,8 +91,8 @@ class WorkbenchOrder {
 		`count` positions that sort between `left` and `right` (rows beside the moved ones, null at an end), spread evenly; null when
 		there is no room, or `left` has no position (rows without one sort after every row with one).
 	**/
-	static function gap(model:WorkbenchTreeModel, left:Null<String>, right:Null<String>, count:Int):Null<Array<Int>> {
-		var low:Null<Int> = left == null ? null : model.orderOfRow(left), high:Null<Int> = right == null ? null : model.orderOfRow(right);
+	static function gap(rows:WorkbenchRows, left:Null<String>, right:Null<String>, count:Int):Null<Array<Int>> {
+		var low:Null<Int> = left == null ? null : rows.orderOfRow(left), high:Null<Int> = right == null ? null : rows.orderOfRow(right);
 		if (left != null && low == null) return null;
 		if (high != null) {
 			var from:Int = low == null ? -1 : low, room:Int = high - from;
@@ -105,14 +105,14 @@ class WorkbenchOrder {
 	}
 
 	/** Whether dropping already leaves the rows where they sort: the same sequence, their positions between the neighbours', in order. */
-	static function inPlace(model:WorkbenchTreeModel, destination:String, moving:Array<String>, current:Array<String>, shown:Array<String>,
+	static function inPlace(rows:WorkbenchRows, destination:String, moving:Array<String>, current:Array<String>, shown:Array<String>,
 			left:Null<String>, right:Null<String>):Bool {
 		if (current.join(",") != shown.join(",")) return false;
-		var low:Null<Int> = left == null ? null : model.orderOfRow(left), high:Null<Int> = right == null ? null : model.orderOfRow(right);
+		var low:Null<Int> = left == null ? null : rows.orderOfRow(left), high:Null<Int> = right == null ? null : rows.orderOfRow(right);
 		var previous:Int = left == null ? -1 : low == null ? -1 : low;
 		for (key in moving) {
-			var order = model.orderOfRow(key);
-			if (model.groupOfRow(key) != destination) return false;
+			var order = rows.orderOfRow(key);
+			if (rows.groupOfRow(key) != destination) return false;
 			if (order == null) {
 				// A row without a position sorts after every placed one, so it is in place only among such rows.
 				if (left != null && low != null && right != null && high != null) return false;
@@ -124,13 +124,13 @@ class WorkbenchOrder {
 		return true;
 	}
 
-	static function canPlace(model:WorkbenchTreeModel, catalog:TerminalCatalog, agents:Null<AgentCatalog>, key:String, destination:String,
+	static function canPlace(rows:WorkbenchRows, catalog:TerminalCatalog, agents:Null<AgentCatalog>, key:String, destination:String,
 			parent:Null<String>):Bool {
 		var row = WorkbenchRowKey.parse(key);
-		if (row == null || model.groupOfRow(key) == null) return false;
+		if (row == null || rows.groupOfRow(key) == null) return false;
 		return switch row.kind {
 			case WorkbenchRowKind.Group:
-				var group = model.groups.get(row.id);
+				var group = rows.groups.get(row.id);
 				group != null && (group.parent == parent || GroupContextActions.canParent(row.id, parent, catalog.groups));
 			case WorkbenchRowKind.Terminal: true;
 			case WorkbenchRowKind.Agent: agents != null && agents.instance == catalog.instance && agents.root == catalog.workspaceRoot;

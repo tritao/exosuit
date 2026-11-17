@@ -35,7 +35,7 @@ def run(gui):
 
     gui.step("a new group has its own tab set")
     show_workbench(gui)
-    create(gui, "g:" + work, "New group", "Second", "groups")
+    create(gui, open_row(gui, "g", work), "New Group", "Second", "groups")
     quick_switch(gui, "Second")
     gui.check("context is a different group", lambda s: s["state"]["context"] != ctx_work, 10,
               detail=lambda s: (ctx_work, s["state"]["context"]))
@@ -54,12 +54,8 @@ def run(gui):
               detail=lambda s: (s["state"]["context"], tabs(s["state"])))
 
     gui.step("Goto Previous Workspace from the palette")
-    # An idle workspace is not attached to by a quick switch (the context moves, the window stays on Alpha's service;
-    # reported separately), so start Beta's service first, from its row's menu.
+    # Beta is idle: switching to it opens it (WB Q1).
     beta = ws(gui.state(), "Beta")["id"]
-    show_workbench(gui)
-    menu(gui, "w:" + beta, "Start Service")
-    gui.wait("Beta running", lambda s: gui.find(s, pattern=r"^Workspace Beta, running"), 40)
     quick_switch(gui, "Beta")
     gui.shot("after-beta-switch")
     gui.check("moved to Beta", lambda s: s["state"]["contextWorkspace"] != alpha and s["state"]["openWorkspace"] == s["state"]["contextWorkspace"], 60,

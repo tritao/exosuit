@@ -359,6 +359,13 @@ class PreferencesRegistry {
 		}
 		if (!projectOnly) {
 			var options = new SettingOptions();
+			options.label = "Default agent provider";
+			options.options = [new PropertyOption("claude", "Claude"), new PropertyOption("codex", "Codex"), new PropertyOption("pi", "Pi")];
+			options.tooltip = "The provider New Agent Session starts at once. The other providers are in its submenu.";
+			registry.define("workbench/agents/default_provider", PropertyType.Enum, PropertyValue.Enum(defaults.defaultAgentProvider), options);
+		}
+		if (!projectOnly) {
+			var options = new SettingOptions();
 			options.label = "Relay URL";
 			options.tooltip = "HTTPS address of the relay Worker that carries remote access (phone, browser). Empty uses the default. Changing it applies to the next \"Enable remote access\"; a machine already set up must be disconnected first (Remote Access panel, \"Use a different relay\").";
 			registry.add(new RelayUrlSettingDefinition(RelayUrl.SETTING, PropertyType.Text, PropertyValue.Text(""), options));
@@ -369,6 +376,7 @@ class PreferencesRegistry {
 	public static function snapshot(store:SettingsStore, ?base:Settings):Settings {
 		var value = base == null ? new Settings() : base.copy();
 		if (store.registry.exists("workbench/agents/session_mode") && (base == null || !store.isDefault("workbench/agents/session_mode"))) value.agentSessionMode = store.getString("workbench/agents/session_mode");
+		if (store.registry.exists("workbench/agents/default_provider") && (base == null || !store.isDefault("workbench/agents/default_provider"))) value.defaultAgentProvider = store.getString("workbench/agents/default_provider");
 		if (store.registry.exists("appearance/workbench/zoom_percent") && (base == null || !store.isDefault("appearance/workbench/zoom_percent"))) value.applicationZoom = store.getInt("appearance/workbench/zoom_percent");
 		if (store.registry.exists("appearance/workbench/layout_mode") && (base == null || !store.isDefault("appearance/workbench/layout_mode"))) value.layoutMode = store.getString("appearance/workbench/layout_mode");
 		if (store.registry.exists("appearance/workbench/activity_bar") && (base == null || !store.isDefault("appearance/workbench/activity_bar"))) value.activityBar = store.getString("appearance/workbench/activity_bar");

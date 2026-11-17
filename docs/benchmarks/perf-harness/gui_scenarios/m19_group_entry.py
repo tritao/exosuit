@@ -21,7 +21,7 @@ def run(gui):
     gui.check("the window starts in the workspace root context", lambda s: s["state"]["context"] == root_key and not s["state"]["context"].endswith("/" + work), 5)
 
     gui.step("a single click on the Work row enters Work")
-    gui.click(gui.element("g:" + work), fx=0.6)
+    gui.click(gui.element(open_row(gui, "g", work)), fx=0.6)
     gui.check("the click makes Work the active context", lambda s: s["state"]["context"].endswith("/" + work), 8,
               detail=lambda s: (s["state"]["context"], s["state"]["hostContext"]))
     work_key = gui.state()["context"]
@@ -42,15 +42,15 @@ def run(gui):
     gui.check("the root has a2 only", lambda s: tabs(s["state"]) == ["a2.txt"], 10, detail=lambda s: tabs(s["state"]))
 
     gui.step("back to Work by a click: a1 only")
-    gui.click(gui.element("g:" + work), fx=0.6)
+    gui.click(gui.element(open_row(gui, "g", work)), fx=0.6)
     gui.check("Work is back with a1 only", lambda s: s["state"]["context"] == work_key and tabs(s["state"]) == ["a1.txt"], 10,
               detail=lambda s: (s["state"]["context"], tabs(s["state"])))
 
     gui.step("a second group is entered by a click as well")
     show_workbench(gui)
-    create(gui, "g:" + work, "New group", "Second", "groups")
+    create(gui, open_row(gui, "g", work), "New Group", "Second", "groups")
     second = by_name_id(gui.state(), "Second")
-    gui.click(gui.element("g:" + second), fx=0.6)
+    gui.click(gui.element(open_row(gui, "g", second)), fx=0.6)
     gui.check("the click enters Second", lambda s: s["state"]["context"].endswith("/" + second), 8,
               detail=lambda s: s["state"]["context"])
     gui.check("Second starts with no tabs", lambda s: tabs(s["state"]) == [], 8, detail=lambda s: tabs(s["state"]))
@@ -58,6 +58,10 @@ def run(gui):
     gui.step("Enter on a selected group row enters it")
     gui.click(gui.element("w:" + alpha), fx=0.6)
     gui.check("root again", lambda s: s["state"]["context"] == root_key, 8, detail=lambda s: s["state"]["context"])
+    # A click on the open root's row keeps the window there and gives the row the keyboard. The click that came back to
+    # the root does not always: TreeView's focus request is lost on a context the window showed before
+    # (docs/haxeon-compiler-bugs.md, "TreeView.focusItem on a restored context").
+    gui.click(gui.element("w:" + alpha), fx=0.6)
     gui.chord("down")  # the selection moves to the next row, which is a group of Alpha; the context stays
     time.sleep(0.3)
     gui.check("an arrow key alone does not switch", lambda s: s["state"]["context"] == root_key, 3, detail=lambda s: s["state"]["context"])

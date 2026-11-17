@@ -1,6 +1,6 @@
 """Everyday sweep, agent sessions in a brand-new workspace and across two workspaces, end to end with real input.
 
-New Workspace… makes Gamma (no restart). From Gamma's row menu: New Agent Session…, the chooser's Codex (a fake,
+New Workspace… makes Gamma (no restart). From Gamma's row menu: New Agent Session, which starts the default provider Codex (a fake,
 tests/workspace-agents/fake-codex.py, answers "FAKE-REPLY: <prompt>"), the row and the tab appear, a prompt typed with
 the keyboard and Enter gets its reply in the transcript. Then Alpha gets a session of its own the same way, and the
 window switches Gamma, Alpha, Gamma: each shows its own session and conversation. No real provider is started."""
@@ -56,10 +56,10 @@ def run(gui):
         gui.click(gui.element("w:" + wid), count=2)
         attached(gui, name)
         gui.check("back in %s: its session row is listed, the other's is not" % name,
-                  lambda s: [a["id"] for a in s["state"]["agents"]] == [own] and gui.find(s, "a:" + own) and not gui.find(s, "a:" + str(other)), 15,
+                  lambda s: [a["id"] for a in s["state"]["agents"]] == [own] and gui.find(s, open_row(gui, "a", own)) and not gui.find(s, open_row(gui, "a", str(other))), 15,
                   detail=lambda s: s["state"]["agents"])
         if not shown_transcript(gui.state()):
-            gui.click(gui.element("a:" + own))
+            gui.click(gui.element(open_row(gui, "a", own)))
         gui.check("back in %s: its conversation is in front" % name,
                   lambda s: any(("FAKE-REPLY: hello " + name.lower()) in l for l in shown_transcript(s["state"])), 15,
                   detail=lambda s: s["state"]["panes"])

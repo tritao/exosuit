@@ -1,7 +1,7 @@
 """M19 new workspace: right after New Workspace… the window can add a terminal, an agent session and a group.
 
 Real input: a click on the New Workspace… row, the name, Enter; then nothing for a few seconds while the snapshot is
-watched (so a state that only appears after more input is seen as late); then the workspace row's menu and New Terminal….
+watched (so a state that only appears after more input is seen as late); then the workspace row's menu and New Terminal.
 Writes result/trace.json: every change of what the Workbench could do, with the seconds since the name was entered."""
 import json
 import os
@@ -19,11 +19,11 @@ def view(gui, snap):
     w = s.get("workbench") or {}
     return {"open": s["openWorkspace"], "status": s["workspaceStatus"], "error": s["workspaceError"],
             "catalog": w.get("catalog"), "terminal": w.get("canCreateTerminal"), "agent": w.get("canCreateAgent"),
-            "groups": w.get("canEditGroups"), "parent": w.get("groupParent"), "openRow": w.get("openRow"),
-            "served": w.get("servedWorkspace"), "empty": s.get("workbenchEmptyState"), "connecting": w.get("connectingTo"),
+            "groups": w.get("canEditGroups"), "rowsLive": w.get("openRowsLive"), "openRow": w.get("openRow"),
+            "served": w.get("servedWorkspace"), "empty": s.get("workbenchEmptyState"), "connecting": not w.get("openRowsLive"),
             "selected": w.get("selected"), "tree": bool(gui.find(snap, "n:new-workspace")),
             "catalogError": w.get("catalogError"), "agentError": w.get("agentError"),
-            "newTerminalButton": bool(gui.find(snap, "New terminal")), "firstGroupButton": bool(gui.find(snap, "New group", role="1"))}
+            "emptyRow": bool(gui.find(snap, pattern=r"^s:none\|"))}
 
 
 def watch(gui, name, seconds, started, done=None):
@@ -59,7 +59,7 @@ def create(gui, name):
 
 
 def ready(now, row):
-    return now["open"] and now["parent"] == row(now) and now["terminal"] and now["agent"] and now["groups"]
+    return now["open"] and now["openRow"] == row(now) and now["terminal"] and now["agent"] and now["groups"]
 
 
 def menu(gui, row_label):
@@ -76,7 +76,7 @@ def menu(gui, row_label):
 
 def run(gui):
     attached(gui, "Alpha")
-    gui.wait("Alpha's catalog", lambda s: s["state"]["workbench"]["catalog"] and s["state"]["workbench"]["groupParent"], 40, settle=0.5)
+    gui.wait("Alpha's catalog", lambda s: s["state"]["workbench"]["catalog"] and s["state"]["workbench"]["openRowsLive"], 40, settle=0.5)
     gui.step("create workspace Gamma from the New Workspace row, then send nothing")
     started = create(gui, "Gamma")
     trace, last = watch(gui, "trace", 15, started, lambda now: ready(now, lambda v: "w:" + v["open"]) and now["empty"])
@@ -85,17 +85,19 @@ def run(gui):
     gui.check("Gamma exists and is open", lambda s: gamma and s["state"]["openWorkspace"] == gamma, 1, detail=lambda s: last)
     gui.check("the Workbench tree is still showing", lambda s: gui.find(s, "n:new-workspace") and gui.find(s, row), 1, detail=lambda s: last)
     gui.check("the new workspace's row is selected", lambda s: s["state"]["workbench"]["selected"] == row, 1, detail=lambda s: last)
-    gui.check("the tree's rows belong to Gamma", lambda s: s["state"]["workbench"]["groupParent"] == row, 1, detail=lambda s: last)
+    gui.check("the tree's rows belong to Gamma", lambda s: s["state"]["workbench"]["openRow"] == row and s["state"]["workbench"]["openRowsLive"], 1, detail=lambda s: last)
     gui.check("a terminal can be created", lambda s: s["state"]["workbench"]["canCreateTerminal"], 1, detail=lambda s: last)
     gui.check("an agent session can be created", lambda s: s["state"]["workbench"]["canCreateAgent"], 1, detail=lambda s: last)
     gui.check("a group can be created", lambda s: s["state"]["workbench"]["canEditGroups"], 1, detail=lambda s: last)
-    gui.check("the empty state offers a start", lambda s: s["state"]["workbenchEmptyState"], 1, detail=lambda s: last)
+    gui.check("the empty workspace's row says so", lambda s: s["state"]["workbenchEmptyState"], 1, detail=lambda s: last)
     gui.check("no workspace error", lambda s: not s["state"]["workspaceError"], 1,
               detail=lambda s: (s["state"]["workspaceError"], s["state"]["notifications"]))
     gui.shot("gamma-created")
 
-    gui.step("the empty state's New group button makes a group in the new workspace")
-    gui.click(gui.element("New group", role="1"))
+    gui.step("the empty row's New Group makes a group in the new workspace")
+    # Gamma's own note row: Alpha is empty too, and its row stays expanded above Gamma's.
+    gui.click(gui.element("s:none|" + gamma), button="right")
+    gui.click(gui.element("New Group", role="16"))
     time.sleep(0.6)
     gui.type_text("Sorted")
     gui.chord("enter")
@@ -105,12 +107,10 @@ def run(gui):
 
     gui.step("the workspace row's menu creates in the new workspace")
     labels = menu(gui, row)
-    for item in ("New Terminal" + ELLIPSIS, "New Agent Session" + ELLIPSIS, "New Group" + ELLIPSIS):
+    for item in ("New Terminal", "New Agent Session", "New Group"):
         gui.check("row menu offers " + item, lambda s, item=item: gui.find(s, item, role="16"), 1, detail=lambda s: labels)
     gui.shot("gamma-menu")
-    gui.click(gui.element("New Terminal" + ELLIPSIS, role="16"))
-    gui.wait("New Terminal prompt", lambda s: s["state"]["commandViewActive"], 5)
-    gui.chord("enter")
+    gui.click(gui.element("New Terminal", role="16"))
     gui.check("the new terminal is in Gamma's catalog", lambda s: len(s["state"]["terminals"]) == 1, 20,
               detail=lambda s: (s["state"]["terminals"], s["state"]["notifications"], view(gui, s)))
     gui.check("and has a tab", lambda s: any(t["kind"] == "terminal" for p in s["state"]["panes"] for t in p["tabs"]), 5,
@@ -120,10 +120,9 @@ def run(gui):
 
     gui.step("attach a folder to the new workspace: the connection, the terminal and the group stay")
     extra = os.path.join(os.path.dirname(gui.out), "fixture", "extra")
-    with open(os.path.join(gui.dir, "pick-folder.txt"), "w") as f:
-        f.write(extra)
     menu(gui, row)
     gui.click(gui.element("Attach Folder" + ELLIPSIS, role="16"))
+    gui.answer_dialog(paths=[extra])
     began = time.monotonic()
     gui.check("Gamma has the folder", lambda s: len(ws(s["state"], "Gamma")["folders"]) == 1, 15,
               detail=lambda s: ws(s["state"], "Gamma"))

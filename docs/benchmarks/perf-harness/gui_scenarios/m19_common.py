@@ -12,6 +12,16 @@ def ws(state, name):
     return next((w for w in state["machineWorkspaces"] if w["name"] == name), None)
 
 
+def row_key(kind, workspace, item):
+    """A Workbench row's key, the label the tree gives it: its kind (g, t or a), its workspace's id, `|` and its id."""
+    return "%s:%s|%s" % (kind, workspace, item)
+
+
+def open_row(gui, kind, item):
+    """The key of row `item` of the workspace `gui`'s window shows."""
+    return row_key(kind, gui.state()["openWorkspace"], item)
+
+
 def tabs(state):
     """Titles of the open tabs, file names only for documents, in order (every pane)."""
     return [t["title"].replace("\\", "/").split("/")[-1] for p in state["panes"] for t in p["tabs"]]
@@ -57,9 +67,24 @@ def menu(gui, row_label, item):
     gui.click(target)
 
 
+def expand(gui, row_key):
+    """Clicks the chevron of the row `row_key` (a click on the row itself opens it). Expanding an idle workspace shows
+    its last-known rows and starts nothing (WB Q3)."""
+    def chevron(s):
+        rows = gui.find(s, row_key)
+        if not rows:
+            return None
+        row = rows[0]
+        return next((e for e in gui.find(s, pattern="^(Expand|Collapse)$", role="1")
+                     if row["y"] <= e["y"] + e["h"] / 2 <= row["y"] + row["h"] and row["x"] <= e["x"] + e["w"] / 2 <= row["x"] + row["w"]), None)
+    target = gui.wait("chevron of " + row_key, chevron, 8)
+    if target["label"] == "Expand":
+        gui.click(target)
+
+
 def ensure_group(gui, workspace_id, name="Work"):
     """The id of the group `name` at the root of the open workspace `workspace_id`, made from the workspace row's menu
-    (New Group…, the inline editor, Enter) when the catalog has none: a new workspace has no groups."""
+    (New Group, the inline editor, Enter) when the catalog has none: a new workspace has no groups."""
     def named(s):
         return next((g["id"] for g in s["state"]["groups"] if g["name"] == name and not g["parent"]), None)
     gui.wait("catalog of the open workspace", lambda s: is_attached(s["state"], workspace_id), 40, settle=0.5)
@@ -67,7 +92,7 @@ def ensure_group(gui, workspace_id, name="Work"):
     if found:
         return found
     show_workbench(gui)
-    menu(gui, "w:" + workspace_id, "New Group…")
+    menu(gui, "w:" + workspace_id, "New Group")
     time.sleep(0.6)
     gui.type_text(name)
     gui.chord("enter")
@@ -119,8 +144,9 @@ def show_workbench(gui):
 
 def reveal(gui, parent_id, child_id):
     """Makes the row of group `child_id` visible: selects its parent group's row and expands it with Right."""
-    if gui.find(gui.snapshot(), "g:" + child_id):
+    child, parent = open_row(gui, "g", child_id), open_row(gui, "g", parent_id)
+    if gui.find(gui.snapshot(), child):
         return
-    gui.click(gui.element("g:" + parent_id))
+    gui.click(gui.element(parent))
     gui.chord("right")
-    gui.wait("row of group " + child_id, lambda s: gui.find(s, "g:" + child_id), 5)
+    gui.wait("row of group " + child_id, lambda s: gui.find(s, child), 5)

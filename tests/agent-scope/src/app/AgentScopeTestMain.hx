@@ -44,7 +44,9 @@ class AgentScopeTestMain {
 		var agents:AgentCatalog = {instance: "i", root: "C:/work", status: "ready", next: null, records: [
 			{id: "a1", name: "Agent", group: "ui", cwd: "", thread: "", state: "idle", turn: null, workspaceRoot: "C:/work"}]};
 		var result = new WorkbenchTreeModel();
-		result.update(catalog, agents);
+		// One workspace, open, whose id is "": its rows are keyed "g:|…".
+		result.update({machine: {id: "m", name: "m", workspaces: [{id: "", name: "work", folders: [], scratch: null, revision: 1}]}, error: null,
+			openWorkspace: "", revision: 1, manages: true}, ["" => {terminals: catalog, agents: agents, snapshot: null, revision: 0}]);
 		return result;
 	}
 
@@ -56,24 +58,24 @@ class AgentScopeTestMain {
 		var first = AgentScope.resolve(tree, null, null);
 		require(first != null && first.groupId == "resume" && first.directory == "C:/work/exosuit", "no selection did not fall back to the first group");
 		// A group row uses its directory; a sub-group narrows to its sub-folder.
-		var resume = AgentScope.resolve(tree, "g:resume", null);
+		var resume = AgentScope.resolve(tree, "g:|resume", null);
 		require(resume != null && resume.directory == "C:/work/exosuit" && resume.caption() == "resume-2026 \u2014 C:/work/exosuit", "group row scope or caption");
-		var ui = AgentScope.resolve(tree, "g:ui", resume);
+		var ui = AgentScope.resolve(tree, "g:|ui", resume);
 		require(ui != null && ui.groupId == "ui" && ui.directory == "C:/work/exosuit/graphical", "sub-group did not narrow to its folder");
 		// A session or terminal row uses its group's directory.
-		var agent = AgentScope.resolve(tree, "a:a1", resume);
+		var agent = AgentScope.resolve(tree, "a:|a1", resume);
 		require(agent != null && agent.groupId == "ui" && agent.directory == "C:/work/exosuit/graphical", "agent session did not use its group");
-		var term = AgentScope.resolve(tree, "t:t1", ui);
+		var term = AgentScope.resolve(tree, "t:|t1", ui);
 		require(term != null && term.groupId == "resume", "terminal did not use its group");
 		// A group without its own folder inherits its parent's; a top-level one the workspace root.
-		var notes = AgentScope.resolve(tree, "g:notes", ui);
+		var notes = AgentScope.resolve(tree, "g:|notes", ui);
 		require(notes != null && notes.groupId == "notes" && notes.directory == "C:/work/exosuit", "sub-group without cwd did not inherit");
-		var loose = AgentScope.resolve(tree, "g:loose", ui);
+		var loose = AgentScope.resolve(tree, "g:|loose", ui);
 		require(loose != null && loose.directory == "C:/work", "top-level group without cwd did not use the workspace root");
 		// Nothing selected, or a row that is gone: the last group's scope stays.
 		var kept = AgentScope.resolve(tree, null, ui);
 		require(kept != null && kept.equals(ui), "empty selection dropped the last group's scope");
-		var stale = AgentScope.resolve(tree, "t:gone", ui);
+		var stale = AgentScope.resolve(tree, "t:|gone", ui);
 		require(stale != null && stale.equals(ui), "a row without a group replaced the scope");
 		// The kept scope follows its group's rename and new folder.
 		var moved = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "web", "C:/work/exosuit/web", "resume", 1)]);
@@ -85,7 +87,7 @@ class AgentScopeTestMain {
 		require(parent != null && parent.groupId == "resume" && parent.directory == "C:/work/exosuit", "a deleted group's scope did not fall back to its parent");
 		var nested = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "ui", "C:/work/exosuit/graphical", "resume", 1),
 			group("deep", "deep", "C:/work/exosuit/graphical/src", "ui", 2)]);
-		var deep = AgentScope.resolve(nested, "g:deep", ui);
+		var deep = AgentScope.resolve(nested, "g:|deep", ui);
 		require(deep != null && deep.ancestors.join(",") == "ui,resume", "a scope did not record its parent groups");
 		var grand = AgentScope.resolve(removed, null, deep);
 		require(grand != null && grand.groupId == "resume", "a scope whose group and parent were deleted skipped the surviving grandparent");
@@ -96,9 +98,9 @@ class AgentScopeTestMain {
 		// A group folder may be any folder, inside the workspace or not; the scope takes it as given.
 		var outside = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("elsewhere", "elsewhere", "D:/scratch/other-repo", "resume", 1),
 			group("under", "under", null, "elsewhere", 2)]);
-		var far = AgentScope.resolve(outside, "g:elsewhere", resume);
+		var far = AgentScope.resolve(outside, "g:|elsewhere", resume);
 		require(far != null && far.directory == "D:/scratch/other-repo", "a folder outside the workspace was not used");
-		var inherited = AgentScope.resolve(outside, "g:under", far);
+		var inherited = AgentScope.resolve(outside, "g:|under", far);
 		require(inherited != null && inherited.directory == "D:/scratch/other-repo", "a sub-group did not inherit an outside folder");
 		// No groups at all: no scope.
 		require(AgentScope.resolve(new WorkbenchTreeModel(), null, null) == null, "empty Workbench produced a scope");
@@ -110,14 +112,14 @@ class AgentScopeTestMain {
 		var calls = 0;
 		var scopes = new AgentScopeTracker(function(path) { calls++; return StringTools.replace(path, "/", "\\"); });
 		var tree = model(groups);
-		var ui = scopes.resolve(tree, "g:ui");
+		var ui = scopes.resolve(tree, "g:|ui");
 		require(ui != null && ui.directory == "C:\\work\\exosuit\\graphical" && calls == 1, "tracker did not normalize the scope folder");
 		var kept = scopes.resolve(tree, null);
 		require(kept == ui && calls == 1, "an unchanged scope was normalized again or replaced");
 		var fallback = scopes.resolve(model([groups[0]]), null);
 		require(fallback != null && fallback.groupId == "resume" && fallback.directory == "C:\\work\\exosuit", "tracker lost the parent fallback");
 		var failing = new AgentScopeTracker(function(path):String throw "gone");
-		var gone = failing.resolve(tree, "g:ui");
+		var gone = failing.resolve(tree, "g:|ui");
 		require(gone != null && gone.directory == "C:/work/exosuit/graphical", "a folder that cannot be normalized lost its scope");
 		scopes.reset();
 		require(scopes.resolve(new WorkbenchTreeModel(), null) == null, "reset kept the last scope");
@@ -125,19 +127,19 @@ class AgentScopeTestMain {
 
 	static function rowKeys():Void {
 		var tree = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "ui", "C:/work/exosuit/graphical", "resume", 1)]);
-		var row = WorkbenchRowKey.parse("a:a1");
-		require(row != null && row.kind == WorkbenchRowKind.Agent && row.id == "a1" && row.toString() == "a:a1", "agent row key");
-		require(WorkbenchRowKey.parse("x:1") == null && WorkbenchRowKey.parse("g:") == null && WorkbenchRowKey.parse(null) == null
-			&& WorkbenchRowKey.parse("g1") == null, "malformed row keys parsed");
-		var colon = WorkbenchRowKey.parse(WorkbenchRowKey.group("a:b"));
-		require(colon != null && colon.id == "a:b", "ids keep their own colons");
-		var terminalGroup = WorkbenchRowKey.groupOf(tree, "t:t2"), ownGroup = WorkbenchRowKey.groupOf(tree, "g:resume");
+		var row = WorkbenchRowKey.parse("a:|a1");
+		require(row != null && row.kind == WorkbenchRowKind.Agent && row.workspace == "" && row.id == "a1" && row.toString() == "a:|a1", "agent row key");
+		require(WorkbenchRowKey.parse("x:|1") == null && WorkbenchRowKey.parse("g:|") == null && WorkbenchRowKey.parse(null) == null
+			&& WorkbenchRowKey.parse("g1") == null && WorkbenchRowKey.parse("g:a1") == null, "malformed row keys parsed");
+		var colon = WorkbenchRowKey.parse(WorkbenchRowKey.group("w1", "a:b|c"));
+		require(colon != null && colon.workspace == "w1" && colon.id == "a:b|c", "ids keep their own colons and bars");
+		var terminalGroup = WorkbenchRowKey.groupOf(tree, "t:|t2"), ownGroup = WorkbenchRowKey.groupOf(tree, "g:|resume");
 		require(terminalGroup != null && terminalGroup.id == "ui" && ownGroup != null && ownGroup.id == "resume"
-			&& WorkbenchRowKey.groupOf(tree, "a:gone") == null, "row group");
-		require(WorkbenchRowKey.parentGroupId(tree, "g:ui") == "resume" && WorkbenchRowKey.parentGroupId(tree, "g:resume") == null
-			&& WorkbenchRowKey.parentGroupId(tree, "a:a1") == "ui", "row parent group");
-		require(WorkbenchRowKey.idOf("t:t1", WorkbenchRowKind.Terminal) == "t1"
-			&& WorkbenchRowKey.idOf("t:t1", WorkbenchRowKind.Agent) == null, "row id by kind");
+			&& WorkbenchRowKey.groupOf(tree, "a:|gone") == null, "row group");
+		require(WorkbenchRowKey.parentGroupId(tree, "g:|ui") == "resume" && WorkbenchRowKey.parentGroupId(tree, "g:|resume") == null
+			&& WorkbenchRowKey.parentGroupId(tree, "a:|a1") == "ui", "row parent group");
+		require(WorkbenchRowKey.idOf("t:|t1", WorkbenchRowKind.Terminal) == "t1"
+			&& WorkbenchRowKey.idOf("t:|t1", WorkbenchRowKind.Agent) == null, "row id by kind");
 	}
 
 	/** Group rows show the folder relative to the workspace root in any case or separator, also below a drive root. */

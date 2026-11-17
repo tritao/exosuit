@@ -7,8 +7,8 @@ import workspace.service.WorkspaceProtocol;
 /** Pure policy evaluated against the current workspace snapshot, including at release. */
 class WorkbenchDropRules {
 	/**
-		Where a drop onto `target` puts things: a group's id, the workspace root for `rootRow` (the open workspace's row;
-		null when the groups are not under one), or null for a row that takes no drops.
+		Where a drop onto `target` puts things: a group's id, the workspace root for `rootRow` (the workspace's row; null
+		when its rows are not under one), or null for a row that takes no drops.
 	**/
 	public static function destination(target:String, rootRow:Null<String>):Null<String>
 		return rootRow != null && target == rootRow ? WorkspaceProtocol.ROOT_GROUP : WorkbenchRowKey.idOf(target, WorkbenchRowKind.Group);
@@ -23,9 +23,10 @@ class WorkbenchDropRules {
 		return offset < -edge ? WorkbenchDropZone.Before : offset > edge ? WorkbenchDropZone.After : takesDrops ? WorkbenchDropZone.Into : WorkbenchDropZone.After;
 	}
 
+	/** Whether `source` may move into `target`, a group or the root row of the same workspace, by that workspace's lists. */
 	public static function canDrop(source:String, target:String, catalog:TerminalCatalog, agents:Null<AgentCatalog>, rootRow:Null<String>):Bool {
-		var into = destination(target, rootRow), row = WorkbenchRowKey.parse(source);
-		if (into == null || row == null || !WorkspaceProtocol.knownGroup(into, catalog.groups)) return false;
+		var into = destination(target, rootRow), row = WorkbenchRowKey.parse(source), onto = WorkbenchRowKey.parse(target);
+		if (into == null || row == null || (onto != null && onto.workspace != row.workspace) || !WorkspaceProtocol.knownGroup(into, catalog.groups)) return false;
 		var id = row.id, parent = WorkspaceProtocol.parentFor(into);
 		switch row.kind {
 			case WorkbenchRowKind.Group:

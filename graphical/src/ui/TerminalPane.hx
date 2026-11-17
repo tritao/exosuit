@@ -472,8 +472,8 @@ class TerminalPane implements AgentTerminalPanel {
 		requestFrame();
 	}
 
-	/** Typed text follows the shell's input mode; ConPTY asks for Win32 key events. */
-	function sendText(text:String):Void {
+	/** Typed text follows the shell's input mode; ConPTY asks for Win32 key events. `exosuit.terminal.send` types this way. */
+	public function sendText(text:String):Void {
 		session.emulator.text(Bytes.ofString(text));
 		session.flushInput();
 	}
@@ -1173,9 +1173,13 @@ class TerminalPane implements AgentTerminalPanel {
 		}
 	}
 
-	/** Input before a remote terminal attaches is queued; a failed one (detached too) takes none. */
+	/**
+		Input before a remote terminal attaches is queued; a failed one keeps what is typed on screen as not sent and
+		never sends it (Workbench design Q11).
+	**/
 	function canSendInput():Bool
-		return !closed && (remoteBackend == null || remoteBackend.isAvailable() && (!remoteBackend.isAttached() || remoteBackend.canControl()));
+		return !closed && (remoteBackend == null || remoteBackend.isAvailable() && (!remoteBackend.isAttached() || remoteBackend.canControl())
+			|| remoteBackend.keepsUnsentInput());
 
 	/** The selected text, or null when nothing is selected. */
 	public function selectedText():Null<String> {

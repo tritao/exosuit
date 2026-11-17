@@ -6,57 +6,51 @@ import haxeon.ui.widgets.collections.TreeViewModel;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
 import haxeon.ui.widgets.text.Text;
 import suit.MachineCatalog.MachineWorkspace;
-import workspace.client.WorkspaceCatalogMirror;
-import workspace.PathKey;
-import workspace.service.GroupFolders;
 import workspace.service.WorkspaceProtocol;
-import workspace.service.WorkspaceTerminalProtocol;
-import workspace.service.WorkspaceCatalogProtocol.CatalogSession;
-import workspace.service.WorkspaceCatalogProtocol.CatalogTerminal;
 import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
+import ui.WorkbenchRows.WorkbenchRowSource;
 
 /**
 	Projection only: grouping/status belong to the service, expansion/selection to TreeView.
 
-	With suit on, the tree is one tree (docs/architecture/0006-workspaces-without-folders.md): the machine's workspaces,
-	status lines and New Workspace…; the open workspace's groups, sessions and terminals nest under its row. The machine
-	itself is chosen above the tree (WorkbenchMachineSelector). With suit off it is the group tree alone.
+	The tree is one tree (docs/architecture/0006-workspaces-without-folders.md): the machine's workspaces, status lines
+	and, where the window may make workspaces, New Workspace…. The machine is this one's suit on the desktop and a paired
+	machine's directory on a device (WorkbenchMachine). Every workspace's groups, sessions and terminals nest under its
+	row by one rule (WorkbenchRows), keyed by workspace and item: the open workspace's always, another's while its row is
+	expanded, from its link's lists or a copy of its catalog. An expanded workspace with nothing to show says so in a
+	child row.
 **/
 class WorkbenchTreeModel implements TreeViewModel {
-	public final groups:Map<String, WorkspaceGroup> = [];
-	/** The machine's workspaces by id; empty when suit is off. */
+	/** The machine's workspaces by id. */
 	public final workspaces:Map<String, MachineWorkspace> = [];
-	/**
-		The rows directly in the workspace, wherever they sit: its top-level groups, then the sessions and terminals at
-		its root (in no group).
-	**/
-	public final groupRoots:Array<String> = [];
-	/** The row the top-level groups sit under: the open workspace's, or null when they are roots. */
-	public var groupParent(default, null):Null<String>;
-	/** The open workspace's row, attached or not; null without one. */
+	/** The workspace this window shows, or null when it shows none. */
+	public var openWorkspace(default, null):Null<String>;
+	/** The open workspace's row; null without one. */
 	public var openRow(default, null):Null<String>;
 	public var machine(default, null):Null<WorkbenchMachineView>;
-	public final agents:Map<String, workspace.service.WorkspaceAgentProtocol.AgentRecord> = [];
-	public final terminals:Map<String, TerminalRecord> = [];
-	/** Rows of the other workspaces, from their catalogs (M19 Phase 6): read-only, keyed by `WorkbenchRowKey.foreign`. */
-	final foreignGroups:Map<String, ForeignGroup> = [];
-	final foreignTerminals:Map<String, CatalogTerminal> = [];
-	final foreignSessions:Map<String, CatalogSession> = [];
-	/** The other workspaces' rows as last built, per workspace id, reused while the catalog copy has the same revision. */
-	final projections:Map<String, ForeignProjection> = [];
-	final projected:Map<String, Bool> = [];
-	/** Projections built so far: tests and measurements count them. */
+	/** The rows shown now, per workspace id: the open workspace's, and each expanded one's that has a source. */
+	final shown:Map<String, WorkbenchRows> = [];
+	/** Each workspace's rows as last built, reused while their source has not changed. */
+	final built:Map<String, WorkbenchRows> = [];
+	/** Rows built so far: tests and measurements count them. */
 	public var projectionBuilds(default, null):Int = 0;
 	/**
-		The workspace rows (`w:` keys) the tree shows expanded; only those project their catalogs. Null projects every workspace.
-		Set before `update`: the tree is not asked from inside it.
+		The workspace rows (`w:` keys) the tree shows expanded; only those (and the open one) are projected. Null projects
+		every workspace. Set before `update`: the tree is not asked from inside it.
 	**/
 	public var expandedRows:Null<Map<String, Bool>>;
+	/** Why this window could not connect to the open workspace, or null; its row says so instead of "Loading…". */
+	public var openFailure:Null<String>;
+	/**
+		Whether each workspace row starts expanded: a row first shown as the open workspace's does (the window starts
+		there, or the workspace was just made); every other row starts collapsed and stays as it was shown when a click
+		opens it, since only the chevron expands (Workbench design Q1).
+	**/
+	final startsExpanded:Map<String, Bool> = [];
 
+	/** The rows under each workspace row (its top-level rows, or a note). */
 	final children:Map<String, Array<String>> = [];
 	final roots:Array<String> = [];
-	/** How each group, terminal and session row sorts among its siblings. */
-	final places:Map<String, RowPlace> = [];
 	/** The latest node each row built, to find the row under the pointer while a drag is over the tree. */
 	final nodes:Map<String, ProbedRow> = [];
 	var probes:Int = 0;
@@ -70,240 +64,130 @@ class WorkbenchTreeModel implements TreeViewModel {
 	/** The row an insertion line is drawn at, and whether on its lower edge; null when no drop would land between rows. */
 	public var insertion(default, null):Null<String>;
 	public var insertionAfter(default, null):Bool = false;
+	/** The inline name editor of a group or session row, by row key, or null for a row that shows its label. */
 	public var groupEditor:Null<String->Null<View>>;
 	public var agentEditor:Null<String->Null<View>>;
-	/** The open workspace's first folder, as the service serves it; null without a catalog. */
-	public var workspaceRoot(default, null):Null<String>;
 
 	public function new() {}
 
-	public function update(catalog:Null<TerminalCatalog>, ?agentCatalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog, ?draft:WorkspaceGroup,
-			?machine:WorkbenchMachineView):Void {
-		agents.clear();
-		groups.clear();
-		terminals.clear();
+	/**
+		Lays out `view`'s workspaces with each workspace's rows from `sources`, by workspace id. `draft` is a group being
+		named in workspace `draftWorkspace`.
+	**/
+	public function update(view:WorkbenchMachineView, sources:Map<String, WorkbenchRowSource>, ?draft:WorkspaceGroup, ?draftWorkspace:String):Void {
 		children.clear();
 		roots.resize(0);
-		groupRoots.resize(0);
-		places.clear();
 		nodes.clear();
-		layout++;
+		shown.clear();
 		workspaces.clear();
-		foreignGroups.clear();
-		foreignTerminals.clear();
-		foreignSessions.clear();
-		projected.clear();
-		groupParent = null;
-		openRow = null;
-		this.machine = machine;
+		layout++;
 		version++;
-		workspaceRoot = catalog == null ? null : catalog.workspaceRoot;
-		if (catalog != null)
-			projectGroups(catalog, agentCatalog, draft);
-		if (machine == null) {
-			for (key in groupRoots) roots.push(key);
-			projections.clear();
-			return;
-		}
-		projectMachine(machine, catalog);
-		for (id in [for (key in projections.keys()) key])
-			if (!projected.exists(id))
-				projections.remove(id);
+		machine = view;
+		openWorkspace = view.openWorkspace;
+		openRow = openWorkspace == null ? null : WorkbenchRowKey.machineWorkspace(openWorkspace);
+		projectMachine(view, sources, draft, draftWorkspace);
+		for (id in [for (key in built.keys()) key])
+			if (!shown.exists(id))
+				built.remove(id);
 	}
 
-	/** The machine's workspaces and status lines; the groups go under the open workspace once its service is attached. */
-	function projectMachine(view:WorkbenchMachineView, catalog:Null<TerminalCatalog>):Void {
-		var rows = roots;
+	/** The machine's workspaces and status lines, and under each shown workspace its rows or a note. */
+	function projectMachine(view:WorkbenchMachineView, sources:Map<String, WorkbenchRowSource>, draft:Null<WorkspaceGroup>, draftWorkspace:Null<String>):Void {
 		var state = view.machine;
 		if (state != null)
 			for (entry in state.workspaces) {
 				var key = WorkbenchRowKey.machineWorkspace(entry.id);
 				workspaces.set(entry.id, entry);
-				rows.push(key);
+				roots.push(key);
 				children.set(key, []);
-				if (entry.id == view.openWorkspace) openRow = key;
+				if (!startsExpanded.exists(key)) startsExpanded.set(key, key == openRow);
 			}
 		if (state != null && state.workspaces.length == 0)
-			rows.push(WorkbenchRowKey.status("empty"));
+			roots.push(WorkbenchRowKey.status("empty"));
 		else if (state == null && view.error == null)
-			rows.push(WorkbenchRowKey.status("loading"));
+			roots.push(WorkbenchRowKey.status("loading"));
 		if (view.error != null)
-			rows.push(WorkbenchRowKey.status("error"));
-		rows.push(WorkbenchRowKey.NEW_WORKSPACE);
-		// The other workspaces' groups, sessions and terminals come from their catalogs, whether or not the attached one is known yet.
-		var watched = view.watched;
-		if (state != null && watched != null)
-			for (entry in state.workspaces) {
-				var watchedState = watched.get(entry.id);
-				if (entry.id != view.openWorkspace && watchedState != null)
-					projectForeign(entry, watchedState);
+			roots.push(WorkbenchRowKey.status("error"));
+		if (view.manages) roots.push(WorkbenchRowKey.NEW_WORKSPACE);
+		if (state == null) return;
+		var expanded = expandedRows;
+		for (entry in state.workspaces) {
+			var key = WorkbenchRowKey.machineWorkspace(entry.id);
+			if (key != openRow && expanded != null && !expanded.exists(key)) continue;
+			var rows = project(entry.id, sources, draft, draftWorkspace);
+			if (rows != null && rows.top.length > 0) {
+				children.set(key, rows.top);
+				continue;
 			}
-		if (catalog == null)
-			return;
-		var open = openRow;
-		if (open == null) {
-			// This window's folders are none of the machine's workspaces (or suit has not answered): the groups follow the machine.
-			for (key in groupRoots) roots.push(key);
-			return;
+			var watched = view.watched, status = watched == null ? null : watched.get(entry.id);
+			children.get(key).push(WorkbenchRowKey.note(noteKind(key, rows != null, status), entry.id));
 		}
-		// While a switch is under way the service still holds the previous workspace's groups; they wait.
-		// A service too old to name its folder is taken to serve this window's.
-		var served = catalog.workspaceRoot;
-		var ownService = view.servedRoot;
-		if (served != null && !(ownService != null && PathKey.same(ownService, served))
-				&& !Lambda.exists(view.openRoots, function(root) return PathKey.same(root, served)))
-			return;
-		groupParent = open;
-		children.set(open, groupRoots.copy());
 	}
 
 	/**
-		A workspace this window is not attached to: its catalog's groups, sessions and terminals under its row, read-only.
-		Only a workspace the tree shows expanded (`expandedRows`; all of them while it is null) is projected, and a projection is
-		reused until its catalog changes, so a busy session in one workspace rebuilds that workspace's rows alone.
+		Why an expanded workspace row has no rows under it: nothing in it yet, still loading, its service not running, or
+		the reason this window could not connect to it. Its menu is the workspace's, so a session can be made from it.
 	**/
-	function projectForeign(entry:MachineWorkspace, state:WorkbenchWorkspaceState):Void {
-		var mirror = state.catalog;
-		var rootKey = WorkbenchRowKey.machineWorkspace(entry.id);
-		if (mirror == null || !children.exists(rootKey))
-			return;
-		var shown = expandedRows;
-		if (shown != null && !shown.exists(rootKey))
-			return;
-		var id = entry.id;
-		projected.set(id, true);
-		var cached = projections.get(id);
-		if (cached == null || cached.mirror != mirror || cached.revision != mirror.revision) {
-			cached = buildForeign(id, mirror);
-			projections.set(id, cached);
+	function noteKind(key:String, hasRows:Bool, status:Null<WorkbenchWorkspaceState>):String {
+		if (hasRows) return WorkbenchRowKey.NOTE_EMPTY;
+		if (key == openRow && openFailure != null) return WorkbenchRowKey.NOTE_FAILED;
+		if (status != null && !status.running && !status.starting) return WorkbenchRowKey.NOTE_IDLE;
+		return WorkbenchRowKey.NOTE_LOADING;
+	}
+
+	/** Workspace `id`'s rows from its source, rebuilt only when that changed; null without a source. */
+	function project(id:String, sources:Map<String, WorkbenchRowSource>, draft:Null<WorkspaceGroup>, draftWorkspace:Null<String>):Null<WorkbenchRows> {
+		var source = sources.get(id);
+		if (source == null) return null;
+		var named = draftWorkspace == id ? draft : null;
+		var rows = built.get(id);
+		if (rows == null || !rows.sameSource(source, named)) {
+			rows = WorkbenchRows.build(id, source, named);
+			if (rows == null) return null;
+			built.set(id, rows);
 			projectionBuilds++;
 		}
-		children.set(rootKey, cached.top);
-		for (key => items in cached.kids)
-			children.set(key, items);
-		for (key => group in cached.groups)
-			foreignGroups.set(key, group);
-		for (key => terminal in cached.terminals)
-			foreignTerminals.set(key, terminal);
-		for (key => session in cached.sessions)
-			foreignSessions.set(key, session);
-		for (key => place in cached.places)
-			places.set(key, place);
+		shown.set(id, rows);
+		return rows;
 	}
 
-	function buildForeign(id:String, mirror:WorkspaceCatalogMirror):ForeignProjection {
-		var built = new ForeignProjection(mirror);
-		var top = built.top, kids = built.kids, placed = built.places;
-		var groupList = mirror.groupList();
-		for (g in groupList) {
-			var key = WorkbenchRowKey.foreign(WorkbenchRowKind.Group, id, g.id);
-			built.groups.set(key, new ForeignGroup(id, g));
-			kids.set(key, []);
-			placed.set(key, new RowPlace(WorkspaceProtocol.order(g.order), 0, 0));
-		}
-		var byId:Map<String, WorkspaceGroup> = [];
-		for (g in groupList)
-			byId.set(g.id, g);
-		for (g in groupList) {
-			// A group that is its own ancestor, or hangs under one, sits at the workspace root instead of making a subtree without end.
-			var parent = inCycle(g, byId, groupList.length) ? null : g.parent;
-			var siblings = parent == null ? top : kids.get(WorkbenchRowKey.foreign(WorkbenchRowKind.Group, id, parent));
-			(siblings == null ? top : siblings).push(WorkbenchRowKey.foreign(WorkbenchRowKind.Group, id, g.id));
-		}
-		var arrival = 0;
-		for (t in mirror.terminalList()) {
-			var key = WorkbenchRowKey.foreign(WorkbenchRowKind.Terminal, id, t.id);
-			built.terminals.set(key, t);
-			var siblings = WorkspaceProtocol.isRoot(t.group) ? top : kids.get(WorkbenchRowKey.foreign(WorkbenchRowKind.Group, id, t.group));
-			(siblings == null ? top : siblings).push(key);
-			placed.set(key, new RowPlace(t.order, 1, arrival++));
-		}
-		for (a in mirror.sessionList()) {
-			var key = WorkbenchRowKey.foreign(WorkbenchRowKind.Agent, id, a.id);
-			built.sessions.set(key, a);
-			var siblings = WorkspaceProtocol.isRoot(a.group) ? top : kids.get(WorkbenchRowKey.foreign(WorkbenchRowKind.Group, id, a.group));
-			(siblings == null ? top : siblings).push(key);
-			placed.set(key, new RowPlace(a.order, 2, arrival++));
-		}
-		var compare = function(a:String, b:String) return RowPlace.compare(placed.get(a), placed.get(b), a, b);
-		top.sort(compare);
-		for (items in kids)
-			items.sort(compare);
-		return built;
-	}
+	/** The rows of workspace `id` the tree shows now, or null. */
+	public function rows(id:Null<String>):Null<WorkbenchRows>
+		return id == null ? null : shown.get(id);
 
-	/** Whether walking up from `group`'s parent reaches `group` again or never ends (a group can name itself or a descendant as its parent). */
-	static function inCycle(group:WorkspaceGroup, byId:Map<String, WorkspaceGroup>, limit:Int):Bool {
-		var cursor = group.parent, steps = 0;
-		while (cursor != null) {
-			if (cursor == group.id || ++steps > limit)
-				return true;
-			var up = byId.get(cursor);
-			if (up == null)
-				return false;
-			cursor = up.parent;
-		}
-		return false;
-	}
+	/** The open workspace's rows, or null. */
+	public function open():Null<WorkbenchRows>
+		return rows(openWorkspace);
 
-	function projectGroups(catalog:TerminalCatalog, agentCatalog:Null<workspace.service.WorkspaceAgentProtocol.AgentCatalog>, draft:Null<WorkspaceGroup>):Void {
-		var ordered = catalog.groups.copy();
-        if (draft != null && !Lambda.exists(ordered, function(g) return g.id == draft.id)) ordered.push(draft);
-		for (g in ordered) {
-			groups.set(g.id, g);
-			children.set(WorkbenchRowKey.group(g.id), []);
-			places.set(WorkbenchRowKey.group(g.id), new RowPlace(WorkspaceProtocol.order(g.order), 0, 0));
-		}
-		for (g in ordered) {
-			var siblings = g.parent == null ? groupRoots : children.get(WorkbenchRowKey.group(g.parent));
-			if (siblings != null)
-				siblings.push(WorkbenchRowKey.group(g.id));
-		}
-		var arrival = 0;
-		for (t in catalog.terminals) {
-			terminals.set(t.id, t);
-			var siblings = itemsOf(t.group);
-			if (siblings != null) {
-				siblings.push(WorkbenchRowKey.terminal(t.id));
-				places.set(WorkbenchRowKey.terminal(t.id), new RowPlace(t.order, 1, arrival++));
-			}
-		}
-		if (agentCatalog != null)
-			for (a in agentCatalog.records) {
-				agents.set(a.id, a);
-				var siblings = itemsOf(a.group);
-				if (siblings != null) {
-					siblings.push(WorkbenchRowKey.agent(a.id));
-					places.set(WorkbenchRowKey.agent(a.id), new RowPlace(a.order, 2, arrival++));
-				}
-			}
-		// Placed rows by position (a group is always placed), then those not yet placed in the order they arrived.
-		var compare = function(a:String, b:String) return RowPlace.compare(places.get(a), places.get(b), a, b);
-		groupRoots.sort(compare);
-		for (items in children) items.sort(compare);
-	}
-
-	/** The group a row sits in, as the service names it (the workspace root for a top-level group or a root item); null for other rows. */
-	public function groupOfRow(key:String):Null<String> {
+	/**
+		The workspace a row belongs to: a workspace row's own, a note's, a group's, session's or terminal's. Null for the
+		machine's status rows and New Workspace….
+	**/
+	public function workspaceOfRow(key:Null<String>):Null<String> {
+		var id = WorkbenchRowKey.workspaceId(key);
+		if (id != null) return id;
+		var noted = WorkbenchRowKey.noteWorkspace(key);
+		if (noted != null) return noted;
 		var row = WorkbenchRowKey.parse(key);
-		if (row == null) return null;
-		return switch row.kind {
-			case WorkbenchRowKind.Group: var group = groups.get(row.id); group == null ? null : group.parent == null ? WorkspaceProtocol.ROOT_GROUP : group.parent;
-			case WorkbenchRowKind.Terminal: var terminal = terminals.get(row.id); terminal == null ? null : terminal.group;
-			case WorkbenchRowKind.Agent: var agent = agents.get(row.id); agent == null ? null : agent.group;
-		};
+		return row == null ? null : row.workspace;
+	}
+
+	/** The group a row sits in as the tree shows it (the workspace root for a top-level group or a root item); null for other rows. */
+	public function groupOfRow(key:String):Null<String> {
+		var rows = rowsOf(key);
+		return rows == null ? null : rows.groupOfRow(key);
 	}
 
 	/** A row's stored position among its siblings; null for a session or terminal not yet placed, and for other rows. */
 	public function orderOfRow(key:String):Null<Int> {
-		var place = places.get(key);
-		return place == null ? null : place.order;
+		var rows = rowsOf(key);
+		return rows == null ? null : rows.orderOfRow(key);
 	}
 
-	/** The rows directly in `group` (the workspace root for ROOT_GROUP), in the order the tree shows them. */
-	public function siblings(group:String):Array<String> {
-		var items = itemsOf(group);
-		return items == null ? [] : items.copy();
+	/** The rows of the workspace a group, session or terminal row belongs to. */
+	public function rowsOf(key:Null<String>):Null<WorkbenchRows> {
+		var row = WorkbenchRowKey.parse(key);
+		return row == null ? null : rows(row.workspace);
 	}
 
 	/** Moves the insertion line to the upper (or lower) edge of `key`, or removes it; the rows rebuild only when it changes. */
@@ -374,10 +258,6 @@ class WorkbenchTreeModel implements TreeViewModel {
 		return probe == null ? null : probe.centre();
 	}
 
-	/** The rows a session or terminal in `group` joins: the group's, or the workspace's own (`groupRoots`) at its root. */
-	function itemsOf(group:String):Null<Array<String>>
-		return WorkspaceProtocol.isRoot(group) ? groupRoots : children.get(WorkbenchRowKey.group(group));
-
 	public function rootCount():Int
 		return roots.length;
 
@@ -390,30 +270,35 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function rootKeyAt(index:Int):String
 		return roots[index];
 
-	public function childCount(key:String):Int {
+	function itemsUnder(key:String):Null<Array<String>> {
 		var items = children.get(key);
+		if (items != null) return items;
+		var rows = rowsOf(key);
+		return rows == null ? null : rows.rowsUnder(key);
+	}
+
+	public function childCount(key:String):Int {
+		var items = itemsUnder(key);
 		return items == null ? 0 : items.length;
 	}
 
 	public function childKeyAt(key:String, index:Int):String {
-		var items = children.get(key);
+		var items = itemsUnder(key);
 		if (items == null)
 			throw "Unknown tree branch";
 		return items[index];
 	}
 
-	public function initiallyExpanded(key:String):Bool
-		return key == openRow || WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) && groupRoots.indexOf(key) >= 0;
+	/** A workspace row first shown as the open one starts expanded, and so does every workspace's top-level group. */
+	public function initiallyExpanded(key:String):Bool {
+		if (startsExpanded.get(key) == true) return true;
+		var row = WorkbenchRowKey.parse(key), rows = rowsOf(key);
+		return row != null && row.kind == WorkbenchRowKind.Group && rows != null && rows.top.indexOf(key) >= 0;
+	}
 
 	/** True for a row the tree draws as expandable even without children: every workspace, open or not. */
 	public function expandable(key:String):Bool
 		return childCount(key) > 0 || WorkbenchRowKey.workspaceId(key) != null;
-
-	/** The workspace whose groups the tree shows, or null. */
-	public function groupWorkspace():Null<MachineWorkspace> {
-		var id = WorkbenchRowKey.workspaceId(groupParent);
-		return id == null ? null : workspaces.get(id);
-	}
 
 	public function estimatedExtent():Float
 		return WorkbenchSessionLabel.ROW_HEIGHT;
@@ -427,68 +312,30 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function revision():Int
 		return version;
 
-	/** Claude and Pi continue the same conversation when a prompt arrives; a Codex session is only disconnected. */
-	public static function agentStateLabel(state:String, ?provider:String):String {
-		return switch (state) {
-			case "reconnecting": "Reconnecting…";
-			case "reconnect-failed": "Session unavailable";
-			// Stopped with the service; a message (or Resume) continues the same conversation.
-			case "disconnected": provider == "claude" || provider == "pi" ? "Resumable" : "Disconnected";
-			default: state;
-		};
-	}
-
 	public function buildItem(key:String):View {
-		if (WorkbenchRowKey.isForeign(key)) return foreignItem(key);
 		if (WorkbenchRowKey.isMachineRow(key)) return machineItem(key);
-		var row = WorkbenchRowKey.parse(key);
-		if (row == null) return new Text("");
+		var row = WorkbenchRowKey.parse(key), rows = rowsOf(key);
+		if (row == null || rows == null) return new Text("");
 		var editing:Null<View> = null;
-		if (row.kind == WorkbenchRowKind.Group && groupEditor != null) editing = groupEditor(row.id);
-		if (row.kind == WorkbenchRowKind.Agent && agentEditor != null) editing = agentEditor(row.id);
+		if (row.kind == WorkbenchRowKind.Group && groupEditor != null) editing = groupEditor(key);
+		if (row.kind == WorkbenchRowKind.Agent && agentEditor != null) editing = agentEditor(key);
 		if (editing != null) return editing;
-		var label = rowLabel(row);
+		var label = rowLabel(key, row, rows);
 		var probed = new WorkbenchRowProbe(label, function(node) { nodes.set(key, new ProbedRow(key, node, ++probes)); layout++; });
 		return key == insertion ? new WorkbenchInsertionLine(probed, insertionAfter) : probed;
 	}
 
-	function rowLabel(row:WorkbenchRowKey):View {
-		switch row.kind {
-			case WorkbenchRowKind.Group:
-				var group = groups.get(row.id);
-				if (group != null) {
-					var owner = groupWorkspace();
-					return new WorkbenchGroupLabel(group.name, directory(group), firstFolder(), owner == null ? null : owner.name, anotherWindow(owner == null ? null : owner.id, group.id));
-				}
-			case WorkbenchRowKind.Agent:
-				var a = agents.get(row.id);
-				if (a != null) return new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state, a.provider));
-			case WorkbenchRowKind.Terminal:
-				var terminal = terminals.get(row.id);
-				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state, terminal.agentProvider));
+	/** A group, session or terminal row of any workspace: its name and state as its source says. */
+	function rowLabel(key:String, row:WorkbenchRowKey, rows:WorkbenchRows):View {
+		if (row.kind == WorkbenchRowKind.Group) {
+			var group = rows.groups.get(row.id);
+			if (group == null) return new Text("");
+			var first = firstFolder(row.workspace), owner = workspaces.get(row.workspace);
+			var folder = rows.directory(group, first);
+			return new WorkbenchGroupLabel(group.name, folder, first, owner == null ? null : owner.name, anotherWindow(row.workspace, group.id));
 		}
-		return new Text("");
-	}
-
-	/** A row of a workspace this window is not attached to: its name and state as the catalog says, nothing to edit. */
-	function foreignItem(key:String):View {
-		var row = WorkbenchRowKey.parseForeign(key);
-		if (row == null) return new Text("");
-		switch row.kind {
-			case WorkbenchRowKind.Group:
-				var group = foreignGroups.get(key);
-				if (group != null) {
-					var owner = workspaces.get(group.workspace);
-					return new WorkbenchGroupLabel(group.group.name, group.group.cwd, null, owner == null ? null : owner.name, anotherWindow(group.workspace, group.group.id));
-				}
-			case WorkbenchRowKind.Agent:
-				var session = foreignSessions.get(key);
-				if (session != null) return new WorkbenchSessionLabel(session.name, session.state, agentStateLabel(session.state, session.provider));
-			case WorkbenchRowKind.Terminal:
-				var terminal = foreignTerminals.get(key);
-				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state, terminal.agentProvider));
-		}
-		return new Text("");
+		var shown = rows.label(key);
+		return shown == null ? new Text("") : new WorkbenchSessionLabel(shown.name, shown.state, shown.text);
 	}
 
 	/**
@@ -512,59 +359,36 @@ class WorkbenchTreeModel implements TreeViewModel {
 			var watched = view.watched, state = watched == null ? null : watched.get(id);
 			return WorkbenchMachineLabel.workspace(entry, key == openRow, state, anotherWindow(id, null));
 		}
-		var error = view.error;
-		return switch WorkbenchRowKey.statusKind(key) {
-			case "empty": WorkbenchMachineLabel.status("No workspaces yet. Make one to hold groups, sessions and terminals.");
+		var error = view.error, kind = WorkbenchRowKey.statusKind(key);
+		if (kind == WorkbenchRowKey.NOTE_EMPTY) return WorkbenchMachineLabel.status("No sessions yet");
+		if (kind == WorkbenchRowKey.NOTE_LOADING) return WorkbenchMachineLabel.status("Loading…");
+		if (kind == WorkbenchRowKey.NOTE_IDLE) return WorkbenchMachineLabel.status("Not running · click to open");
+		if (kind == WorkbenchRowKey.NOTE_FAILED) return WorkbenchMachineLabel.status("Could not connect: " + openFailure, true);
+		return switch kind {
+			case "empty": WorkbenchMachineLabel.status(view.manages ? "No workspaces yet. Make one to hold groups, sessions and terminals."
+				: "No workspaces are shared with this device yet.");
 			case "loading": WorkbenchMachineLabel.status("Looking for this machine's workspaces…");
 			case "error": WorkbenchMachineLabel.status(error == null ? "" : error, true);
 			default: new Text("");
 		};
 	}
 
-	public function directory(group:WorkspaceGroup):Null<String> {
-		var folder = GroupFolders.nearest(groups, group);
-		return folder == null ? firstFolder() : folder;
+	/** The folder `group` of workspace `id` works in: its own or inherited, else the workspace's first folder. */
+	public function directory(id:String, group:WorkspaceGroup):Null<String> {
+		var rows = rows(id);
+		return rows == null ? firstFolder(id) : rows.directory(group, firstFolder(id));
 	}
 
 	/**
-		The open workspace's first folder, where its root and folderless groups work: the catalog's first attached folder,
-		else the service's root. A service keeps the folder it started in, so a workspace started in its scratch folder
-		still names that after a folder is attached.
+		Workspace `id`'s first folder, where its root and folderless groups work: its first attached folder, else its
+		service's root as its lists name it, else its scratch folder. A service keeps the folder it started in, so a
+		workspace started in its scratch folder still names that after a folder is attached.
 	**/
-	public function firstFolder():Null<String> {
-		var owner = groupWorkspace();
-		return owner != null && owner.folders.length > 0 ? owner.folders[0] : workspaceRoot;
-	}
-
-	/** The position after every placed row in `parent` (null for the workspace root): one step past the last, or 0 in a group with none. */
-	public function nextOrder(parent:Null<String>):Int {
-		var last:Null<Int> = null, into = parent == null ? WorkspaceProtocol.ROOT_GROUP : parent;
-		for (key => place in places) {
-			var order = place.order;
-			if (order != null && groupOfRow(key) == into && (last == null || order > last)) last = order;
-		}
-		return last == null ? 0 : Std.int(Math.min(WorkspaceProtocol.MAX_ORDER, last + WorkbenchOrder.STEP));
-	}
-}
-
-/** Where a row sorts among its siblings: by position when it has one, then by kind, then by arrival. */
-private class RowPlace {
-	public final order:Null<Int>;
-	final kind:Int;
-	final arrival:Int;
-
-	public function new(order:Null<Int>, kind:Int, arrival:Int) {
-		this.order = order; this.kind = kind; this.arrival = arrival;
-	}
-
-	/** Placed rows first, by position; ties by kind (groups, terminals, sessions), then groups by id and the rest as they arrived. */
-	public static function compare(a:RowPlace, b:RowPlace, keyA:String, keyB:String):Int {
-		var left = a.order, right = b.order;
-		if (left != null && right == null) return -1;
-		if (left == null && right != null) return 1;
-		if (left != null && right != null && left != right) return left - right;
-		if (a.kind != b.kind) return a.kind - b.kind;
-		return a.kind == 0 ? Reflect.compare(keyA, keyB) : a.arrival - b.arrival;
+	public function firstFolder(id:Null<String>):Null<String> {
+		var entry = id == null ? null : workspaces.get(id), rows = rows(id);
+		if (entry != null && entry.folders.length > 0) return entry.folders[0];
+		if (rows != null && rows.root != null) return rows.root;
+		return entry == null ? null : entry.scratch;
 	}
 }
 
@@ -608,31 +432,5 @@ private class ProbedRow {
 			var bounds = measured.globalBounds();
 			return bounds.y + bounds.height / 2;
 		} catch (_:Dynamic) return null;
-	}
-}
-
-/** One workspace's foreign rows built from `mirror` at `revision`: shared by every update until the catalog changes. */
-private class ForeignProjection {
-	public final mirror:WorkspaceCatalogMirror;
-	public final revision:Int;
-	public final top:Array<String> = [];
-	public final kids:Map<String, Array<String>> = [];
-	public final groups:Map<String, ForeignGroup> = [];
-	public final terminals:Map<String, CatalogTerminal> = [];
-	public final sessions:Map<String, CatalogSession> = [];
-	public final places:Map<String, RowPlace> = [];
-
-	public function new(mirror:WorkspaceCatalogMirror) {
-		this.mirror = mirror; revision = mirror.revision;
-	}
-}
-
-/** A group of another workspace, with the workspace's id. */
-private class ForeignGroup {
-	public final workspace:String;
-	public final group:WorkspaceGroup;
-
-	public function new(workspace:String, group:WorkspaceGroup) {
-		this.workspace = workspace; this.group = group;
 	}
 }

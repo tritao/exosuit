@@ -35,13 +35,14 @@ class WorkbenchDragTestMain {
    turn:null,workspaceRoot:"/workspace"};
   var agents:AgentCatalog = {instance:"owner",root:"/workspace",records:[record],status:""};
   function canDrop(a:String,b:String):Bool return WorkbenchDropRules.canDrop(a,b,catalog,agents,null);
-  require(canDrop("t:term","g:two") && canDrop("a:agent","g:two") && canDrop("g:one","g:two"),"valid moves rejected");
-  require(!canDrop("g:one","g:child") && !canDrop("g:one","g:one"),"group cycle accepted");
-  require(!canDrop("t:term","g:one") && !canDrop("a:agent","g:missing") && !canDrop("g:one","t:term"),"invalid destination accepted");
-  agents.instance="other"; require(!canDrop("a:agent","g:two"),"foreign catalog accepted"); agents.instance="owner";
+  require(canDrop("t:|term","g:|two") && canDrop("a:|agent","g:|two") && canDrop("g:|one","g:|two"),"valid moves rejected");
+  require(!canDrop("g:|one","g:|child") && !canDrop("g:|one","g:|one"),"group cycle accepted");
+  require(!canDrop("t:|term","g:|one") && !canDrop("a:|agent","g:|missing") && !canDrop("g:|one","t:|term"),"invalid destination accepted");
+  agents.instance="other"; require(!canDrop("a:|agent","g:|two"),"a session list from another service accepted"); agents.instance="owner";
+  require(!canDrop("t:|term","g:elsewhere|two") && !canDrop("g:elsewhere|one","g:|two"),"a drop across workspaces accepted");
   function canDropRoot(a:String,b:String):Bool { return WorkbenchDropRules.canDrop(a,b,catalog,agents,"w:open"); }
-  require(canDropRoot("t:term","w:open") && canDropRoot("a:agent","w:open") && canDropRoot("g:child","w:open"),"workspace root drops rejected");
-  require(!canDropRoot("g:one","w:open") && !canDrop("t:term","w:open") && !canDropRoot("t:term","w:other"),"root drop accepted for a top-level group, without a root row or onto another workspace");
+  require(canDropRoot("t:|term","w:open") && canDropRoot("a:|agent","w:open") && canDropRoot("g:|child","w:open"),"workspace root drops rejected");
+  require(!canDropRoot("g:|one","w:open") && !canDrop("t:|term","w:open") && !canDropRoot("t:|term","w:other"),"root drop accepted for a top-level group, without a root row or onto another workspace");
   var saves=0;
   require(AgentMetadata.move(record,"one","two",catalog.groups,function() saves++) == null && saves==1,"agent move not persisted");
   require(record.cwd=="/original" && record.thread=="thread", "move changed native session identity");
@@ -53,7 +54,8 @@ class WorkbenchDragTestMain {
   try AgentMetadata.move(record,"two","one",catalog.groups,function() {throw "storage failure";}) catch (_:Dynamic) failed=true;
   require(failed && record.group=="two", "failed persistence changed live grouping");
   record.group="one";
-  var model=new WorkbenchTreeModel(); model.update(catalog,agents);
+  var revision=0;
+  var model=new WorkbenchTreeModel(); model.update({machine:{id:"m",name:"m",workspaces:[{id:"",name:"work",folders:[],scratch:null,revision:1}]},error:null,openWorkspace:"",revision:1,manages:true},[""=>{terminals:catalog,agents:agents,snapshot:null,revision:++revision}]);
   var fonts=haxeon.ui.FontCollection.create();
   fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
   var context=new UiContext(null,fonts);
@@ -61,7 +63,7 @@ class WorkbenchDragTestMain {
   var tree=new TreeView("drag-tree",model,style);
   tree.canDragItem=function(_) return true; tree.canDropItem=canDrop;
   var drops=0,clicks=0;
-  tree.onItemDrop=function(a,b) {require(a=="t:term" && b=="g:two","wrong drop");drops++;};
+  tree.onItemDrop=function(a,b) {require(a=="t:|term" && b=="g:|two","wrong drop");drops++;};
   tree.onItemClicked=function(_,_) clicks++;
   var frame=new haxeon.ui.LayoutFrame(300,300);
   var root:RenderNode=null;
@@ -72,12 +74,12 @@ class WorkbenchDragTestMain {
    require(found!=null,"missing row "+key);return found.globalBounds();
   }
   submit();
-  var from=row("t:term"),to=row("g:two");
+  var from=row("t:|term"),to=row("g:|two");
   context.pointerDown(100,from.y+15,0); context.pointerUp(100,from.y+15,0);submit();
   require(clicks==1 && drops==0,"drag support broke normal clicks");
   context.pointerDown(100,from.y+15,0);context.pointerMove(100,to.y+15);submit();
   context.pointerUp(100,to.y+15,0);submit();
-  require(drops==1 && clicks==1 && tree.selectedKey=="t:term","drag failed, lost selection or activated source");
+  require(drops==1 && clicks==1 && tree.selectedKey=="t:|term","drag failed, lost selection or activated source");
   context.pointerDown(100,from.y+15,0);context.pointerMove(100,to.y+15);submit();
   context.key(UiEventKind.KeyDown,UiKey.Escape);context.pointerUp(100,to.y+15,0);submit();
   require(drops==1,"Escape failed to cancel drag");
@@ -97,15 +99,15 @@ class WorkbenchDragTestMain {
   tree=replacement;submit();context.pointerUp(100,to.y+15,0);submit();
   require(drops==2,"declarative rebuild lost the drag gesture");
   catalog.groups.push({id:"nested",name:"Nested",parent:"two",cwd:null,revision:1});
-  model.update(catalog,agents);tree.setExpanded("g:two",false);submit();
-  from=row("t:term");to=row("g:two");
+  model.update({machine:{id:"m",name:"m",workspaces:[{id:"",name:"work",folders:[],scratch:null,revision:1}]},error:null,openWorkspace:"",revision:1,manages:true},[""=>{terminals:catalog,agents:agents,snapshot:null,revision:++revision}]);tree.setExpanded("g:|two",false);submit();
+  from=row("t:|term");to=row("g:|two");
   context.pointerDown(100,from.y+15,0);context.pointerMove(100,to.y+15);submit();
   context.animations.advance(0.65);submit();
-  require(tree.isExpanded("g:two"),"hover did not expand destination");
+  require(tree.isExpanded("g:|two"),"hover did not expand destination");
   context.pointerCancel(0,100,to.y+15);submit();
   for (i in 0...40) catalog.terminals.push({id:"extra-"+i,name:"Extra",group:"one",cwd:"/original",instance:"owner",
    state:"running",exitCode:0,available:true,revision:Int64.ofInt(1)});
-  model.update(catalog,agents);submit();from=row("t:term");
+  model.update({machine:{id:"m",name:"m",workspaces:[{id:"",name:"work",folders:[],scratch:null,revision:1}]},error:null,openWorkspace:"",revision:1,manages:true},[""=>{terminals:catalog,agents:agents,snapshot:null,revision:++revision}]);submit();from=row("t:|term");
   context.pointerDown(100,from.y+15,0);context.pointerMove(100,295);submit();
   context.animations.advance(0.25);submit();
   require(tree.controller.targetY>0,"edge drag did not scroll tree");

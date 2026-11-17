@@ -33,9 +33,10 @@ class RpcTerminalBackend implements TerminalBackend {
   var controlUnavailable:Bool = false;
   var controlOffered:Bool = false;
   var terminalState:String = "running";
-  var historyError:Bool = false;
   var historyAvailable:Bool = true;
   var restartable:Bool = false;
+  /** The view has seen the terminal's state once since it was opened. */
+  var openedOnce:Bool = false;
   var restartError:Null<String>;
   var pending:Bool = false;
   var closed:Bool = false;
@@ -50,6 +51,15 @@ class RpcTerminalBackend implements TerminalBackend {
   var writeBytes:Int = 0;
   var writing:Bool = false;
   var failure:Null<String>;
+  /** Typed input the terminal has not answered with output yet: its "terminal-key" mark is out, "terminal-echo" waits. */
+  var echoAwaited:Bool = false;
+  /** Output answering that input arrived; it is marked once the emulator has it. */
+  var echoArrived:Bool = false;
+  /**
+    What was typed and not sent when the terminal failed (Workbench design Q11): kept on screen with the cause, and
+    never sent by itself, not even after Retry. Dismiss clears it.
+  **/
+  var unsentInput:Null<String>;
   public var name(default, null):Null<String>;
   var failureReported:Bool = false;
   var output:Array<TerminalEvent> = [];
@@ -128,8 +138,8 @@ class RpcTerminalBackend implements TerminalBackend {
     Sys.putEnv(CLIENT_KEY, Sys.getPid() + ":" + key);
   }
   public function id():String return terminalId;
-  /** A Claude Code or Codex terminal: restarting it continues the same conversation. */
-  public function resumesConversation():Bool return agentProvider == "claude" || agentProvider == "codex";
+  /** A Claude Code, Codex or Pi terminal: restarting it continues the same conversation. */
+  public function resumesConversation():Bool return agentProvider != null;
   public function configureAgent(provider:String):Void {
     if (!create || attached || pending || ["codex","claude","pi"].indexOf(provider) < 0)
       throw "Agent launch mode must be selected before creating the terminal";
@@ -139,6 +149,8 @@ class RpcTerminalBackend implements TerminalBackend {
   public function usesNotifications():Bool return eventDriven;
   /** False once the terminal failed or closed: write throws, so input must not reach it. */
   public function isAvailable():Bool return !closed && failure == null;
+  /** The terminal failed: what is typed now is kept on screen as not sent (`write`), never sent. */
+  public function keepsUnsentInput():Bool return !closed && failure != null;
   public function isSynchronized():Bool return synchronized;
   public function canControl():Bool return controller && terminalState == "running";
   public function hasControlGrant():Bool {
@@ -147,9 +159,11 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   /** Normal writable sessions need no persistent control notice. */
   public function needsControlNotice():Bool
-    return failure != null || !attached || !synchronized || historyError || terminalState != "running" || controlUnavailable || !hasControlGrant() || controlPending || !controller;
+    return failure != null || unsentInput != null || !attached || !synchronized || terminalState != "running" || controlUnavailable || !hasControlGrant() || controlPending || !controller;
   public function controlStatus():String {
-    if (failure != null) return "Terminal unavailable: " + failure;
+    // The unsent text comes first: a long cause is cut at the strip's end, and is in the notification too.
+    if (failure != null) return (unsentInput == null ? "" : "Not sent: " + unsentPreview() + " · ") + "Terminal unavailable: " + failure;
+    if (unsentInput != null && attached && synchronized) return "Not sent before the failure: " + unsentPreview() + " · type it again to send it";
     if (!attached) {
       var endpoint = provider();
       if (endpoint != null && endpoint.rootPath() != null && !serves(endpoint))
@@ -157,16 +171,15 @@ class RpcTerminalBackend implements TerminalBackend {
       return "Connecting to workspace terminal…";
     }
     if (!synchronized) return "Loading terminal history…";
-    if (historyError) return "Terminal history could not be saved";
     if (terminalState == "starting") return "Starting terminal…";
     if (terminalState != "running") {
       if (controlPending) return "Restarting terminal…";
       if (restartError != null) return restartError;
       if (!hasControlGrant()) return "Session ended · restarting requires terminal control permission";
-      if (!restartable || controlUnavailable) return "Session ended · update the workspace service in Remote Access to restart";
+      if (!restartable || controlUnavailable) return "Session ended · this workspace service cannot restart it";
       return historyAvailable ? "Session ended · saved history" : "Session ended · no saved history";
     }
-    if (controlUnavailable) return "Read only · update the workspace daemon to control this terminal";
+    if (controlUnavailable) return "Read only · this workspace service does not allow control of this terminal";
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
     if (controller) return "You are controlling this terminal";
@@ -174,7 +187,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return failure != null ? (closed ? "" : "Retry") : !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || terminalState == "starting" ? "" : terminalState != "running" ? (restartable ? "Restart Terminal" : "") : controller ? "Release" : "Take control";
+  public function controlAction():String return failure != null ? (closed ? "" : "Retry") : unsentInput != null && attached && synchronized ? "Dismiss" : !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || terminalState == "starting" ? "" : terminalState != "running" ? (restartable ? "Restart Terminal" : "") : controller ? "Release" : "Take control";
   /** This view holds the terminal's control lease. */
   public function isController():Bool return attached && controller;
   /** For a host that held control before its process was killed and reopens the terminal by itself (the phone): another
@@ -194,7 +207,7 @@ class RpcTerminalBackend implements TerminalBackend {
     controlReleased = true;
   }
   function asking():Bool
-    return controlOffered && failure == null && attached && synchronized && !historyError && terminalState == "running" && !controlUnavailable && hasControlGrant() && !controlPending && !controller;
+    return controlOffered && failure == null && attached && synchronized && terminalState == "running" && !controlUnavailable && hasControlGrant() && !controlPending && !controller;
   /** Attaches again after a failure, from the service's current screen, as a view that was just opened does. */
   function retry():Void {
     if (closed || failure == null) return;
@@ -211,8 +224,21 @@ class RpcTerminalBackend implements TerminalBackend {
     snapshotRetryAt = 0;
     snapshotExpiries = 0;
   }
+  /** The unsent text as one quoted line: line ends shown as ⏎, other control characters dropped, long text shortened. */
+  function unsentPreview():String {
+    var text = unsentInput == null ? "" : unsentInput, shown = new StringBuf(), count = 0;
+    for (index in 0...text.length) {
+      var code = StringTools.fastCodeAt(text, index);
+      if (code == 13 || code == 10) { if (code == 13 || index == 0 || StringTools.fastCodeAt(text, index - 1) != 13) shown.add("⏎"); }
+      else if (code >= 32) shown.addChar(code);
+      else continue;
+      if (++count >= 80) { shown.add("…"); break; }
+    }
+    return "“" + shown.toString() + "”";
+  }
   public function activateControl():Void {
     if (failure != null) { retry(); return; }
+    if (unsentInput != null) { unsentInput = null; return; }
     if (terminalState != "running") { restartShell(); return; }
     controlReleased = controller;
     setControl(!controller, true);
@@ -275,7 +301,6 @@ class RpcTerminalBackend implements TerminalBackend {
     terminalState = info.state;
     if (terminalState == "running") restartError = null;
     if (info.agentProvider != null) agentProvider = info.agentProvider;
-    historyError = info.historyError == true;
     historyAvailable = info.historyAvailable != false;
     restartable = info.restartable == true;
     if (!controller && info.controller == true && theme != null) themePending = true;
@@ -315,18 +340,38 @@ class RpcTerminalBackend implements TerminalBackend {
     };
     failure = message;
     attached = false;
+    if (writeBytes > 0) {
+      var typed = new StringBuf();
+      if (unsentInput != null) typed.add(unsentInput);
+      for (part in writes) typed.add(part.toString());
+      unsentInput = typed.toString();
+    }
     writes.resize(0);
     writeBytes = 0;
   }
   public function write(bytes:Bytes):Void {
-    if (closed || failure != null) throw "Terminal is unavailable";
+    if (closed) throw "Terminal is unavailable";
+    if (failure != null) {
+      // Typed into a terminal that failed: kept on screen with the cause, never sent (Workbench design Q11).
+      var kept = (unsentInput == null ? "" : unsentInput) + bytes.toString();
+      if (kept.length > 65536) throw "Terminal input queue exceeds limit";
+      unsentInput = kept;
+      return;
+    }
     if (attached && !controller) return;
     if (bytes == null || bytes.length == 0) return;
     if (writeBytes + bytes.length > 65536) throw "Terminal input queue exceeds limit";
     writes.push(bytes.sub(0, bytes.length));
     terminalsession.TerminalLatencyTrace.mark("terminal.input.queued");
+    if (!echoAwaited) {
+      // Keystroke -> echo on screen, timed in the app (perf-harness gui_scenarios/terminal_echo.py).
+      echoAwaited = true;
+      ConnectTimeline.mark("terminal-key", root, terminalId);
+    }
     writeBytes += bytes.length;
     interactiveUntil = Sys.time() + 0.25;
+    // Typing: the pipes this input and its echo cross are polled; keep their polls on time (FineTimer).
+    workspace.transport.FineTimer.hold(2.0);
     nextRead = 0;
     var c = connection;
     if (c != null && c.isOpen()) flushInput(c);
@@ -357,6 +402,7 @@ class RpcTerminalBackend implements TerminalBackend {
       if (current(c, epoch)) {
         writing = false;
         terminalsession.TerminalLatencyTrace.mark("terminal.input.acknowledged");
+        if (echoAwaited) ConnectTimeline.mark("terminal-input-acknowledged", root, terminalId);
         nextRead = 0;
         flushInput(c);
       }
@@ -544,6 +590,7 @@ class RpcTerminalBackend implements TerminalBackend {
           }
           pending = false;
           attached = true;
+          ConnectTimeline.mark("terminal-attached", root, terminalId);
           eventDriven = info.notifications == true && releaseEvents != null;
           create = false;
           // An attach starts from the service's history and current screen; replay continues from its cursor. A view
@@ -606,10 +653,20 @@ class RpcTerminalBackend implements TerminalBackend {
     var events = output;
     output = [];
     for (event in events) emit(event);
+    if (echoArrived) {
+      echoArrived = false;
+      ConnectTimeline.markAtNextFrame("terminal-echo", root, terminalId);
+    }
     // Readiness follows application to the emulator, never just receipt of an RPC reply.
     if (synchronizationPending) {
       synchronizationPending = false;
       synchronized = true;
+      // Opening a Claude, Codex or Pi terminal whose program had ended continues its conversation, as Restart does. It
+      // sends no text. A program that ends while the view is open stays ended until asked.
+      if (!openedOnce) {
+        openedOnce = true;
+        if (agentProvider != null && ended()) restartShell();
+      }
     }
     fitEndedView();
     if (output.length > 0) {
@@ -634,6 +691,7 @@ class RpcTerminalBackend implements TerminalBackend {
     replayDirty = false;
     var requested = replayCursor;
     terminalsession.TerminalLatencyTrace.mark("terminal.replay.requested");
+    if (echoAwaited) ConnectTimeline.mark("terminal-replay-requested", root, terminalId);
     c.call(WorkspaceTerminalProtocol.REPLAY, {
       workspace:"workspace", instance:instance, id:terminalId, cursor:requested
     }, 2000, function(value) {
@@ -663,6 +721,11 @@ class RpcTerminalBackend implements TerminalBackend {
       if (bytes > 65536 || nextOffset > value.terminal.end) { fail("Invalid terminal replay bounds"); return; }
       if (!observe(value.terminal)) return;
       terminalsession.TerminalLatencyTrace.mark("terminal.replay.received");
+      if (echoAwaited && bytes > 0) {
+        echoAwaited = false;
+        echoArrived = true;
+        ConnectTimeline.mark("terminal-echo-received", root, terminalId);
+      }
       if (value.events.length > 0) restoreStreamGeometry();
       for (event in value.events) {
         if (event.data.length == 0) { streamColumns = event.columns; streamRows = event.rows; }

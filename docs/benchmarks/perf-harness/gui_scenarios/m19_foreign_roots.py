@@ -37,19 +37,18 @@ def run(gui):
     open_by_double_click(gui, alpha, "Alpha")
     show_workbench(gui)
     work = ensure_group(gui, alpha)
-    term = new_terminal(gui, "g:" + work)
+    term = new_terminal(gui, open_row(gui, "g", work))
     only(gui, "Alpha", "Alpha", os.path.join(fixture, "alpha"))
     gui.shot("alpha")
 
     gui.step("a group whose folder is Gamma's: 'Open folder' must not add Gamma to Alpha")
     show_workbench(gui)
     gamma = os.path.join(fixture, "gamma")
-    with open(os.path.join(gui.dir, "pick-folder.txt"), "w") as f:
-        f.write(gamma)
-    menu(gui, "g:" + work, "Change Working Directory" + ELLIPSIS)
+    menu(gui, open_row(gui, "g", work), "Change Working Directory" + ELLIPSIS)
+    gui.answer_dialog(paths=[gamma])
     gui.wait("the group's folder is Gamma's", lambda s: any(g["id"] == work and g["cwd"] and norm(g["cwd"]) == norm(gamma) for g in s["state"]["groups"]), 15)
     show_workbench(gui)
-    menu(gui, "g:" + work, "Open folder")
+    menu(gui, open_row(gui, "g", work), "Open folder")
     time.sleep(2)
     alpha_folder = [norm(os.path.join(fixture, "alpha"))]
     gui.check("Alpha's open projects are still just Alpha's folder", lambda s: [norm(r) for r in s["state"]["projectRoots"]] == alpha_folder, 10,
@@ -70,16 +69,16 @@ def run(gui):
 
     gui.step("back to Alpha through its terminal row")
     show_workbench(gui)
-    foreign_group = "f:g" + alpha + "|" + work
-    foreign_term = "f:t" + alpha + "|" + term
-    if not gui.find(gui.snapshot(), foreign_group):
+    alpha_group = row_key("g", alpha, work)
+    alpha_term = row_key("t", alpha, term)
+    if not gui.find(gui.snapshot(), alpha_group):
         row_ = gui.element("w:" + alpha)
         gui.click(row_, fx=min(0.04, 10.0 / row_["w"]))
-    gui.wait("Alpha's group in the tree", lambda s: gui.find(s, foreign_group), 45)
-    if not gui.find(gui.snapshot(), foreign_term):
-        group_row = gui.element(foreign_group)
+    gui.wait("Alpha's group in the tree", lambda s: gui.find(s, alpha_group), 45)
+    if not gui.find(gui.snapshot(), alpha_term):
+        group_row = gui.element(alpha_group)
         gui.click(group_row, fx=min(0.04, 10.0 / group_row["w"]) + 0.07)
-    gui.click(gui.element(foreign_term))
+    gui.click(gui.element(alpha_term))
     time.sleep(0.4)
     gui.chord("enter")
     gui.wait("the window follows to Alpha", lambda s: s["state"]["contextWorkspace"] == alpha, 40)

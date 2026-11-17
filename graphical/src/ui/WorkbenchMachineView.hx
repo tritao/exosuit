@@ -2,41 +2,39 @@ package ui;
 
 import suit.MachineCatalog.MachineState;
 import workspace.client.WorkspaceCatalogMirror;
+import ui.WorkbenchRows.WorkbenchRowSource;
 
 /**
-	What the tree shows of a workspace this window is not attached to: whether its service runs, whether its catalog
-	connection is live, and the catalog last read (kept while the connection is down).
+	What a workspace's row says of it: whether its service runs, whether the window's link to it is live, and its
+	catalog as last read (the link's copy, else the snapshot its service left).
 **/
 typedef WorkbenchWorkspaceState = {
 	/** suit reports the workspace's service as running. */
 	var running:Bool;
 	/** The catalog connection is open with a complete copy. */
 	var live:Bool;
-	/** The service is being started because the workspace was expanded while idle. */
+	/** The window's link is starting the service, which was idle. */
 	var starting:Bool;
 	var catalog:Null<WorkspaceCatalogMirror>;
 }
 
-/** This machine as the Workbench tree shows it (docs/architecture/0006-workspaces-without-folders.md). */
+/** A machine as the Workbench tree shows it (docs/architecture/0006-workspaces-without-folders.md); see WorkbenchMachine. */
 typedef WorkbenchMachineView = {
-	/** This machine's name and workspaces; null until suit answers. */
+	/** The machine's name and workspaces; null until suit answers. */
 	var machine:Null<MachineState>;
 	/** Why suit did not answer, or null. */
 	var error:Null<String>;
-	/** The machine workspace open in this window, or null when this window's folders are not one of them. */
+	/** The machine workspace open in this window, or null when it shows none. */
 	var openWorkspace:Null<String>;
-	/** This window's folders: the attached service's groups are the open workspace's while it serves one of them. */
-	var openRoots:Array<String>;
-	/**
-		The root of the open workspace's own service once this window is attached to it, else null. That service keeps the folder
-		it started in (a scratch folder, or a folder detached since), so its groups are the open workspace's whatever this window's folders are now.
-	**/
-	@:optional var servedRoot:Null<String>;
 	/** Changes whenever `machine` or `error` does. */
 	var revision:Int;
-	/** Per workspace id (M19 Phase 6); absent in a view that knows only the attached workspace. */
+	/** The window may change the machine's workspaces (create, rename, folders, remove): suit's on this machine, not a device's. */
+	var manages:Bool;
+	/** Per workspace id (M19 Phase 6). */
 	@:optional var watched:Map<String, WorkbenchWorkspaceState>;
-	/** Changes whenever a catalog connection or a catalog does. */
+	/** Each workspace's rows, by id: the lists of the window's link to it, else a copy of its catalog. */
+	@:optional var rows:Map<String, WorkbenchRowSource>;
+	/** Changes whenever a link, its lists or a catalog does. */
 	@:optional var watchRevision:Int;
 	/** Where the other editor windows are focused (M19 Phase 8): this window's own is left out. */
 	@:optional var windows:Array<suit.WindowFocus>;
