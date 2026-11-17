@@ -38,7 +38,7 @@ class ReplacementBackupStore {
 			for (field in 0...4) {
 				var separator = content.indexOf(":", offset);
 				if (separator < 0) throw "corrupt replacement backup lengths";
-				lengths.push(Std.parseInt(content.substring(offset, separator)));
+				lengths.push(Std.parseInt(content.substring(offset, separator)) ?? 0);
 				offset = separator + 1;
 			}
 			var pathLength = lengths[0], textLength = lengths[1], expectedLength = lengths[2], matchCount = lengths[3];

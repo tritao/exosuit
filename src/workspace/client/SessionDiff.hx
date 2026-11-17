@@ -38,10 +38,10 @@ class SessionDiff {
       if (!inHunk && StringTools.startsWith(line, "--- ")) { hasOld = true; oldPath = headerPath(line, "a/"); updateTitle(); }
       else if (!inHunk && StringTools.startsWith(line, "+++ ")) { hasNew = true; deleted = StringTools.trim(line.substr(4)) == "/dev/null"; newPath = headerPath(line, "b/"); updateTitle(); }
       else if (hunk.match(line)) {
-        kind = "hunk"; oldLine = Std.parseInt(hunk.matched(1)); newLine = Std.parseInt(hunk.matched(3));
+        kind = "hunk"; oldLine = Std.parseInt(hunk.matched(1)) ?? 0; newLine = Std.parseInt(hunk.matched(3)) ?? 0;
         var oldCount = hunk.matched(2), newCount = hunk.matched(4);
-        oldRemaining = oldCount == null || oldCount == "" ? 1 : Std.parseInt(oldCount);
-        newRemaining = newCount == null || newCount == "" ? 1 : Std.parseInt(newCount);
+        oldRemaining = oldCount == null || oldCount == "" ? 1 : Std.parseInt(oldCount) ?? 0;
+        newRemaining = newCount == null || newCount == "" ? 1 : Std.parseInt(newCount) ?? 0;
         inHunk = oldRemaining > 0 || newRemaining > 0;
       } else if (inHunk && line.length > 0) {
         switch (line.charAt(0)) {

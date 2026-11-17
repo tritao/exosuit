@@ -72,7 +72,7 @@ class BuildController {
 		root.openCommandView(new CommandViewProvider("Run Task: ", entries, function(query) {}, function(entry, query, backwards) {
 			root.closeCommandView();
 			if (entry == null) return;
-			var index = Std.parseInt(entry.value);
+			var index = Std.parseInt(entry.value) ?? 0;
 			if (index >= 0 && index < tasks.length) run(project, tasks[index]);
 		}));
 		return true;

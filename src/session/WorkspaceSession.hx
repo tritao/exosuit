@@ -186,7 +186,7 @@ class WorkspaceSession {
 			var line = StringTools.endsWith(raw, "\r") ? raw.substring(0, raw.length - 1) : raw, separator = line.indexOf("=");
 			if (line.length == 0 || separator < 0) continue;
 			var key = line.substring(0, separator), value = line.substring(separator + 1);
-			if (key == "version") version = Std.parseInt(value);
+			if (key == "version") version = Std.parseInt(value) ?? 0;
 			else if (key == "workspace") result.savedWorkspace = workspace.SavedWorkspace.decode(haxe.crypto.Base64.decode(value).toString());
 			else if (key == "contextRecent" && value.length <= 32768 && result.recent.length < workspace.ActiveContext.RECENT_LIMIT) {
 				var fields = value.split(":");
@@ -326,7 +326,7 @@ class WorkspaceSession {
 	}
 
 	static function nonNegativeInteger(value:String):Bool {
-		var parsed = Std.parseInt(value);
+		var parsed = Std.parseInt(value) ?? 0;
 		return parsed >= 0 && Std.string(parsed) == value;
 	}
 

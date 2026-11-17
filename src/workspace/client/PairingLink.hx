@@ -49,7 +49,8 @@ class PairingLink {
 		var port = pattern.matched(3);
 		if (port == "")
 			port = null;
-		if (port != null && (Std.parseInt(port) == null || Std.parseInt(port) > 65535 || Std.parseInt(port) < 1))
+		var portNumber = port == null ? null : Std.parseInt(port);
+		if (port != null && (portNumber == null || portNumber > 65535 || portNumber < 1))
 			return null;
 		if (scheme != "wss" && host != "localhost" && host != "127.0.0.1")
 			return null;

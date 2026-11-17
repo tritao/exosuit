@@ -23,5 +23,5 @@ class LspPositionCodec {
 	}
 
 	static function dynamicInt(value:Dynamic):Int
-		return value == null ? -1 : Std.parseInt(Std.string(value));
+		return value == null ? -1 : Std.parseInt(Std.string(value)) ?? 0;
 }
