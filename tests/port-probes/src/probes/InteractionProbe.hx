@@ -43,35 +43,33 @@ class InteractionProbe {
 		var builds = harness.rootBuilds;
 		harness.ui.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
 		root = harness.submit();
-		var hoverBuilds = harness.rootBuilds - builds;
-		Report.info(7, "hover over the pane: rootBuilds+=" + hoverBuilds + " actions visible=" + actionsVisible(root));
-		Report.check(7, "hovering the pane shows the header actions in the next frame without requestFrame",
-			actionsVisible(root), "visible=" + actionsVisible(root) + " rootBuilds+=" + hoverBuilds);
-
-		builds = harness.rootBuilds;
-		harness.ui.pointerLeave();
-		root = harness.submit();
-		Report.check(7, "leaving the pane hides them again", !actionsVisible(root),
+		Report.check(7, "hovering the pane alone causes no root build, so the header actions stay hidden (T19 holds)",
+			!actionsVisible(root) && harness.rootBuilds == builds,
 			"visible=" + actionsVisible(root) + " rootBuilds+=" + (harness.rootBuilds - builds));
+		builds = harness.rootBuilds;
+		harness.requestFrame();
+		root = harness.submit();
+		Report.check(7, "with requestFrame() after the hover, the full build shows them",
+			actionsVisible(root), "visible=" + actionsVisible(root) + " rootBuilds+=" + (harness.rootBuilds - builds));
+		harness.ui.pointerLeave();
+		harness.requestFrame();
+		root = harness.submit();
+		Report.check(7, "leaving + requestFrame() hides them", !actionsVisible(root), "visible=" + actionsVisible(root));
 
 		builds = harness.rootBuilds;
 		harness.ui.focusWidget(Harness.first(root, AccessibilityRole.Button, "Inside").id);
 		root = harness.submit();
-		Report.check(7, "focusing a control in the pane shows them in the next frame without requestFrame",
-			actionsVisible(root), "visible=" + actionsVisible(root) + " rootBuilds+=" + (harness.rootBuilds - builds));
-
-		builds = harness.rootBuilds;
-		harness.ui.clearFocus();
-		root = harness.submit();
-		Report.check(7, "clearing focus hides them again", !actionsVisible(root),
+		Report.check(7, "focusing a control in the pane alone causes no root build, so they stay hidden",
+			!actionsVisible(root) && harness.rootBuilds == builds,
 			"visible=" + actionsVisible(root) + " rootBuilds+=" + (harness.rootBuilds - builds));
-
-		var plain = harness.rootBuilds;
-		harness.ui.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-		harness.submit();
-		harness.ui.pointerLeave();
-		harness.submit();
-		Report.info(7, "hover in and out with the pane's own visuals only: rootBuilds+=" + (harness.rootBuilds - plain));
+		harness.requestFrame();
+		root = harness.submit();
+		Report.check(7, "with requestFrame() after the focus change, the full build shows them", actionsVisible(root),
+			"visible=" + actionsVisible(root));
+		harness.ui.clearFocus();
+		harness.requestFrame();
+		root = harness.submit();
+		Report.check(7, "clearing focus + requestFrame() hides them", !actionsVisible(root), "visible=" + actionsVisible(root));
 		harness.dispose();
 	}
 

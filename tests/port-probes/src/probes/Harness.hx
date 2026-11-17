@@ -39,6 +39,9 @@ class Harness {
 	public function new(fonts:FontCollection, body:BuildContext->Array<View>, width:Float = 480, height:Float = 360) {
 		ui = new UiContext(null, fonts);
 		ui.buildContext.environment.reducedMotion = true;
+		// The probes count root builds and keep stale trees on purpose (T1, T5, T19); the retention check
+		// (HAXEON_UI_VERIFY_RETENTION, which test-windows.ps1 sets) would add builds and reject those trees.
+		ui.verifyRetentionEvery = 0;
 		this.body = body;
 		frame = new LayoutFrame(width, height);
 		var rootView = new RootView(this);

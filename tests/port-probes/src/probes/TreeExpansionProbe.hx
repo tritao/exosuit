@@ -49,6 +49,7 @@ class TreeExpansionProbe {
 		Report.check(3, shape + ": fixture starts with group collapsed",
 			Harness.hasText(root, "group") && !Harness.hasText(root, "a"), "group=" + Harness.hasText(root, "group"));
 		harness.ui.focusWidget(row(root, "group").id);
+		harness.submit();
 		root = harness.submit();
 
 		var builds = harness.rootBuilds, frames = harness.selfFrames;
@@ -64,6 +65,7 @@ class TreeExpansionProbe {
 		frames = harness.selfFrames;
 		harness.ui.focusWidget(row(root, "group").id);
 		harness.submit();
+		harness.submit();
 		harness.ui.key(UiEventKind.KeyDown, UiKey.Left);
 		harness.ui.key(UiEventKind.KeyUp, UiKey.Left);
 		root = harness.submit();
@@ -78,6 +80,7 @@ class TreeExpansionProbe {
 			Harness.hasText(root, "a"), "children shown=" + Harness.hasText(root, "a") + " rootBuilds+="
 			+ (harness.rootBuilds - builds));
 		harness.ui.pointerLeave();
+		harness.submit();
 		root = harness.submit();
 
 		builds = harness.rootBuilds;

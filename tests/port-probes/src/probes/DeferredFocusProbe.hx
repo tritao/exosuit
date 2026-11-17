@@ -42,20 +42,42 @@ class DeferredFocusProbe {
 
 		harness.ui.focusWidget(start);
 		harness.submit();
+		harness.submit();
 		var builds = harness.rootBuilds;
 		press();
 		harness.submit();
-		var reuseMoved = focused();
-		Report.check(2, "a deferred focus request with no requestFrame is NOT applied by the next (reuse) frame",
-			!reuseMoved, "focus moved=" + reuseMoved + " rootBuilds+=" + (harness.rootBuilds - builds));
-		builds = harness.rootBuilds;
+		Report.check(2, "from a shortcut handler with no requestFrame, focus does NOT move in the next (reuse) frame",
+			!focused(), "focus moved=" + focused() + " rootBuilds+=" + (harness.rootBuilds - builds));
+		harness.requestFrame();
 		harness.submit();
-		Report.info(2, "second idle frame after it: focus moved=" + focused() + " rootBuilds+=" + (harness.rootBuilds - builds));
+
+		harness.ui.focusWidget(start);
+		harness.submit();
+		var steady = harness.submit();
+		var idle = harness.submit();
+		Report.info(2, "steady frames before the callback request reuse the tree: " + (steady == idle));
+		builds = harness.rootBuilds;
+		harness.ui.buildContext.requestFocusAfterLayout(target);
+		harness.scheduleFrame();
+		var after = harness.submit();
+		var moved = focused();
+		Report.info(2, "the frame after the callback request returned the same tree object: " + (after == idle));
+		Report.check(2, "from code outside any input event (a callback), with only a host frame, focus does NOT move (reuse frame)",
+			!moved, "focus moved=" + moved + " rootBuilds+=" + (harness.rootBuilds - builds));
 		builds = harness.rootBuilds;
 		harness.requestFrame();
 		harness.submit();
-		Report.check(2, "the request is kept: the next full build (an unrelated requestFrame) applies it late",
-			focused(), "focus moved=" + focused() + " rootBuilds+=" + (harness.rootBuilds - builds));
+		Report.check(2, "...the request is kept and the next full build applies it", focused(),
+			"focus moved=" + focused() + " rootBuilds+=" + (harness.rootBuilds - builds));
+
+		harness.ui.focusWidget(start);
+		harness.submit();
+		builds = harness.rootBuilds;
+		harness.ui.buildContext.requestFocusAfterLayout(target);
+		harness.requestFrame();
+		harness.submit();
+		Report.check(2, "from a callback, requestFocusAfterLayout + requestFrame() moves focus in the next frame", focused(),
+			"focus moved=" + focused() + " rootBuilds+=" + (harness.rootBuilds - builds));
 
 		bumpTick = true;
 		harness.ui.focusWidget(start);
@@ -63,7 +85,7 @@ class DeferredFocusProbe {
 		builds = harness.rootBuilds;
 		press();
 		harness.submit();
-		Report.check(2, "requestFocusAfterLayout + requestFrame() in the handler moves focus in the next frame",
+		Report.check(2, "from a shortcut handler, requestFocusAfterLayout + requestFrame() moves focus in the next frame",
 			focused(), "focus moved=" + focused() + " rootBuilds+=" + (harness.rootBuilds - builds));
 		harness.dispose();
 	}

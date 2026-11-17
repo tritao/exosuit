@@ -29,6 +29,7 @@ class TextFieldTickProbe {
 		]);
 		var root = harness.submit();
 		harness.ui.focusWidget(Harness.first(root, AccessibilityRole.TextField).id);
+		harness.submit();
 		root = harness.submit();
 		var builds = harness.rootBuilds;
 		harness.ui.text(UiEventKind.TextInput, "a");
@@ -59,6 +60,7 @@ class TextFieldTickProbe {
 		]);
 		var root = harness.submitKeyed("k" + revision);
 		harness.ui.focusWidget(Harness.first(root, AccessibilityRole.TextField).id);
+		harness.submitKeyed("k" + revision);
 		root = harness.submitKeyed("k" + revision);
 		var builds = harness.rootBuilds;
 		harness.ui.text(UiEventKind.TextInput, "a");

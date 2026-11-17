@@ -4,7 +4,10 @@
   "entry": "app.PortProbesMain",
   "sourceRoots": ["src"],
   "scopeSourceRoots": false,
-  "dependencies": { "haxeon-ui": { "path": "../../haxeon/packages/ui" } },
+  "dependencies": {
+    "haxeon-ui": { "path": "../../haxeon/packages/ui" },
+    "exosuit-ui-native": { "path": "../../uikit-native" }
+  },
   "target": "host",
   "outputDir": "build"
 }

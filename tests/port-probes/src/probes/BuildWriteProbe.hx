@@ -61,7 +61,7 @@ class BuildWriteProbe {
 				var root = harness.submit();
 				recovered = Harness.textStartingWith(root, "shown:");
 			} catch (e:Dynamic) recovered = "threw again: " + Std.string(e);
-			Report.check(5, "after the " + variant + " throw, the context builds the next frame normally",
+			Report.check(5, "after the " + variant + " frame, the context builds the next frame normally",
 				recovered == "shown:" + shown.value, "next frame shows " + recovered + " (signal=" + shown.value + ")");
 		}
 		harness.dispose();
