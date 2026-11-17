@@ -10,6 +10,10 @@ $script:HaxeonRoot = Join-Path $script:RepoRoot 'haxeon'
 $script:BuildRoot = Join-Path $script:AndroidRoot 'build'
 $script:NdkVersion = '30.0.16248370'
 $script:Guard = Join-Path $script:RepoRoot 'docs/benchmarks/perf-harness/run-guarded.ps1'
+# Where Haxeon keeps its HashLink VM and the CLI's bytecode (scripts/haxeon_paths.py reads haxeon/cmake/hashlink-output-paths.txt).
+$script:VmDirectory = (& python (Join-Path $script:RepoRoot 'scripts/haxeon_paths.py') $script:HaxeonRoot | Select-Object -First 1)
+$script:Hl = Join-Path $script:VmDirectory 'hl.exe'
+$script:Cli = Join-Path $script:VmDirectory 'haxeon-cli.hl'
 
 function Get-Tool([string]$name) {
     $found = Get-Command $name -ErrorAction SilentlyContinue
