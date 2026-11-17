@@ -7,10 +7,8 @@ sources. The bundled example is runnable as-is:
 python scripts/run.py
 ```
 
-`run.py` discovers `plugins/*/plugin.conf`. An external manifest can be loaded
-directly with `--plugin=/absolute/path/plugin.conf`, or discovered by adding its
-parent directory to the colon-separated `PRAGTICAL_PLUGIN_DIRS` environment
-variable.
+`run.py` discovers `plugins/*/plugin.conf`. An external manifest is loaded with
+`--plugin=/absolute/path/plugin.conf`.
 
 A version-1 manifest declares `manifestVersion=1`, `apiVersion=2`, a stable plugin
 ID and semantic plugin version, an entry module and its sources. Commands and

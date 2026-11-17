@@ -13,7 +13,7 @@ class TerminalServiceTests {
   }
   public static function run(root:String):Void {
     var clock = function() return Sys.time() * 1000;
-    var manager = new WorkspaceTerminalManager("w", "instance", root, 65536);
+    var manager = TestTerminals.manager("w", "instance", root, 65536);
     var pair = MemoryTransport.pair(), client = new RpcConnection(pair.client, clock), server = new RpcConnection(
       pair.server,
       clock
@@ -210,8 +210,8 @@ class TerminalServiceTests {
       }
     }
     error = "";
-    client.call(WorkspaceTerminalProtocol.OUTPUT,
-      {workspace: "w", instance: "instance", id: "bounded", offset: 0}, 1000, function(_) {
+    client.call(WorkspaceTerminalProtocol.REPLAY,
+      {workspace: "w", instance: "instance", id: "bounded", cursor: 0}, 1000, function(_) {
       throw "Trimmed replay was silently accepted";
     }, function(e) error = e.code);
     step();

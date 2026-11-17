@@ -16,8 +16,6 @@ import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
-import workspace.service.WorkspaceLifecycleProtocol;
-import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspaceScmProtocol;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
@@ -125,10 +123,10 @@ class RpcCompatibilityTests {
 		var controlBytes=bytes("8601a17702a16903a17404c305c306c0");
 		require(WorkspaceTerminalProtocol.SET_CONTROL.encodeRequest(control).compare(controlBytes)==0,"Terminal controller lease vector changed");
 		require(WorkspaceTerminalProtocol.SET_CONTROL.decodeRequest(controlBytes).takeover,"Terminal controller takeover decode changed");
-		var terminalRead:TerminalRead = {workspace:"w",instance:"i",id:"t",offset:haxe.Int64.make(1,2)};
+		var terminalRead:TerminalReplayQuery = {workspace:"w",instance:"i",id:"t",cursor:haxe.Int64.make(1,2)};
 		var terminalReadBytes=bytes("8401a17702a16903a17404d30000000100000002");
-		require(WorkspaceTerminalProtocol.OUTPUT.encodeRequest(terminalRead).compare(terminalReadBytes)==0,"Terminal byte-offset vector changed");
-		require(WorkspaceTerminalProtocol.OUTPUT.decodeRequest(terminalReadBytes).offset==haxe.Int64.make(1,2),"64-bit terminal offset truncated");
+		require(WorkspaceTerminalProtocol.REPLAY.encodeRequest(terminalRead).compare(terminalReadBytes)==0,"Terminal replay cursor vector changed");
+		require(WorkspaceTerminalProtocol.REPLAY.decodeRequest(terminalReadBytes).cursor==haxe.Int64.make(1,2),"64-bit terminal cursor truncated");
 		var terminalInput:TerminalInput={workspace:"w",instance:"i",id:"t",sequence:1,data:bytes("0001")};
 		require(WorkspaceTerminalProtocol.INPUT.encodeRequest(terminalInput).compare(bytes("8501a17702a16903a174040105c4020001"))==0,"Terminal binary input vector changed");
 		require(WorkspaceFileProtocol.SEARCH_START.id == 149 && WorkspaceFileProtocol.SEARCH_PAGE.id == 150
@@ -172,18 +170,16 @@ class RpcCompatibilityTests {
 		var methodIds:Array<Int> = [
 			WorkspaceAgentProtocol.MODELS.id, WorkspaceAgentProtocol.DISCOVER.id, WorkspaceAgentProtocol.LIST.id, WorkspaceAgentProtocol.CREATE.id,
 			WorkspaceAgentProtocol.ACTION.id, WorkspaceAgentProtocol.MESSAGE_CONTENT.id, WorkspaceAgentProtocol.MESSAGE_IMAGE.id, WorkspaceAgentProtocol.IMAGE_UPLOAD.id,
-			WorkspaceAgentProtocol.ACTION_SNAPSHOT.id, WorkspaceAgentProtocol.SNAPSHOT_READ.id, WorkspaceCatalogProtocol.CATALOG.id, WorkspaceCatalogProtocol.UNWATCH.id,
+			WorkspaceCatalogProtocol.CATALOG.id, WorkspaceCatalogProtocol.UNWATCH.id,
 			WorkspaceFileProtocol.ROOTS.id, WorkspaceFileProtocol.STAT.id, WorkspaceFileProtocol.LIST.id, WorkspaceFileProtocol.READ_OPEN.id,
 			WorkspaceFileProtocol.READ_CHUNK.id, WorkspaceFileProtocol.READ_CLOSE.id, WorkspaceFileProtocol.WATCH.id, WorkspaceFileProtocol.UNWATCH.id,
 			WorkspaceFileProtocol.SEARCH_START.id, WorkspaceFileProtocol.SEARCH_PAGE.id, WorkspaceFileProtocol.SEARCH_CANCEL.id, WorkspaceFoldersProtocol.SET.id,
-			WorkspaceLifecycleProtocol.STATUS.id, WorkspaceLifecycleProtocol.UPDATE.id, WorkspacePairingProtocol.STATUS.id, WorkspacePairingProtocol.SET_GRANTS.id,
-			WorkspacePairingProtocol.CREATE.id, WorkspacePairingProtocol.LIST.id, WorkspacePairingProtocol.APPROVE.id, WorkspacePairingProtocol.REJECT.id,
-			WorkspacePairingProtocol.REVOKE.id, WorkspaceProtocol.QUERY.id, WorkspaceProtocol.WATCH.id, WorkspaceProtocol.RENAME.id,
-			WorkspaceProtocol.GROUP.id, WorkspaceProtocol.OPERATION.id, WorkspaceProtocol.IDENTITY.id, WorkspaceScmProtocol.REPOSITORIES.id,
+			WorkspaceProtocol.QUERY.id,
+			WorkspaceProtocol.GROUP.id, WorkspaceProtocol.IDENTITY.id, WorkspaceScmProtocol.REPOSITORIES.id,
 			WorkspaceScmProtocol.SNAPSHOT.id, WorkspaceScmProtocol.WATCH.id, WorkspaceScmProtocol.UNWATCH.id, WorkspaceScmProtocol.ORIGINAL.id,
 			WorkspaceScmProtocol.APPLY.id, WorkspaceScmProtocol.TRUST.id, WorkspaceScmProtocol.BRANCHES.id, WorkspaceScmProtocol.ORIGIN.id,
 			WorkspaceTerminalProtocol.RESTART.id, WorkspaceTerminalProtocol.UNWATCH.id, WorkspaceTerminalProtocol.LIST.id, WorkspaceTerminalProtocol.RENAME.id,
-			WorkspaceTerminalProtocol.FORGET.id, WorkspaceTerminalProtocol.OPEN.id, WorkspaceTerminalProtocol.OUTPUT.id, WorkspaceTerminalProtocol.INPUT.id,
+			WorkspaceTerminalProtocol.FORGET.id, WorkspaceTerminalProtocol.OPEN.id, WorkspaceTerminalProtocol.INPUT.id,
 			WorkspaceTerminalProtocol.RESIZE.id, WorkspaceTerminalProtocol.TERMINATE.id, WorkspaceTerminalProtocol.SET_CONTROL.id, WorkspaceTerminalProtocol.REPLAY.id,
 			WorkspaceTerminalProtocol.SNAPSHOT.id
 		];
@@ -223,8 +219,8 @@ class RpcCompatibilityTests {
 			expectedRevision: 1,
 			name: "New"
 		};
-		require(WorkspaceProtocol.RENAME.encodeRequest(rename).compare(bytes("8a01a17702a16503a26f7004a167050106a34e657707c008c009c00ac0")) == 0, "Rename vector changed");
-		require(WorkspaceProtocol.RENAME.decodeRequest(bytes("8601a17702a16503a26f7004a167050106a34e6577")).expectedRevision == 1, "Rename decode changed");
+		require(WorkspaceProtocol.GROUP.encodeRequest(rename).compare(bytes("8a01a17702a16503a26f7004a167050106a34e657707c008c009c00ac0")) == 0, "Group vector changed");
+		require(WorkspaceProtocol.GROUP.decodeRequest(bytes("8601a17702a16503a26f7004a167050106a34e6577")).expectedRevision == 1, "Group decode changed");
 		// Conservative UTF-8 upper bounds: every bounded character can occupy four bytes.
 		var wideName="",wideRoot="";
 		for (_ in 0...126) wideName += "😀";
@@ -252,14 +248,13 @@ class RpcCompatibilityTests {
 		rejects(function() WorkspaceProtocol.QUERY.decodeRequest(bytes("810101")), "Wrong workspace type accepted");
 		rejects(function() WorkspaceProtocol.QUERY.decodeRequest(bytes("8101a17700")), "Trailing data accepted");
 		require(WorkspaceProtocol.QUERY.decodeResponse(bytes("8201a1650200")).groups.length == 0, "Missing array default changed");
-		rejects(function() WorkspaceProtocol.decodeEvent(bytes("8201a1650201")), "Missing required group object accepted");
 		rejects(function() RpcProtocol.decode(bytes("816390"), 4096), "Unknown envelope variant accepted");
 		rejects(function() RpcProtocol.decode(bytes("81079201c0"), 4096), "Changed constructor arity accepted");
 		rejects(function() MessagePackFrame.unpack(bytes("484d504b0200000000048101a177")), "Unsupported frame version accepted");
 		rejects(function() MessagePackFrame.unpack(bytes("484d504b0101000000048101a177")), "Reserved flags accepted");
 		var legacy:WorkspaceGroup = MessagePack.decode(bytes("8301a16702a4576f726b0401"));
 		require(legacy.cwd == null && legacy.revision == 1, "Missing nullable cwd default changed");
-		require(WorkspaceProtocol.RENAME.decodeRequest(bytes("8606a34e6577050104a16703a26f7002a16501a177")).operation == "op",
+		require(WorkspaceProtocol.GROUP.decodeRequest(bytes("8606a34e6577050104a16703a26f7002a16501a177")).operation == "op",
 			"Input map order became significant");
 		catalogVectors();
 		machineDirectoryVectors();
@@ -329,16 +324,27 @@ class RpcCompatibilityTests {
 		var withRelay = bytes("85" + "01a16d" + "02a14e" + "0301" + "0491" + entryHex + "05a172");
 		require(MachineDirectoryProtocol.DIRECTORY.encodeResponse(directory).compare(withRelay) == 0, "Machine directory relay vector changed");
 		require(MachineDirectoryProtocol.DIRECTORY.decodeResponse(withRelay).relay == "r", "Machine directory relay decode changed");
-		var open = bytes("81018201a16d02a177");
+		var open = bytes("82018201a16d02a17702c0");
 		require(MachineDirectoryProtocol.OPEN.encodeRequest({ref: {machine: "m", workspace: "w"}}).compare(open) == 0, "Open workspace vector changed");
 		require(MachineDirectoryProtocol.validOpen(MachineDirectoryProtocol.OPEN.decodeRequest(open)), "Open workspace decode changed");
+		require(MachineDirectoryProtocol.OPEN.decodeRequest(bytes("81018201a16d02a177")).start == null, "An open without `start` gained one");
+		var noStart = bytes("82018201a16d02a17702c2");
+		require(MachineDirectoryProtocol.OPEN.encodeRequest({ref: {machine: "m", workspace: "w"}, start: false}).compare(noStart) == 0,
+			"Open workspace without starting vector changed");
+		require(MachineDirectoryProtocol.OPEN.decodeRequest(noStart).start == false, "Open workspace without starting decode changed");
 		rejects(function() {
 			MachineDirectoryProtocol.OPEN.decodeRequest(bytes("80"));
 		}, "Open without a workspace ref accepted");
-		var stream = bytes("83018201a16d02a17702050391ae776f726b73706163652e72656164");
+		// Fields 4 and 5, the service's generation and root, were added with Step 8 (the device opens a WorkspaceLink on the stream).
+		var stream = bytes("85018201a16d02a17702050391ae776f726b73706163652e7265616404c005c0");
 		require(MachineDirectoryProtocol.OPEN.encodeResponse({ref: {machine: "m", workspace: "w"}, stream: 5, grants: ["workspace.read"]}).compare(stream) == 0,
 			"Workspace stream vector changed");
 		require(MachineDirectoryProtocol.OPEN.decodeResponse(stream).stream == 5, "Workspace stream decode changed");
+		var located = bytes("85018201a16d02a17702050391ae776f726b73706163652e7265616404a16705a172");
+		require(MachineDirectoryProtocol.OPEN.encodeResponse({ref: {machine: "m", workspace: "w"}, stream: 5, grants: ["workspace.read"], generation: "g", root: "r"})
+			.compare(located) == 0, "Workspace stream generation and root vector changed");
+		var decodedStream = MachineDirectoryProtocol.OPEN.decodeResponse(located);
+		require(decodedStream.generation == "g" && decodedStream.root == "r", "Workspace stream generation and root decode changed");
 		require(MachineDirectoryProtocol.CLOSE.encodeRequest({stream: 3}).compare(bytes("810103")) == 0, "Close workspace vector changed");
 		require(MachineDirectoryProtocol.encodeChange({revision: 7}).compare(bytes("810107")) == 0
 			&& MachineDirectoryProtocol.decodeChange(bytes("810107")).revision == 7, "Directory change vector changed");
@@ -518,15 +524,16 @@ class RpcCompatibilityTests {
 		client.call(WorkspaceProtocol.QUERY, {workspace: "absent"}, 1000, function(_) {
 			throw "Unknown workspace succeeded";
 		}, failure);
-		client.call(WorkspaceProtocol.RENAME, {
+		client.call(WorkspaceProtocol.GROUP, {
 			workspace: "w",
 			epoch: "e",
 			operation: "op",
 			group: "g",
 			expectedRevision: 1,
-			name: "New"
+			name: "New",
+			action: "update"
 		}, 1000, function(_) {
-			throw "Denied rename succeeded";
+			throw "Denied group change succeeded";
 		}, failure);
 		server.poll();
 		client.poll();
@@ -577,15 +584,15 @@ class RpcCompatibilityTests {
 		var pair = MemoryTransport.pair(4096, 16);
 		var client = new RpcConnection(pair.client, function() return 0.0, 1024, 8, 4096);
 		var server = new RpcConnection(pair.server, function() return 0.0, 1024, 8, 4096);
-		service.bind(server, [WorkspaceProtocol.READ, WorkspaceProtocol.WRITE]);
+		service.bind(server, [WorkspaceProtocol.READ, WorkspaceProtocol.WRITE, WorkspaceProtocol.TREE]);
 		var failures = 0;
 		var failure = function(error:RpcError) {
 			require(error.code == "invalid_request" && !error.ambiguous, "Incomplete identity was not rejected before dispatch");
 			failures++;
 		};
 		for (hex in ["8501a17703a26f7004a167050106a34e6577", "8501a17702a16503a26f7004a16706a34e6577"]) {
-			var incomplete = new RpcMethod<RenameGroup, RenameResult>(102, function(_) return bytes(hex), WorkspaceProtocol.RENAME.decodeRequest,
-				WorkspaceProtocol.RENAME.encodeResponse, WorkspaceProtocol.RENAME.decodeResponse);
+			var incomplete = new RpcMethod<RenameGroup, RenameResult>(WorkspaceProtocol.GROUP.id, function(_) return bytes(hex), WorkspaceProtocol.GROUP.decodeRequest,
+				WorkspaceProtocol.GROUP.encodeResponse, WorkspaceProtocol.GROUP.decodeResponse);
 			client.call(incomplete, {
 				workspace: "w",
 				epoch: "e",
@@ -597,14 +604,9 @@ class RpcCompatibilityTests {
 				throw "Incomplete rename succeeded";
 			}, failure);
 		}
-		var operation = new RpcMethod<OperationQuery, OperationResult>(103, function(_) return bytes("8201a17703a26f70"),
-			WorkspaceProtocol.OPERATION.decodeRequest, WorkspaceProtocol.OPERATION.encodeResponse, WorkspaceProtocol.OPERATION.decodeResponse);
-		client.call(operation, {workspace: "w", epoch: "e", operation: "op"}, 1000, function(_) {
-			throw "Incomplete operation lookup succeeded";
-		}, failure);
 		server.poll();
 		client.poll();
-		require(failures == 3 && service.snapshot().cursor == 0 && service.snapshot().groups[0].revision == 1,
+		require(failures == 2 && service.snapshot().cursor == 0 && service.snapshot().groups[0].revision == 1,
 			"Incomplete identities changed state or did not retire calls");
 		client.close();
 		server.close();

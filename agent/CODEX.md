@@ -100,9 +100,7 @@ initial refusal is unclassified. Desktop acceptance still uses the fake provider
 
 `python3 scripts/test-workspace-agents.py` runs the native fixture.
 `HAXEON_SELF_HOSTED=1 python3 scripts/test-workspace-agents.py` checks self-hosted
-compilation. `xvfb-run -a python3 scripts/test-codex-workbench-ui.py` drives desktop
-creation, prompting, approvals, input, tab restoration and view closing with fake
-Codex. Passing an installed runtime directory tests relocation.
+compilation.
 
 `python3 scripts/test-codex-shared-metadata.py` checks two clients against an
 already-running real shared daemon. It does not start the daemon, create threads

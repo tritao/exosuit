@@ -59,7 +59,7 @@ import haxeon.ui.core.TextStyleOverride;
  * UIKit workbench host owning document and terminal tabs in DockWorkspace
  * editor panes. Each document view owns its selection and scroll position;
  * terminal tabs retain their session while moving between panes and tools.
- * Command and language overlays are rendered by ExosuitApp.overlayView().
+ * Command and language overlays come from this host's overlayView(), which ExosuitApp draws.
  */
 class UiWorkbenchHost implements WorkbenchHost {
 	final theme:Theme;
@@ -82,8 +82,6 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var lastSwitchSeconds(default, null):Float = 0;
 	public var lastSwitchCold(default, null):Bool = false;
 	public var coldSwitches(default, null):Int = 0;
-	/** Maps a saved context key to the current scheme; set by the app, which knows the machine and workspace. */
-	public var migrateContextKey:String->String = function(key) return key;
 	final contextLayouts:Map<String, UiContextLayout> = [];
 	final pendingContextLayouts:Map<String, Array<String>> = [];
 	final contextDocumentRefs:Map<String, Document> = [];
@@ -187,7 +185,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var currentBuildOutput(default, null):Null<BuildOutput>;
 	var selectedExplorerPath:Null<String>;
 
-	final commandView:CommandView = new CommandView();
+	public final commandView:CommandView = new CommandView();
 	var commandPicker:Null<QuickPickView>;
 	public var configureKeybinding:Null<String->Void>;
 
@@ -1431,15 +1429,6 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return key + "#parked" + n;
 	}
 
-	/** A workspace got its real id: every context under the old one follows, groups included. */
-	public function renameWorkspace(machine:String, previous:String, next:String):Void {
-		if (previous == next) return;
-		for (key in knownContextKeys()) {
-			var parsed = ContextKey.parse(key);
-			if (parsed != null && parsed.machine == machine && parsed.workspace == previous) renameContext(key, ContextKey.withWorkspace(key, next));
-		}
-	}
-
 	/**
 		A context was closed: its views and snapshot go, and so do the bookkeeping entries only it needed. Dirty and
 		untitled tabs never go: they move to the active context first. Returns how many moved.
@@ -1468,9 +1457,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return rescued;
 	}
 
-	static function recovered(key:String):Bool return key.indexOf("#parked") >= 0 || key.indexOf("#legacy") >= 0;
+	static function recovered(key:String):Bool return key.indexOf("#parked") >= 0;
 
-	/** Layouts set aside by a rename or migration collision; the quick switch offers them as "Recovered". */
+	/** Layouts set aside by a machine-id rename collision; the quick switch offers them as "Recovered". */
 	public function recoveredContextKeys():Array<String> {
 		var keys = [for (key in knownContextKeys()) if (recovered(key) && key != contextKey) key];
 		keys.sort(Reflect.compare);
@@ -1842,20 +1831,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 		restoreWindowLayout(lines);
 		var stored = session.ContextLayoutStore.read(lines);
 		contextResolver = resolver;
-		// Current-format keys first, then migrated legacy ones, each in key order: a legacy key that lands on an
-		// existing one is parked beside it (`#legacy<n>`) instead of replacing it or being dropped.
-		var storedKeys = [for (key in stored.layouts.keys()) key];
-		var legacyKey = function(key:String):Bool return migrateContextKey(key) != key;
-		storedKeys.sort(function(a, b) {
-			var la = legacyKey(a), lb = legacyKey(b);
-			return la != lb ? (la ? 1 : -1) : Reflect.compare(a, b);
-		});
-		for (key in storedKeys) {
+		for (key in stored.layouts.keys()) {
 			var layout = stored.layouts.get(key);
 			if (layout == null) continue;
-			var target = migrateContextKey(key), free = target, taken = 0;
-			while (pendingContextLayouts.exists(free)) { taken++; free = target + "#legacy" + taken; }
-			pendingContextLayouts.set(free, layout);
+			pendingContextLayouts.set(key, layout);
 			// Hydrate documents now so Save All, recovery and rename also see inactive tabs.
 			for (line in layout) {
 				var fields = line.split("\t");
@@ -1866,7 +1845,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 		// The window that closed last saved its focused context in `lines`; a snapshot file for the same context is
 		// that window's own copy or older, so it does not replace `lines`.
-		var activeSaved = stored.activeKey == null || sameContextIgnoringMachine(migrateContextKey(stored.activeKey), contextKey);
+		var activeSaved = stored.activeKey == null || sameContextIgnoringMachine(stored.activeKey, contextKey);
 		var selected = pendingContextLayouts.get(contextKey);
 		pendingContextLayouts.remove(contextKey);
 		if (activeSaved) {

@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Supersedes: [0001-platform-boundary.md](0001-platform-boundary.md)
+Supersedes: ADR 0001, platform boundary (removed; see git history)
 
 ## Decision
 
@@ -205,15 +205,11 @@ callbacks and tokens; initialization reinstalls callbacks after restart.
 
 Every headless project, including mandatory source-plugin acceptance, passes in
 both compiler modes. Release packaging, the real LSP smoke gate and UIKit window
-automation still need restoration. The [execution ledger](../roadmap/STATUS.md)
-records commands and remaining checks; graphical builds do not establish
+automation still need restoration; graphical builds do not establish
 interactive behavior.
 
 ## Trade-offs and follow-on work
 
 Separate manifests keep model tests independent of UIKit's native GPU build.
 The shared controllers preserve editor behavior while host adapters expose
-it through widgets. M9/M10 complete styled text, visible selection/navigation,
-pane operations, search surfaces and language UI behavior. Compiler/runtime
-embedding restores source plugins in M8; M8.3 restores release and integration
-gates. See the [roadmap](../roadmap/README.md) for dependencies and acceptance.
+it through widgets.

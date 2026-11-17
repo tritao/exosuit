@@ -27,8 +27,7 @@ The machine key is the Noise static public key (32 bytes, X25519) suit uses with
 
 Vectors (key = bytes 0..31): fingerprint `630dcd2966c4336691125448bbb25b4f`, relay id
 `5ff11fa2bc5136b8ccf63b6c679d6f8d`; with shared secret 32 x `11`, challenge bytes 32..63 and bearer `ab` x 32 the
-proof is `bd14af04eba3b85dbfb2bca787b9a64bcf63070ec15a5e2de9170096057b1598`. `tests/machine-device` and
-`relay/worker/test/identity.test.ts` check them.
+proof is `bd14af04eba3b85dbfb2bca787b9a64bcf63070ec15a5e2de9170096057b1598`. `relay/worker/test/identity.test.ts` checks them.
 
 ## Relay ids (suit)
 
@@ -60,7 +59,7 @@ After the Noise handshake:
   key (it comes from an older desktop), so comparing the code is the only check."
 
 The phone logs `exosuit-pairing: machine key matches the invitation` or `exosuit-pairing: the invitation has no machine
-key` for the acceptance scripts. The code comparison stays in both cases.
+key` for the acceptance scripts, in test runs only (the rig's `EXOSUIT_AUTOMATION_DIR`). The code comparison stays in both cases.
 
 ## Proven registration (Worker)
 

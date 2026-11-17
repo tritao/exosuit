@@ -43,22 +43,11 @@ import haxeon.wire.MessagePack;
 /** Service-owned display name; optional for older daemons. */
 @:optional @:id(11) var name:Null<String>;
 @:optional @:id(12) var notifications:Null<Bool>;
-/** The current rendered history could not be committed to durable storage. */
-@:optional @:id(13) var historyError:Null<Bool>;
 @:optional @:id(14) var restartable:Null<Bool>;
 @:optional @:id(15) var historyAvailable:Null<Bool>;
 @:optional @:id(16) var agentProvider:Null<String>;
 /** The service honours `paced` for this view. Older services send nothing and notify every change. */
 @:optional @:id(17) var paced:Null<Bool>;
-}
-@:wire typedef TerminalRead = {@: id(1) var workspace: String;
-@:id(2) var instance:String;
-@:id(3) var id:String;
-@:id(4) var offset:Int64;
-}
-@:wire typedef TerminalOutput = {@: id(1) var terminal: TerminalInfo;
-@:id(2) var offset:Int64;
-@:id(3) var data:Bytes;
 }
 /** Paged reads carry `token`: 0 takes a new snapshot, otherwise `offset` continues that one. Without it the whole
     snapshot comes in one reply, which a large grid's snapshot does not fit. */
@@ -153,10 +142,8 @@ import haxeon.wire.MessagePack;
 @:optional @:id(11) var agentProvider:Null<String>;
 /** Position among the siblings in its group (groups, sessions and terminals share one order); absent means not yet placed. */
 @:optional @:id(12) var order:Null<Int>;
-/** A provider terminal's conversation id (Claude Code's session id, Codex's thread id), so a restart resumes it. */
+/** A provider terminal's conversation id (Claude Code's and Pi's session id, Codex's thread id), so a restart resumes it. */
 @:optional @:id(13) var agentSession:Null<String>;
-/** Seconds since 1970 when the provider terminal last began a conversation; finds a Codex conversation afterwards. */
-@:optional @:id(14) var agentStarted:Null<Int>;
 }
 @:wire typedef TerminalCatalog = {@: id(1) var instance: String;
 @:id(2) var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>;
@@ -226,13 +213,6 @@ class WorkspaceTerminalProtocol {
     function(b:Bytes):TerminalOpen return MessagePack.decode(b),
     function(v:TerminalInfo) return MessagePack.encode(v),
     function(b:Bytes):TerminalInfo return MessagePack.decode(b)
-  );
-  public static final OUTPUT = new RpcMethod<TerminalRead, TerminalOutput>(
-    111,
-    function(v:TerminalRead) return MessagePack.encode(v),
-    function(b:Bytes):TerminalRead return MessagePack.decode(b),
-    function(v:TerminalOutput) return MessagePack.encode(v),
-    function(b:Bytes):TerminalOutput return MessagePack.decode(b)
   );
   public static final INPUT = new RpcMethod<TerminalInput, TerminalInfo>(
     112,

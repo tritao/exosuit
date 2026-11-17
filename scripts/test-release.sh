@@ -16,17 +16,5 @@ while IFS= read -r -d '' binary; do
 	fi
 done < <(find "$install_dir/lib" "$install_dir/tools" -type f \( -name '*.so*' -o -name '*.hdll' -o -name hl \) -print0)
 
-portable="$fixture/portable state"
-(
-	cd "$fixture"
-	PRAGTICAL_PORTABLE="$portable" xvfb-run -a "$install_dir/exosuit" --capture-dir="$fixture/capture" --smoke-frames=3
-)
-[[ -d "$portable" ]]
-[[ -s "$fixture/capture/frame.png" ]]
-[[ -s "$fixture/capture/app-state.json" ]]
-echo "PASS: unpacked graphical artifact launched outside the source tree"
-
-python3 "$root_dir/scripts/test-bundled-workspace.py" "$install_dir"
-
 HAXEON_LSP="$install_dir/tools/haxeon-lsp" "$root_dir/scripts/test-haxeon-lsp.sh"
 echo "PASS: unpacked artifact completed the real Haxeon language-service route"

@@ -2,7 +2,8 @@
   "version": 1,
   "package": { "name": "exosuit-workspace-scm-test" },
   "entry": "app.WorkspaceScmTestMain",
-  "sourceRoots": ["src"],
+  "sourceRoots": ["src", "../scm-fake/src"],
+  "scopeSourceRoots": false,
   "dependencies": {
     "exosuit-agent": { "path": "../../agent" }
   },

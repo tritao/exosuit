@@ -11,6 +11,7 @@ class ConnectTimeline {
 	static final began = Sys.time();
 	static final events:Array<{t:Float, event:String, workspace:String, detail:String}> = [];
 	static final once:Map<String, Bool> = [];
+	static final atFrame:Array<{event:String, workspace:Null<String>, detail:Null<String>}> = [];
 	static final echo:Bool = wantsEcho();
 
 	static function wantsEcho():Bool {
@@ -28,12 +29,25 @@ class ConnectTimeline {
 				+ (detail == null ? "" : detail) + "\n");
 	}
 
-	/** Marks the first time only, for `key` (events that repeat every frame while a state holds). */
-	public static function markOnce(key:String, event:String, ?workspace:String, ?detail:String):Void {
+	/** Marks the first time only, for `key` (events that repeat every frame while a state holds); true when it marked. */
+	public static function markOnce(key:String, event:String, ?workspace:String, ?detail:String):Bool {
 		if (once.exists(key))
-			return;
+			return false;
 		once.set(key, true);
 		mark(event, workspace, detail);
+		return true;
+	}
+
+	/** Marks `event` when the next frame has been drawn: the moment a state the app just reached is on screen. */
+	public static function markAtNextFrame(event:String, ?workspace:String, ?detail:String):Void
+		atFrame.push({event: event, workspace: workspace, detail: detail});
+
+	/** Called by the host after each drawn frame; marks what waited for it. */
+	public static function frameDrawn():Void {
+		if (atFrame.length == 0)
+			return;
+		for (e in atFrame.splice(0, atFrame.length))
+			mark(e.event, e.workspace, e.detail);
 	}
 
 	/** Whether `markOnce` recorded `key` (and it was not rearmed since). */

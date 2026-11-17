@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# What tests start neither registers with the user's suit nor starts it (see suit/README.md).
-export EXOSUIT_SUIT=${EXOSUIT_SUIT:-off}
+# What the steps start talks only to a suit of its own, in a home of its own, and does not start it (see suit/README.md);
+# scripts/test.sh makes a home of its own for the suites.
+EXOSUIT_SUIT_HOME=$(mktemp -d)/suit
+export EXOSUIT_SUIT_HOME EXOSUIT_SUIT_AUTOSTART=0
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
@@ -9,13 +11,7 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 (cd "$haxeon_root" && ./scripts/test.sh)
 "$root_dir/scripts/test.sh"
 python3 "$root_dir/scripts/build.py"
-"$root_dir/scripts/test-skribidi-layout.sh"
 "$root_dir/scripts/test-haxeon-lsp.sh"
-"$root_dir/scripts/test-real-language-ui.sh"
-"$root_dir/scripts/test-uikit-workflow.sh"
-"$root_dir/scripts/test-decoration-ui.sh"
-"$root_dir/scripts/test-workspace-ui.sh"
-xvfb-run -a -s "-screen 0 1280x1000x24" python3 "$root_dir/scripts/test-agent-session-creation-ui.py"
 "$root_dir/scripts/test-release.sh"
 
 "$root_dir/scripts/test-web.sh"

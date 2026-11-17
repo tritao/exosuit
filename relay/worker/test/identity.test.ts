@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import worker, { registrationProof, relayIdOf, x25519 } from "../src/index";
 
 // Proven registration (docs/mobile/relay-identity.md): a machine whose relay id is derived from its Noise key takes the
-// id back from whoever registered it first. The vectors are the ones tests/machine-device checks in MachineKeys.hx.
+// id back from whoever registered it first. The vectors are the ones suit's MachineKeys.hx computes (docs/mobile/relay-identity.md).
 
 describe("machine key vectors", () => {
   it("derives the relay id and the proof as suit does", async () => {

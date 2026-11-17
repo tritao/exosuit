@@ -2,7 +2,8 @@
   "version": 1,
   "package": { "name": "exosuit-scm-git-test" },
   "entry": "app.ScmGitTestMain",
-  "sourceRoots": ["src"],
+  "sourceRoots": ["src", "../scm-fake/src"],
+  "scopeSourceRoots": false,
   "dependencies": {
     "pragtical_hx": { "path": "../.." }
   },

@@ -1560,7 +1560,7 @@ class ScmGitTestMain {
 		var missingBlob = readBlob(blobReader, gitScheduler, "HEAD", Bytes.ofString("scm/no-such-file"), 1062);
 		require(missingBlob.error != null && missingBlob.error.code == "missing_object"
 			&& blobReader.activeProcessId() == sharedProcessId, "missing blob was not mapped without restarting the reader");
-		var largeBlob = readBlob(blobReader, gitScheduler, "HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1063);
+		var largeBlob = readBlob(blobReader, gitScheduler, "HEAD", Bytes.ofString("native-packages/sqlite/vendor/sqlite3.c"), 1063);
 		require(largeBlob.error != null && largeBlob.error.code == "blob_too_large"
 			&& blobReader.activeProcessId() == sharedProcessId, "oversized blob was not drained by its header size");
 		var afterOversized = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 1064);
@@ -1568,7 +1568,7 @@ class ScmGitTestMain {
 			&& normalizeNewlines(afterOversized.value.bytes.toString()) == normalizeNewlines(smallBytes.toString()),
 			"a read after an oversized blob was misaligned");
 
-		var blobCancelledCallback = false, cancelledBlob = blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1065,
+		var blobCancelledCallback = false, cancelledBlob = blobReader.read("HEAD", Bytes.ofString("native-packages/sqlite/vendor/sqlite3.c"), 1065,
 			_ -> blobCancelledCallback = true);
 		gitScheduler.update(1);
 		var followingBlob:Null<ScmJobResult<ScmBlob>> = null;
@@ -1583,14 +1583,14 @@ class ScmGitTestMain {
 		// waiting: callers cannot see the handle go.
 		var closingReader = new GitBlobReader(processManager, gitScheduler, git, repositoryRoot, false, 1024 * 1024),
 			closedBlob:Null<ScmJobResult<ScmBlob>> = null;
-		closingReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1067, value -> closedBlob = value);
+		closingReader.read("HEAD", Bytes.ofString("native-packages/sqlite/vendor/sqlite3.c"), 1067, value -> closedBlob = value);
 		gitScheduler.update(1);
 		closingReader.dispose();
 		require(closedBlob != null && closedBlob.error != null && closedBlob.error.code == "repository_closed" && closedBlob.error.retryable,
 			"a blob read in progress when its reader was disposed was left without an answer");
 
 		var interrupted:Null<ScmJobResult<ScmBlob>> = null;
-		blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1067, value -> interrupted = value);
+		blobReader.read("HEAD", Bytes.ofString("native-packages/sqlite/vendor/sqlite3.c"), 1067, value -> interrupted = value);
 		gitScheduler.update(1);
 		blobReader.configurationChanged();
 		pump(gitScheduler, () -> interrupted != null, "config change did not retire the active blob request");
@@ -1609,7 +1609,7 @@ class ScmGitTestMain {
 			&& blobReader.activeProcessId() != restartedProcessId,
 			"blob reader did not restart after its idle timeout");
 		var interruptedByExit:Null<ScmJobResult<ScmBlob>> = null;
-		blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1070, value -> interruptedByExit = value);
+		blobReader.read("HEAD", Bytes.ofString("native-packages/sqlite/vendor/sqlite3.c"), 1070, value -> interruptedByExit = value);
 		gitScheduler.update(1);
 		processManager.shutdown();
 		gitScheduler.update(1);

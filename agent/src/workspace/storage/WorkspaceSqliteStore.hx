@@ -14,29 +14,22 @@ import workspace.service.WorkspaceTerminalPersistence;
 import workspace.service.WorkspaceTerminalProtocol;
 
 /** Agent-owned schema; small typed rows, not a copied full-catalog checkpoint.
- * The manager owns the exclusive process lock. SQL cursor/revision CAS fences stale writers. */
-class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence implements workspace.service.WorkspaceDevicePersistence implements WorkspaceAgentContentPersistence {
-	static inline final MAX_DEVICES:Int = 64;
-	/** The id of the group services once seeded into every new catalog (see `retireSeedGroup`). User groups never have it. */
-	public static inline final SEED_GROUP = "work";
-	/** The spacing of rows `retireSeedGroup` moves, as the Workbench spaces appended rows (WorkbenchOrder.STEP). */
-	static inline final SEED_ORDER_STEP = 1024;
+ * The service holds its state folder's exclusive lock (agent.lock, AgentMain). SQL cursor/revision CAS fences stale writers. */
+class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence implements WorkspaceAgentContentPersistence {
 	static inline final CONTENT_TABLE = "CREATE TABLE workspace_agent_content (seq INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, session TEXT NOT NULL, turn TEXT NOT NULL, item TEXT NOT NULL, payload BLOB NOT NULL CHECK(length(payload)<=262144), partial INTEGER NOT NULL CHECK(partial IN (0,1)), UNIQUE(provider,session,turn,item))";
 	static inline final CONTENT_META = "CREATE TABLE workspace_agent_content_meta (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL CHECK(version>=1))";
 	static inline final CONTENT_INDEX = "CREATE INDEX workspace_agent_content_session ON workspace_agent_content(session)";
 	final db:Database;
 	final workspace:String;
-	final historyLimit:Int;
 
-	public function new(path:String, workspace:String, seed:WorkspaceSnapshot, historyLimit:Int = 32, ?root:String) {
-		if (seed == null || seed.cursor != 0 || historyLimit < 1 || historyLimit > 32)
-			throw "Invalid workspace storage seed or history limit";
+	public function new(path:String, workspace:String, seed:WorkspaceSnapshot, ?root:String) {
+		if (seed == null || seed.cursor != 0)
+			throw "Invalid workspace storage seed";
 		if (root != null && (root.length == 0 || root.length > 1024)) throw "Invalid authorized workspace root";
 		var expectedRoot = root == null ? "" : root;
 		// Validate domain identities before creating any schema or rows.
-		new WorkspaceService(workspace, seed.epoch, seed.groups, historyLimit);
+		new WorkspaceService(workspace, seed.epoch, seed.groups);
 		this.workspace = workspace;
-		this.historyLimit = historyLimit;
 		db = Database.open(path, 1000);
 		try {
 			var version = 0;
@@ -47,6 +40,10 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			});
 			if (version < 0 || version > 8)
 				throw "Unsupported workspace schema version";
+			if (version > 0 && version < 8)
+				throw "Workspace catalog " + path + " was written before 2026-10-31 (schema " + version + "), and this build no longer "
+					+ "reads that format. Start this workspace once with Exosuit main a457e3dc, the last build that converts it, then "
+					+ "use this build again.";
 			if (version == 0) {
 				var count = 0;
 				statement("SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'", function(row) {
@@ -60,89 +57,29 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			db.exec("PRAGMA synchronous=FULL");
 			if (version == 0)
 				initialize(seed);
-            if (version < 2) transaction(function() {
-                db.exec("CREATE TABLE workspace_terminals (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
-                db.exec("PRAGMA user_version=2");
-            });
-			if (version < 3 || expectedRoot.length > 0) transaction(function() {
-				if (version < 3) {
-					db.exec("ALTER TABLE workspace_meta ADD COLUMN root TEXT");
-					db.exec("PRAGMA user_version=3");
-				}
-				if (expectedRoot.length == 0) return;
+			if (expectedRoot.length > 0) transaction(function() {
 				var missing = false;
 				statement("SELECT workspace,root IS NULL,length(CAST(root AS BLOB)),root FROM workspace_meta WHERE id=1", function(row) {
 					if (!row.step() || row.columnText(0) != workspace) throw "Workspace database identity mismatch";
 					missing = integer(row.columnInt64(1)) == 1;
 					if (!missing && (integer(row.columnInt64(2)) > 4096 || row.columnText(3) != expectedRoot)) throw "Workspace database root mismatch";
 				});
-				if (missing) {
-					if (version >= 3) throw "Unscoped workspace database";
-					// Older managed schemas represented this identity with their single initial group.
-					// Check that migration evidence once; subsequent identity is independent of group edits.
-					if (version != 0) statement("SELECT payload,length(payload) FROM workspace_groups ORDER BY id LIMIT 2", function(row) {
-						if (!row.step()) throw "Missing legacy workspace root";
-						var legacy:WorkspaceGroup = MessagePack.decode(blob(row, 0, integer(row.columnInt64(1))));
-						if (legacy.cwd != expectedRoot || row.step()) throw "Legacy workspace root mismatch";
-					});
-					statement("UPDATE workspace_meta SET root=?1 WHERE id=1 AND root IS NULL", function(row) {
-						row.bindText(1, expectedRoot); row.step();
-					});
-				}
+				if (!missing) return;
+				// Only a catalog made just now, or one made without a root, has none; the latter is not this workspace's.
+				if (version != 0) throw "Unscoped workspace database";
+				statement("UPDATE workspace_meta SET root=?1 WHERE id=1 AND root IS NULL", function(row) {
+					row.bindText(1, expectedRoot); row.step();
+				});
 			});
-   if(version<4) transaction(function() {
-    db.exec("CREATE TABLE workspace_agents (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
-   db.exec("PRAGMA user_version=4");
-   });
-			// Older editor builds used v5/v6 for agent metadata and task tables,
-			// while the first pairing build also used v5. Preserve either catalog
-			// and converge on a distinct additive device schema revision.
-			if (version < 7) transaction(function() {
-				db.exec("CREATE TABLE IF NOT EXISTS workspace_devices (device_id TEXT PRIMARY KEY, static_key BLOB NOT NULL CHECK(length(static_key)=32), grants BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)))");
-				db.exec("PRAGMA user_version=7");
-			});
-
-            if (version < 8) transaction(function() {
-                db.exec(TERMINAL_HISTORY_TABLE);
-                db.exec("PRAGMA user_version=8");
-            });
 			// Check database ownership before extension initialization or orphan cleanup.
 			statement("SELECT workspace FROM workspace_meta WHERE id=1",function(row) {
 				if(!row.step() || row.columnText(0)!=workspace || row.step()) throw "Workspace database identity mismatch";
 			});
-			// After the check: a database that is refused must not have been rewritten.
-			widenTerminalHistory();
 			initializeContentExtension();
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
 		}
-	}
-
-	/**
-		A terminal's saved history: up to 16 MiB of rendered scrollback (TerminalHostProtocol.SCROLLBACK_ROWS lines) in a
-		MessagePack record. The table was made with a 4 MiB bound when scrollback was 1000 lines.
-	**/
-	static inline final TERMINAL_HISTORY_TABLE = "CREATE TABLE IF NOT EXISTS workspace_terminal_history (id TEXT PRIMARY KEY REFERENCES workspace_terminals(id) ON DELETE CASCADE, payload BLOB NOT NULL CHECK(length(payload)<=16777344))";
-
-	/**
-		Remakes a terminal history table that still has the 4 MiB bound with the 16 MiB one, keeping its rows. Without it
-		every history over 4 MiB (a few thousand coloured lines) failed to save, and the service tried again every two
-		seconds for as long as it ran, growing by tens of MB each time. The schema version stays 8: an older daemon
-		reads and writes the wider table as it did the narrow one.
-	**/
-	function widenTerminalHistory():Void {
-		var schema:Null<String> = null;
-		statement("SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_terminal_history'", function(row) {
-			if (row.step()) schema = row.columnText(0);
-		});
-		if (schema == null || schema.indexOf("<=4194432") < 0) return;
-		transaction(function() {
-			db.exec(StringTools.replace(TERMINAL_HISTORY_TABLE, "IF NOT EXISTS workspace_terminal_history", "workspace_terminal_history_wide"));
-			db.exec("INSERT INTO workspace_terminal_history_wide(id,payload) SELECT id,payload FROM workspace_terminal_history");
-			db.exec("DROP TABLE workspace_terminal_history");
-			db.exec("ALTER TABLE workspace_terminal_history_wide RENAME TO workspace_terminal_history");
-		});
 	}
 
 	static function integer(value:Int64):Int {
@@ -202,11 +139,12 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 
 	function initialize(seed:WorkspaceSnapshot):Void {
 		transaction(function() {
-			db.exec("CREATE TABLE workspace_meta (id INTEGER PRIMARY KEY CHECK(id=1), workspace TEXT NOT NULL, epoch TEXT NOT NULL, cursor INTEGER NOT NULL CHECK(cursor>=0))");
+			db.exec("CREATE TABLE workspace_meta (id INTEGER PRIMARY KEY CHECK(id=1), workspace TEXT NOT NULL, epoch TEXT NOT NULL, cursor INTEGER NOT NULL CHECK(cursor>=0), root TEXT)");
 			db.exec("CREATE TABLE workspace_groups (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload BLOB NOT NULL)");
 			db.exec("CREATE TABLE workspace_operations (id TEXT PRIMARY KEY, sequence INTEGER UNIQUE NOT NULL, request BLOB NOT NULL, outcome BLOB NOT NULL)");
-			db.exec("CREATE TABLE workspace_events (sequence INTEGER PRIMARY KEY, payload BLOB NOT NULL)");
-			statement("INSERT INTO workspace_meta VALUES(1,?1,?2,0)", function(row) {
+			db.exec("CREATE TABLE workspace_terminals (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
+			db.exec("CREATE TABLE workspace_agents (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
+			statement("INSERT INTO workspace_meta VALUES(1,?1,?2,0,NULL)", function(row) {
 				row.bindText(1, workspace);
 				row.bindText(2, seed.epoch);
 				row.step();
@@ -218,7 +156,9 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					row.bindBlob(3, MessagePack.encode(group));
 					row.step();
 				});
-			db.exec("PRAGMA user_version=1");
+			// Older catalogs of schema 8 also hold workspace_terminal_history, which nothing reads now (a terminal's screen
+			// is its host's, TerminalHosts), and workspace_devices (devices pair with suit, MachineDeviceStore).
+			db.exec("PRAGMA user_version=8");
 		});
 	}
 
@@ -231,8 +171,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 	public function load():WorkspaceStoredState {
 		var epoch = "", cursor = 0;
 		var groups:Array<WorkspaceGroup> = [],
-			operations:Array<WorkspaceStoredOperation> = [],
-			events:Array<WorkspaceEvent> = [];
+			operations:Array<WorkspaceStoredOperation> = [];
 		transaction(function() {
 			statement("SELECT workspace,epoch,cursor,length(CAST(workspace AS BLOB)),length(CAST(epoch AS BLOB)) FROM workspace_meta", function(row) {
 				if (!row.step() || integer(row.columnInt64(3)) > 512 || integer(row.columnInt64(4)) > 512)
@@ -259,122 +198,18 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					while (row.step()) {
 						if (integer(row.columnInt64(6)) > 512)
 							throw "Oversized operation identity";
-						var request = WorkspaceProtocol.RENAME.decodeRequest(blob(row, 2, integer(row.columnInt64(4))));
-						var outcome = WorkspaceProtocol.RENAME.decodeResponse(blob(row, 3, integer(row.columnInt64(5))));
+						var request = WorkspaceProtocol.GROUP.decodeRequest(blob(row, 2, integer(row.columnInt64(4))));
+						var outcome = WorkspaceProtocol.GROUP.decodeResponse(blob(row, 3, integer(row.columnInt64(5))));
 						if (request.operation != row.columnText(0) || outcome.sequence != integer(row.columnInt64(1)))
 							throw "Operation metadata mismatch";
 						operations.push({request: request, outcome: outcome});
 					}
 				});
-			statement("SELECT sequence,payload,length(payload) FROM workspace_events ORDER BY sequence LIMIT 33", function(row) {
-				while (row.step()) {
-					var event = WorkspaceProtocol.decodeEvent(blob(row, 1, integer(row.columnInt64(2))));
-					if (event.sequence != integer(row.columnInt64(0)))
-						throw "Event metadata mismatch";
-					events.push(event);
-				}
-			});
 		});
-		return {snapshot: {epoch: epoch, cursor: cursor, groups: groups}, operations: operations, events: events};
+		return {snapshot: {epoch: epoch, cursor: cursor, groups: groups}, operations: operations};
 	}
 
-	/**
-		Removes the "Work" group that services seeded into every new catalog until the workspace itself became the
-		default group. Its sessions and terminals move to its parent (the workspace root for a top-level "Work") and its
-		child groups to that parent too, after the parent's existing rows, keeping their order among themselves. Their
-		own records (folders, histories, stored content) are untouched. A child group without a folder of its own keeps
-		the folder it had through "Work" when that is not `root`, the folder the workspace root's work runs in.
-
-		The group operations and events are dropped, the cursor restarts and the epoch becomes `epoch`, as when a
-		migration merges catalogs: they describe edits to groups that no longer exist as recorded, so restoring them
-		would fail, and a client holding the old epoch loads the catalog afresh. Returns whether the group was there; a
-		catalog without it is not changed, so this runs at every start.
-	**/
-	public function retireSeedGroup(epoch:String, root:String):Bool {
-		if (epoch == null || epoch.length == 0 || epoch.length > 128) throw "Invalid workspace epoch";
-		var retired = false;
-		transaction(function() {
-			var groups:Array<WorkspaceGroup> = [];
-			statement("SELECT payload,length(payload) FROM workspace_groups ORDER BY id", function(row) {
-				while (row.step()) {
-					var group:WorkspaceGroup = MessagePack.decode(blob(row, 0, integer(row.columnInt64(1))));
-					groups.push(group);
-				}
-			});
-			var seed = Lambda.find(groups, function(group) return group.id == SEED_GROUP);
-			if (seed == null) return;
-			retired = true;
-			var destination = seed.parent == null ? WorkspaceProtocol.ROOT_GROUP : seed.parent;
-			var agents = loadAgents(), terminals = loadTerminals();
-			// Rows already in the destination keep their places; the moved rows follow the last of them.
-			var next = 0;
-			function after(order:Null<Int>):Void {
-				var value = WorkspaceProtocol.order(order);
-				if (value + SEED_ORDER_STEP > next) next = value + SEED_ORDER_STEP;
-			}
-			for (group in groups)
-				if (group.id != SEED_GROUP && (group.parent == null ? WorkspaceProtocol.ROOT_GROUP : group.parent) == destination) after(group.order);
-			for (agent in agents) if (agent.group == destination) after(agent.order);
-			for (terminal in terminals) if (terminal.group == destination) after(terminal.order);
-			var moving:Array<{order:Int, kind:Int, id:String}> = [];
-			for (group in groups) if (group.parent == SEED_GROUP) moving.push({order: WorkspaceProtocol.order(group.order), kind: 0, id: group.id});
-			for (agent in agents) if (agent.group == SEED_GROUP) moving.push({order: WorkspaceProtocol.order(agent.order), kind: 1, id: agent.id});
-			for (terminal in terminals) if (terminal.group == SEED_GROUP) moving.push({order: WorkspaceProtocol.order(terminal.order), kind: 2, id: terminal.id});
-			moving.sort(function(a, b) return a.order != b.order ? a.order - b.order : a.kind != b.kind ? a.kind - b.kind : Reflect.compare(a.id, b.id));
-			var placed:Map<String, Int> = [];
-			for (entry in moving) {
-				placed.set(entry.kind + ":" + entry.id, next > WorkspaceProtocol.MAX_ORDER ? WorkspaceProtocol.MAX_ORDER : next);
-				next += SEED_ORDER_STEP;
-			}
-			var inherited = seed.cwd != null && !workspace.PathKey.same(seed.cwd, root) ? seed.cwd : null;
-			for (group in groups) if (group.parent == SEED_GROUP) {
-				group.parent = WorkspaceProtocol.parentFor(destination);
-				group.order = placed.get("0:" + group.id);
-				if (group.cwd == null) group.cwd = inherited;
-				group.revision++;
-				statement("UPDATE workspace_groups SET revision=?2,payload=?3 WHERE id=?1", function(row) {
-					row.bindText(1, group.id);
-					row.bindInt64(2, Int64.ofInt(group.revision));
-					row.bindBlob(3, MessagePack.encode(group));
-					row.step();
-				});
-			}
-			for (agent in agents) if (agent.group == SEED_GROUP) {
-				agent.group = destination;
-				agent.order = placed.get("1:" + agent.id);
-				var bytes = MessagePack.encode(agent);
-				statement("UPDATE workspace_agents SET payload=?2 WHERE id=?1", function(row) {
-					row.bindText(1, agent.id);
-					row.bindBlob(2, bytes);
-					row.step();
-				});
-			}
-			for (terminal in terminals) if (terminal.group == SEED_GROUP) {
-				terminal.group = destination;
-				terminal.order = placed.get("2:" + terminal.id);
-				terminal.revision = Int64.add(terminal.revision, Int64.ofInt(1));
-				var bytes = MessagePack.encode(terminal);
-				statement("UPDATE workspace_terminals SET payload=?2 WHERE id=?1", function(row) {
-					row.bindText(1, terminal.id);
-					row.bindBlob(2, bytes);
-					row.step();
-				});
-			}
-			statement("DELETE FROM workspace_groups WHERE id=?1", function(row) {
-				row.bindText(1, SEED_GROUP);
-				row.step();
-			});
-			db.exec("DELETE FROM workspace_operations");
-			db.exec("DELETE FROM workspace_events");
-			statement("UPDATE workspace_meta SET epoch=?1,cursor=0 WHERE id=1", function(row) {
-				row.bindText(1, epoch);
-				row.step();
-			});
-		});
-		return retired;
-	}
-
-	public function commit(request:RenameGroup, outcome:RenameResult, event:WorkspaceEvent):Void {
+	public function commit(request:RenameGroup, outcome:RenameResult):Void {
 		transaction(function() {
 			statement("UPDATE workspace_meta SET cursor=?1 WHERE id=1 AND workspace=?2 AND epoch=?3 AND cursor=?4", function(row) {
 				row.bindInt64(1, Int64.ofInt(outcome.sequence));
@@ -405,17 +240,8 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			statement("INSERT INTO workspace_operations VALUES(?1,?2,?3,?4)", function(row) {
 				row.bindText(1, request.operation);
 				row.bindInt64(2, Int64.ofInt(outcome.sequence));
-				row.bindBlob(3, WorkspaceProtocol.RENAME.encodeRequest(request));
-				row.bindBlob(4, WorkspaceProtocol.RENAME.encodeResponse(outcome));
-				row.step();
-			});
-			statement("INSERT INTO workspace_events VALUES(?1,?2)", function(row) {
-				row.bindInt64(1, Int64.ofInt(event.sequence));
-				row.bindBlob(2, WorkspaceProtocol.encodeEvent(event));
-				row.step();
-			});
-			statement("DELETE FROM workspace_events WHERE sequence<=?1", function(row) {
-				row.bindInt64(1, Int64.ofInt(outcome.sequence > historyLimit ? outcome.sequence - historyLimit : 0));
+				row.bindBlob(3, WorkspaceProtocol.GROUP.encodeRequest(request));
+				row.bindBlob(4, WorkspaceProtocol.GROUP.encodeResponse(outcome));
 				row.step();
 			});
 		});
@@ -445,38 +271,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
  }
  public function removeTerminal(id:String):Void {
   transaction(function() {
-   statement("DELETE FROM workspace_terminal_history WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
    statement("DELETE FROM workspace_terminals WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
-  });
- }
-
- public function hasTerminalHistory(id:String):Bool {
-  var found = false;
-  statement("SELECT 1 FROM workspace_terminal_history WHERE id=?1", function(row) {
-   row.bindText(1,id); found = row.step();
-  });
-  return found;
- }
- public function loadTerminalHistory(id:String):Null<workspace.service.TerminalHistory> {
-  var result:Null<workspace.service.TerminalHistory> = null;
-  statement("SELECT payload,length(payload) FROM workspace_terminal_history WHERE id=?1", function(row) {
-   row.bindText(1,id);
-   if (row.step()) result = MessagePack.decode(blob(row,0,integer(row.columnInt64(1)),16777344));
-  });
-  if (result != null) validateTerminalHistory(result);
-  return result;
- }
- static function validateTerminalHistory(h:workspace.service.TerminalHistory):Void {
-  if (h == null || h.version != 1 || h.columns < 1 || h.columns > 512 || h.rows < 1 || h.rows > 256
-   || h.data == null || h.data.length == 0 || h.data.length > 16777216) throw "Invalid terminal history";
- }
- public function saveTerminalHistory(id:String, history:workspace.service.TerminalHistory):Void {
-  validateTerminalHistory(history);
-  var payload = MessagePack.encode(history);
-  transaction(function() {
-   statement("INSERT INTO workspace_terminal_history(id,payload) SELECT id,?2 FROM workspace_terminals WHERE id=?1 ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", function(row) {
-    row.bindText(1,id); row.bindBlob(2,payload); row.step();
-   });
   });
  }
 
@@ -557,84 +352,6 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
    }
   });
  }
-
-	public function loadDevices():Array<workspace.service.WorkspaceDeviceRecord> {
-		var records:Array<workspace.service.WorkspaceDeviceRecord> = [];
-		statement("SELECT device_id,static_key,grants,revoked,length(static_key),length(grants) FROM workspace_devices ORDER BY device_id LIMIT 65", function(row) {
-			while (row.step()) {
-				var deviceId = row.columnText(0), keySize = integer(row.columnInt64(4)), grantsSize = integer(row.columnInt64(5));
-				workspace.transport.RelayFrameCodec.decodeChannelId(deviceId);
-				if (keySize != 32 || grantsSize < 1 || grantsSize > 4096)
-					throw "Invalid persisted workspace device";
-				var grants:Array<String> = MessagePack.decode(blob(row, 2, grantsSize, 4096));
-				validateDeviceGrants(grants);
-				var revokedValue = integer(row.columnInt64(3));
-				if (revokedValue > 1)
-					throw "Invalid persisted workspace device state";
-				records.push({deviceId: deviceId, staticPublicKey: row.columnBlob(1), grants: grants, revoked: revokedValue == 1});
-			}
-		});
-		if (records.length > 64)
-			throw "Workspace device catalog exceeds limit";
-		return records;
-	}
-
-	public function saveDevice(record:workspace.service.WorkspaceDeviceRecord):Void {
-		if (record == null || record.staticPublicKey == null || record.staticPublicKey.length != 32)
-			throw "Invalid workspace device identity";
-		workspace.transport.RelayFrameCodec.decodeChannelId(record.deviceId);
-		validateDeviceGrants(record.grants);
-		var grants = MessagePack.encode(record.grants);
-		transaction(function() {
-			var count = 0, exists = false;
-			statement("SELECT count(*),EXISTS(SELECT 1 FROM workspace_devices WHERE device_id=?1) FROM workspace_devices", function(row) {
-				row.bindText(1, record.deviceId);
-				if (!row.step()) throw "Workspace device count unavailable";
-				count = integer(row.columnInt64(0));
-				exists = integer(row.columnInt64(1)) == 1;
-			});
-			if (!exists && count >= MAX_DEVICES)
-				throw "Workspace device limit reached";
-			statement("INSERT INTO workspace_devices(device_id,static_key,grants,revoked) VALUES(?1,?2,?3,?4) ON CONFLICT(device_id) DO UPDATE SET static_key=excluded.static_key,grants=excluded.grants,revoked=excluded.revoked", function(row) {
-				row.bindText(1, record.deviceId);
-				row.bindBlob(2, record.staticPublicKey);
-				row.bindBlob(3, grants);
-				row.bindInt64(4, Int64.ofInt(record.revoked ? 1 : 0));
-				row.step();
-			});
-		});
-	}
-
-	public function revokeDevice(deviceId:String):Void {
-		workspace.transport.RelayFrameCodec.decodeChannelId(deviceId);
-		transaction(function() {
-			statement("UPDATE workspace_devices SET revoked=1 WHERE device_id=?1", function(row) {
-				row.bindText(1, deviceId);
-				row.step();
-			});
-		});
-	}
-
-	public function deleteDevice(deviceId:String):Void {
-		workspace.transport.RelayFrameCodec.decodeChannelId(deviceId);
-		transaction(function() {
-			statement("DELETE FROM workspace_devices WHERE device_id=?1", function(row) {
-				row.bindText(1, deviceId);
-				row.step();
-			});
-		});
-	}
-
-	static function validateDeviceGrants(grants:Array<String>):Void {
-		if (grants == null || grants.length > 32)
-			throw "Invalid workspace device grants";
-		var seen:Map<String, Bool> = [];
-		for (grant in grants) {
-			if (grant == null || grant.length == 0 || grant.length > 128 || seen.exists(grant))
-				throw "Invalid workspace device grant";
-			seen.set(grant, true);
-		}
-	}
 
 	public function close():Void
 		db.close();

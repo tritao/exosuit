@@ -66,7 +66,7 @@ SVG also has an opt-in native preview for a deliberately limited subset: root `s
 
 Codex messages can now carry optional opaque image identities associated only with managed staged paths reported by a real native user-message item. The host archives the protected file and session/turn/item binding rather than exposing its path. Retention is bounded to 32 images / 64 MiB; oldest unpinned entries can expire and active native reads retain existing lease protection. Native recovery resolves only managed archived identities. A null identity produces an explicit unavailable label.
 
-Preview and Open image are explicit actions. Reads use the authorized message-image RPC in 24 KiB chunks with identity/offset/size and connection fencing. Native previews are bounded to 512 pixels, and original-resolution editor tabs share the existing aggregate decoded-memory cap and are excluded from local file restoration. Provider/client/UI tests and dark/light native captures are recorded in [validation](ui-exploration-validation.md).
+Preview and Open image are explicit actions. Reads use the authorized message-image RPC in 24 KiB chunks with identity/offset/size and connection fencing. Native previews are bounded to 512 pixels, and original-resolution editor tabs share the existing aggregate decoded-memory cap and are excluded from local file restoration..
 
 
 ## Native Codex image and plan activities

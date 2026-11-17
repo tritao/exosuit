@@ -115,21 +115,6 @@ class SuitTray {
 		menu.close();
 	}
 
-	/** Builds the native menu without showing it; returns its command count. For `suit tray-check`. */
-	public function build(build:SuitMenuModel.SuitMenuSink->Void):Int {
-		actions.clear();
-		var menu = NativeKit.nk_menu_create_checked(new MenuOptions());
-		try build(new SuitMenu(menu, actions)) catch (error:Dynamic) {
-			menu.close();
-			throw error;
-		}
-		menu.close();
-		var count = 0;
-		for (_ in actions)
-			count++;
-		return count;
-	}
-
 	/** Runs the action for a chosen command id. */
 	public function activate(commandId:Int):Bool {
 		var action = actions.get(commandId);

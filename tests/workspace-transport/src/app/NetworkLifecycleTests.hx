@@ -88,20 +88,21 @@ class NetworkLifecycleTests {
 			if (connection == null)
 				throw "Missing policy connection";
 			var denied = false;
-			connection.call(WorkspaceProtocol.RENAME, {
+			connection.call(WorkspaceProtocol.GROUP, {
 				workspace: "w",
 				epoch: "e",
 				operation: "denied",
 				group: "g",
 				expectedRevision: 1,
-				name: "New"
+				name: "New",
+				action: "update"
 			}, 1000, function(_) {
-				throw "Revoked rename succeeded";
+				throw "Revoked group change succeeded";
 			}, function(error) {
 				denied = error.code == "unauthorized" && !error.ambiguous;
 			});
 			while (!denied) {
-				require(clock() < deadline, "Denied rename timed out");
+				require(clock() < deadline, "Denied group change timed out");
 				step();
 			}
 			require(catalog.snapshot().cursor == 0, "Revoked write changed workspace state");

@@ -32,8 +32,8 @@ class WorkspaceGroupTests {
 				revision: 1
 			}
 		]);
-		var store = new WorkspaceSqliteStore(root + "/groups.sqlite", "w", seed.snapshot(), 32, root);
-		var service = new WorkspaceService("w", "groups", seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
+		var store = new WorkspaceSqliteStore(root + "/groups.sqlite", "w", seed.snapshot(), root);
+		var service = new WorkspaceService("w", "groups", seed.snapshot().groups, 256, 16, store, directories.resolve);
 		var clock = function() return Sys.time() * 1000;
 		var pair = MemoryTransport.pair(),
 			client = new RpcConnection(pair.client, clock),
@@ -43,7 +43,6 @@ class WorkspaceGroupTests {
 			WorkspaceProtocol.WRITE,
 			WorkspaceProtocol.TREE,
 			WorkspaceProtocol.REMOVE,
-			WorkspaceProtocol.EVENTS,
 			WorkspaceTerminalProtocol.READ,
 			WorkspaceTerminalProtocol.CONTROL,
 			WorkspaceTerminalProtocol.CATALOG
@@ -52,10 +51,8 @@ class WorkspaceGroupTests {
 		var readPair = MemoryTransport.pair(),
 			readClient = new RpcConnection(readPair.client, clock),
 			readServer = new RpcConnection(readPair.server, clock);
-		service.bind(readServer, [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS]);
-		var replica = new workspace.service.WorkspaceReplica("w");
-		replica.restore(readClient, function() return true);
-		var terminals = new WorkspaceTerminalManager("w", "owner", root, 65536, store, function() return service.snapshot().groups);
+		service.bind(readServer, [WorkspaceProtocol.READ]);
+		var terminals = TestTerminals.manager("w", "owner", root, 65536, store, function() return service.snapshot().groups);
 		terminals.bind(server, grants);
 		var allowRemoval = true;
 		service.canRemoveGroup = function(group) {
@@ -74,7 +71,15 @@ class WorkspaceGroupTests {
 		}
 		for (_ in 0...4)
 			pump();
-		require(replica.ready, "Read-only observer failed to subscribe");
+		// The groups the read-only client sees.
+		function readGroups():Array<WorkspaceGroup> {
+			var got:Null<WorkspaceSnapshot> = null;
+			readClient.call(WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) got = value, function(e) throw e.message);
+			pump();
+			var answered = got;
+			if (answered == null) throw "QUERY was not answered";
+			return answered.groups;
+		}
 		var counter = 0;
 		function change(id:String, name:String, parent:Null<String>, cwd:Null<String>, revision:Int, action:String, ?error:String):Null<RenameResult> {
 			counter++;
@@ -106,7 +111,7 @@ class WorkspaceGroupTests {
 		change("parent", "Same", "work", child, 0, "create");
 		change("nested", "Same", "parent", null, 0, "create");
 		change("other", "Same", "work", root, 0, "create");
-		require(replica.view().length == 4, "Second client missed group creation");
+		require(readGroups().length == 4, "Second client missed group creation");
 		var denied = "";
 		readClient.call(WorkspaceProtocol.GROUP, {
 			workspace: "w",
@@ -121,19 +126,6 @@ class WorkspaceGroupTests {
 		pump();
 		pump();
 		require(denied == "unauthorized", "Read-only group mutation was not denied");
-		var legacy = "";
-		client.call(WorkspaceProtocol.RENAME, {
-			workspace: "w",
-			epoch: "groups",
-			operation: "legacy-create",
-			group: "forbidden",
-			name: "X",
-			expectedRevision: 0,
-			action: "create"
-		}, 1000,
-			function(_) throw "Legacy method bypassed tree capability", function(e) legacy = e.code);
-		pump();
-		require(legacy == "invalid_request", "Legacy rename accepted group creation");
 		change("parent", "Same", "nested", child, 1, "update", "invalid_group");
 		change("nested", "Same", "missing", null, 1, "update", "invalid_group");
 		change("other", "Same", "work", root + "/missing", 1, "update", "invalid_directory");
@@ -166,19 +158,19 @@ class WorkspaceGroupTests {
 		while (output.indexOf("GROUP_CWD:" + child) < 0 && clock() < deadline) {
 			Sys.sleep(0.005);
 			pump();
-			client.call(WorkspaceTerminalProtocol.OUTPUT, {
+			client.call(WorkspaceTerminalProtocol.REPLAY, {
 				workspace: "w",
 				instance: "owner",
 				id: "inherited",
-				offset: 0
-			}, 1000, function(v) output = v.data.toString(), function(e) throw e.message);
+				cursor: 0
+			}, 1000, function(v) output = [for (event in v.events) event.data.toString()].join(""), function(e) throw e.message);
 			pump();
 		}
 		require(output.indexOf("GROUP_CWD:" + child) >= 0, "Actual shell did not launch in inherited directory:\n" + output);
 		change("nested", "Renamed", "other", null, 1, "update");
 		change("work", "Work renamed", null, child, 1, "update");
 		change("nested", "Stale", "work", null, 1, "update", "stale_revision");
-		var observed = Lambda.find(replica.view(), function(g) return g.id == "nested");
+		var observed = Lambda.find(readGroups(), function(g) return g.id == "nested");
 		require(observed != null && observed.parent == "other" && observed.name == "Renamed", "Second client missed group move/rename");
 		var listing:Null<TerminalCatalog> = null;
 		client.call(WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "owner", after: null}, 1000, function(v) listing = v,
@@ -241,7 +233,7 @@ class WorkspaceGroupTests {
 		pump();
 		require(deletionResult != null && deletionResult.deleted == true && deletionError == "", "empty group removal failed");
 		require(!Lambda.exists(service.snapshot().groups,function(group) return group.id == "delete-me") &&
-			!Lambda.exists(replica.view(),function(group) return group.id == "delete-me"), "group removal was not replicated");
+			!Lambda.exists(readGroups(),function(group) return group.id == "delete-me"), "group removal was not replicated");
 		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
 		pump();
 		require(deletionError == "" && deletionResult != null && deletionResult.deleted == true, "group deletion retry was not idempotent");
@@ -252,37 +244,38 @@ class WorkspaceGroupTests {
 		readServer.close();
 		terminals.dispose();
 		store.close();
-		store = new WorkspaceSqliteStore(root + "/groups.sqlite", "w", seed.snapshot(), 32, root);
+		store = new WorkspaceSqliteStore(root + "/groups.sqlite", "w", seed.snapshot(), root);
 		var wrongRoot = false;
 		try {
-			var wrong = new WorkspaceSqliteStore(root + "/groups.sqlite", "w", seed.snapshot(), 32, child);
+			var wrong = new WorkspaceSqliteStore(root + "/groups.sqlite", "w", seed.snapshot(), child);
 			wrong.close();
 		} catch (_:Dynamic)
 			wrongRoot = true;
 		require(wrongRoot, "Group directory change redirected the database authorization root");
-		var recovered = new WorkspaceService("w", "ignored", seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
+		var recovered = new WorkspaceService("w", "ignored", seed.snapshot().groups, 256, 16, store, directories.resolve);
 		var groups = recovered.snapshot().groups;
 		require(groups.length == 4, "Created groups did not survive restart");
 		var nested = Lambda.find(groups, function(g) return g.id == "nested");
 		require(nested != null && nested.name == "Renamed" && nested.parent == "other" && nested.revision == 2, "Nested group state did not survive restart");
 
 		store.close();
-		// A failed legacy-root migration must leave the old schema reopenable by its correct owner.
-		var legacyStore = new WorkspaceSqliteStore(root + "/legacy-root.sqlite", "w", seed.snapshot());
+		// A catalog in a format from before 2026-10-31 is refused, untouched, with the build that converts it.
+		var legacyStore = new WorkspaceSqliteStore(root + "/legacy.sqlite", "w", seed.snapshot(), root);
 		legacyStore.close();
-		var legacyDb = sqlitekit.Database.open(root + "/legacy-root.sqlite");
-		legacyDb.exec("DROP TABLE workspace_agents; DROP TABLE workspace_devices; ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=2");
+		var legacyDb = sqlitekit.Database.open(root + "/legacy.sqlite");
+		legacyDb.exec("DROP TABLE workspace_agents; PRAGMA user_version=2");
 		legacyDb.close();
-		var rejectedLegacy = false;
+		var refusal = "";
 		try {
-			var wrong = new WorkspaceSqliteStore(root + "/legacy-root.sqlite", "w", seed.snapshot(), 32, child);
-			wrong.close();
-		} catch (_:Dynamic)
-			rejectedLegacy = true;
-		require(rejectedLegacy, "Legacy root mismatch was accepted");
-		legacyStore = new WorkspaceSqliteStore(root + "/legacy-root.sqlite", "w", seed.snapshot(), 32, root);
-		require(legacyStore.load().snapshot.cursor == 0, "Failed root migration prevented correct-owner recovery");
-		legacyStore.close();
+			var old = new WorkspaceSqliteStore(root + "/legacy.sqlite", "w", seed.snapshot(), root);
+			old.close();
+		} catch (error:Dynamic)
+			refusal = Std.string(error);
+		require(refusal.indexOf("before 2026-10-31") >= 0 && refusal.indexOf("a457e3dc") >= 0, "An old catalog was not refused by name: " + refusal);
+		legacyDb = sqlitekit.Database.open(root + "/legacy.sqlite");
+		var version = legacyDb.prepare("PRAGMA user_version");
+		require(version.step() && haxe.Int64.toInt(version.columnInt64(0)) == 2, "A refused catalog was rewritten");
+		version.close(); legacyDb.close();
 
 		var wideName = "", wideRoot = "";
 		for (_ in 0...128)

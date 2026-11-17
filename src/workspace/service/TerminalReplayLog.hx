@@ -83,19 +83,4 @@ class TerminalReplayLog {
     }
     return {events:result, next:next};
   }
-  /** Compatibility for byte-only readers. New clients use read(). */
-  public function readBytes(offset:Int64):Bytes {
-    if (offset < startOffset || offset > endOffset) throw "Invalid terminal output offset";
-    var length = Int64.toInt(endOffset - offset > BATCH_BYTES ? Int64.ofInt(BATCH_BYTES) : endOffset - offset);
-    var bytes = Bytes.alloc(length), copied = 0;
-    for (entry in entries) {
-      if (copied == length) break;
-      if (entry.offset + entry.data.length <= offset) continue;
-      var skip = offset > entry.offset ? Int64.toInt(offset - entry.offset) : 0;
-      var take = Std.int(Math.min(entry.data.length - skip, length - copied));
-      bytes.blit(copied, entry.data, skip, take);
-      copied += take;
-    }
-    return bytes;
-  }
 }

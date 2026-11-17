@@ -1,0 +1,123 @@
+{
+ "results": [
+  {
+   "check": "time startup",
+   "ok": true,
+   "ms": {
+    "startup-main": 0,
+    "window-open": 226,
+    "app-constructed": 244,
+    "workspace-clients": 245,
+    "context-started": 245,
+    "app-built": 245,
+    "first-frame": 420,
+    "alpha-rows-frame": 8064
+   },
+   "events": []
+  },
+  {
+   "check": "time expand",
+   "ok": true,
+   "ms": {
+    "rows-visible": 1173,
+    "rows-frame": 1176
+   },
+   "events": [
+    "0 start-requested workspac Gamma",
+    "1 starter-queued workspac ",
+    "52 starter-launch workspac ",
+    "932 starter-endpoint workspac ",
+    "932 service-noted workspac ",
+    "932 starter-done workspac ",
+    "932 suit-queued  machine",
+    "994 suit-begin  machine",
+    "1115 suit-reply  machine ok 120 ms",
+    "1115 watch-connected workspac ",
+    "1115 catalog-read workspac first",
+    "1173 watch-live workspac 1 pages",
+    "1173 rows-visible workspac other",
+    "1176 rows-frame workspac other"
+   ]
+  },
+  {
+   "check": "time open",
+   "ok": true,
+   "ms": {
+    "connected": 786,
+    "rows-frame": 867
+   },
+   "events": [
+    "0 open-workspace workspac Beta",
+    "9 attach workspac C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\beta",
+    "12 helper-start workspac launch",
+    "12 status workspac Connecting workspace\u2026",
+    "687 helper-exit workspac launch code 0",
+    "688 discovered workspac ",
+    "743 starter-endpoint workspac ",
+    "743 service-noted workspac ",
+    "743 starter-done workspac ",
+    "743 suit-queued  machine",
+    "754 identity-verified workspac ",
+    "785 ready workspac ",
+    "786 status workspac Workspace connected",
+    "803 suit-begin  machine",
+    "822 catalog-first-read workspac 0 terminals",
+    "823 rows-visible workspac own",
+    "867 rows-frame workspac own"
+   ]
+  },
+  {
+   "check": "time back",
+   "ok": true,
+   "ms": {
+    "connected": 121,
+    "rows-frame": 228
+   },
+   "events": [
+    "0 open-workspace workspac Alpha",
+    "8 attach workspac C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\alpha",
+    "12 helper-start workspac discover",
+    "12 descriptor workspac discover",
+    "12 discovered workspac ",
+    "12 status workspac Connecting workspace\u2026",
+    "74 identity-verified workspac ",
+    "120 ready workspac ",
+    "121 status workspac Workspace connected",
+    "151 watch-connected workspac ",
+    "151 catalog-read workspac first",
+    "169 catalog-first-read workspac 0 terminals",
+    "170 rows-visible workspac own",
+    "218 watch-live workspac 1 pages",
+    "219 rows-visible workspac other",
+    "228 rows-frame workspac own"
+   ]
+  },
+  {
+   "check": "time agent",
+   "ok": true,
+   "ms": {
+    "terminal-attached": 63,
+    "terminal-shown": 247
+   },
+   "events": [
+    "0 new-agent-session workspac claude",
+    "17 terminal-open C:\\Users workspace-terminal-34f8fbad093ac1c5cfe5430bbbe89f9bdd54a29e41d0c39295d5070aa3c6b2dc",
+    "63 terminal-attached C:\\Users workspace-terminal-34f8fbad093ac1c5cfe5430bbbe89f9bdd54a29e41d0c39295d5070aa3c6b2dc",
+    "247 terminal-shown C:\\Users workspace-terminal-34f8fbad093ac1c5cfe5430bbbe89f9bdd54a29e41d0c39295d5070aa3c6b2dc 73106 bytes"
+   ]
+  },
+  {
+   "check": "time suit machine",
+   "ok": true,
+   "ms": {
+    "reply 0": 235,
+    "reply 1": 109,
+    "reply 2": 120,
+    "reply 3": 117,
+    "reply 4": 133
+   },
+   "events": []
+  }
+ ],
+ "seconds": 15.0
+}

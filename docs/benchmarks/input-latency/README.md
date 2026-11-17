@@ -2,7 +2,7 @@
 
 Measures how long the editor takes to react to real input: from the moment Windows receives a mouse move, button or
 key, to the moment the editor takes it off its queue, and what the UI thread was doing meanwhile. Scripted benchmarks
-(`../live-mode-performance/`) inject input into the app's own queue, so they cannot see this delay; these tools can.
+inject input into the app's own queue, so they cannot see this delay; these tools can.
 The Windows tools below are `hook.py`, `driver.py`, `session.sh` and `analyze.py`. Linux has its own, which read the
 profiler's capture instead of three text files: see [Linux](#linux).
 
@@ -48,9 +48,7 @@ that time split between waiting, frames, GC and other UI-thread work:
 
 `to_perfetto.py HOOK APP GC OUT.pftrace` writes a trace for <https://ui.perfetto.dev> with tracks for OS input, the UI
 thread (waits, frames, GC pauses, dequeues) and one bar per input from arrival to dequeue; bars over 10 ms are named
-`SLOW`. To open it from a local file, drag it into the Perfetto UI, or serve the folder with
-`../live-mode-performance/serve_dir.py runs/<name>` and open
-`https://ui.perfetto.dev/#!/?url=http://127.0.0.1:9001/<name>.pftrace`.
+`SLOW`. To open it, drag the file into the Perfetto UI.
 
 ## Known limits
 

@@ -224,13 +224,13 @@ class CodexSessionPanel implements View {
     };
   }
 
-  /** Pi and the built-in Exosuit agent share the supervised / auto-accept / full-access permission modes. */
+  /** Pi has the supervised / auto-accept / full-access permission modes. */
   static function usesSupervisedModes(provider:Null<String>):Bool {
-    return provider == "pi" || provider == "agentkit";
+    return provider == "pi";
   }
 
   static function providerName(provider:Null<String>):String {
-    return provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : provider == "agentkit" ? "Exosuit" : "Codex";
+    return provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Codex";
   }
 
   static function piPermissionLabel(mode:String):String {
@@ -491,8 +491,7 @@ class CodexSessionPanel implements View {
     rows.push(new KeyedView("workspace", new Row("agent-workspace-actions", workspaceControls, workspaceStyle)));
     if (details) {
       rows.push(new KeyedView("directory", paragraph(view.record.cwd)));
-      // The built-in agent has no native thread to show; its identity is the Workbench resource.
-      if (view.record.provider != "agentkit") rows.push(new KeyedView("thread", paragraph((view.record.provider == "claude" ? "Claude session: " : "Thread: ") + view.record.thread)));
+      rows.push(new KeyedView("thread", paragraph((view.record.provider == "claude" ? "Claude session: " : "Thread: ") + view.record.thread)));
       rows.push(new KeyedView("connection", paragraph("Connection: " + connectionState)));
       rows.push(new KeyedView("diagnostics-toggle", new Button(diagnostics ? "Hide diagnostics" : "Show diagnostics", null, function() {
         diagnostics = !diagnostics;

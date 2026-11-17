@@ -19,5 +19,3 @@ working plugin active; use `plugins:show-diagnostics`, then explicitly reload or
 disable it. A failed language server is restartable from its language commands;
 release archives select their bundled server, while developers can explicitly set
 `HAXEON_LSP` to another launcher.
-
-Known limitations are tracked in [release qualification](release-qualification.md).

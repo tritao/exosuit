@@ -1,0 +1,566 @@
+[
+ {
+  "t": 0,
+  "event": "startup-main",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 226,
+  "event": "window-open",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 244,
+  "event": "app-constructed",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 245,
+  "event": "machine-seeded",
+  "workspace": "",
+  "detail": "3 workspaces"
+ },
+ {
+  "t": 245,
+  "event": "suit-queued",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 245,
+  "event": "workspace-clients",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 245,
+  "event": "context-started",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 245,
+  "event": "app-built",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 258,
+  "event": "attach",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\alpha"
+ },
+ {
+  "t": 263,
+  "event": "helper-start",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "launch"
+ },
+ {
+  "t": 263,
+  "event": "status",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "Connecting workspace\u2026"
+ },
+ {
+  "t": 263,
+  "event": "suit-begin",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 420,
+  "event": "first-frame",
+  "workspace": "",
+  "detail": ""
+ },
+ {
+  "t": 498,
+  "event": "suit-reply",
+  "workspace": "",
+  "detail": "machine ok 235 ms"
+ },
+ {
+  "t": 5300,
+  "event": "suit-queued",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 5300,
+  "event": "suit-begin",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 5410,
+  "event": "suit-reply",
+  "workspace": "",
+  "detail": "machine ok 109 ms"
+ },
+ {
+  "t": 7864,
+  "event": "descriptor",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "launch"
+ },
+ {
+  "t": 7864,
+  "event": "discovered",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 7884,
+  "event": "helper-exit",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "launch code 0"
+ },
+ {
+  "t": 7884,
+  "event": "descriptor-confirmed",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 7914,
+  "event": "identity-verified",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 7945,
+  "event": "ready",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 7946,
+  "event": "status",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "Workspace connected"
+ },
+ {
+  "t": 8017,
+  "event": "catalog-first-read",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "0 terminals"
+ },
+ {
+  "t": 8017,
+  "event": "rows-visible",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "own"
+ },
+ {
+  "t": 8064,
+  "event": "rows-frame",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "own"
+ },
+ {
+  "t": 8494,
+  "event": "start-requested",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": "Gamma"
+ },
+ {
+  "t": 8495,
+  "event": "starter-queued",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": ""
+ },
+ {
+  "t": 8546,
+  "event": "starter-launch",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": ""
+ },
+ {
+  "t": 9426,
+  "event": "starter-endpoint",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": ""
+ },
+ {
+  "t": 9426,
+  "event": "service-noted",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": ""
+ },
+ {
+  "t": 9426,
+  "event": "starter-done",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": ""
+ },
+ {
+  "t": 9426,
+  "event": "suit-queued",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 9488,
+  "event": "suit-begin",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 9609,
+  "event": "suit-reply",
+  "workspace": "",
+  "detail": "machine ok 120 ms"
+ },
+ {
+  "t": 9609,
+  "event": "watch-connected",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": ""
+ },
+ {
+  "t": 9609,
+  "event": "catalog-read",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": "first"
+ },
+ {
+  "t": 9667,
+  "event": "watch-live",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": "1 pages"
+ },
+ {
+  "t": 9667,
+  "event": "rows-visible",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": "other"
+ },
+ {
+  "t": 9670,
+  "event": "rows-frame",
+  "workspace": "workspace-2648633ede6d9e05c76b23c4975373f7",
+  "detail": "other"
+ },
+ {
+  "t": 10098,
+  "event": "start-requested",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "Beta"
+ },
+ {
+  "t": 10098,
+  "event": "starter-queued",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10139,
+  "event": "starter-launch",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10210,
+  "event": "open-workspace",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "Beta"
+ },
+ {
+  "t": 10219,
+  "event": "attach",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\beta"
+ },
+ {
+  "t": 10222,
+  "event": "helper-start",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "launch"
+ },
+ {
+  "t": 10222,
+  "event": "status",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "Connecting workspace\u2026"
+ },
+ {
+  "t": 10897,
+  "event": "helper-exit",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "launch code 0"
+ },
+ {
+  "t": 10898,
+  "event": "discovered",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10953,
+  "event": "starter-endpoint",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10953,
+  "event": "service-noted",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10953,
+  "event": "starter-done",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10953,
+  "event": "suit-queued",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 10964,
+  "event": "identity-verified",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10995,
+  "event": "ready",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 10996,
+  "event": "status",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "Workspace connected"
+ },
+ {
+  "t": 11013,
+  "event": "suit-begin",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 11032,
+  "event": "catalog-first-read",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "0 terminals"
+ },
+ {
+  "t": 11033,
+  "event": "rows-visible",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "own"
+ },
+ {
+  "t": 11077,
+  "event": "rows-frame",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "own"
+ },
+ {
+  "t": 11131,
+  "event": "suit-reply",
+  "workspace": "",
+  "detail": "machine ok 117 ms"
+ },
+ {
+  "t": 11909,
+  "event": "start-requested",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "Alpha"
+ },
+ {
+  "t": 11910,
+  "event": "starter-queued",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 11936,
+  "event": "starter-launch",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12021,
+  "event": "open-workspace",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "Alpha"
+ },
+ {
+  "t": 12029,
+  "event": "attach",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\alpha"
+ },
+ {
+  "t": 12033,
+  "event": "helper-start",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "discover"
+ },
+ {
+  "t": 12033,
+  "event": "descriptor",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "discover"
+ },
+ {
+  "t": 12033,
+  "event": "discovered",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12033,
+  "event": "status",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "Connecting workspace\u2026"
+ },
+ {
+  "t": 12095,
+  "event": "identity-verified",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12141,
+  "event": "ready",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12142,
+  "event": "status",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "Workspace connected"
+ },
+ {
+  "t": 12172,
+  "event": "watch-connected",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": ""
+ },
+ {
+  "t": 12172,
+  "event": "catalog-read",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "first"
+ },
+ {
+  "t": 12190,
+  "event": "catalog-first-read",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "0 terminals"
+ },
+ {
+  "t": 12191,
+  "event": "rows-visible",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "own"
+ },
+ {
+  "t": 12239,
+  "event": "watch-live",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "1 pages"
+ },
+ {
+  "t": 12240,
+  "event": "rows-visible",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "other"
+ },
+ {
+  "t": 12249,
+  "event": "rows-frame",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "own"
+ },
+ {
+  "t": 12249,
+  "event": "rows-frame",
+  "workspace": "workspace-fc2fee211a64d81a718d19fc60a996d1",
+  "detail": "other"
+ },
+ {
+  "t": 12253,
+  "event": "helper-exit",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "discover code 0"
+ },
+ {
+  "t": 12253,
+  "event": "descriptor-confirmed",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12465,
+  "event": "starter-endpoint",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12465,
+  "event": "service-noted",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12465,
+  "event": "starter-done",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": ""
+ },
+ {
+  "t": 12465,
+  "event": "suit-queued",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 12538,
+  "event": "suit-begin",
+  "workspace": "",
+  "detail": "machine"
+ },
+ {
+  "t": 12671,
+  "event": "suit-reply",
+  "workspace": "",
+  "detail": "machine ok 133 ms"
+ },
+ {
+  "t": 14461,
+  "event": "new-agent-session",
+  "workspace": "workspace-db8b541d58b682d7d24ad42e37f1ad01",
+  "detail": "claude"
+ },
+ {
+  "t": 14478,
+  "event": "terminal-open",
+  "workspace": "C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\alpha",
+  "detail": "workspace-terminal-34f8fbad093ac1c5cfe5430bbbe89f9bdd54a29e41d0c39295d5070aa3c6b2dc"
+ },
+ {
+  "t": 14524,
+  "event": "terminal-attached",
+  "workspace": "C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\alpha",
+  "detail": "workspace-terminal-34f8fbad093ac1c5cfe5430bbbe89f9bdd54a29e41d0c39295d5070aa3c6b2dc"
+ },
+ {
+  "t": 14708,
+  "event": "terminal-shown",
+  "workspace": "C:\\Users\\corbi\\projects\\exosuit-wt\\entropy-s0\\docs\\benchmarks\\perf-harness\\runs\\s0-baseline\\fixture\\alpha",
+  "detail": "workspace-terminal-34f8fbad093ac1c5cfe5430bbbe89f9bdd54a29e41d0c39295d5070aa3c6b2dc 73106 bytes"
+ }
+]

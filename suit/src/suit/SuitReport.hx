@@ -85,17 +85,6 @@ class SuitReport {
 		};
 	}
 
-	public static function relayState(process:SuitProcess):String {
-		var relay = process.relay;
-		if (relay == null)
-			return "";
-		if (relay.error != null)
-			return "error: " + relay.error;
-		if (relay.connected)
-			return "connected";
-		return relay.updatedAt > 0 ? "reconnecting" : "configured";
-	}
-
 	public static function text(inventory:SuitInventory, daemon:Null<Bool>):String {
 		var output = new StringBuf();
 		output.add(inventory.summary() + "\n");
@@ -116,9 +105,6 @@ class SuitReport {
 				notes.push("orphaned");
 			if (process.shared)
 				notes.push(SHARED_NOTE);
-			var relay = relayState(process);
-			if (relay.length > 0)
-				notes.push("relay " + relay);
 			var kept = terminal(process);
 			if (kept.length > 0)
 				notes.push(kept);
@@ -179,7 +165,6 @@ class SuitReport {
 			stateDir: process.stateDir,
 			owner: process.owner,
 			uptimeSeconds: process.started > 0 ? Std.int((Date.now().getTime() - process.started) / 1000) : null,
-			relay: process.relay,
 			terminal: process.terminal,
 			children: children(inventory, process),
 			commandLine: process.commandLine
@@ -219,7 +204,7 @@ class SuitReport {
 	}
 
 	/** Every kind suit knows, in the order `suit list --all` counts them. */
-	public static final ALL_KINDS:Array<SuitKind> = [SuitKind.Editor, SuitKind.WorkspaceManager, SuitKind.WorkspaceHost, SuitKind.CompilerWorker,
+	public static final ALL_KINDS:Array<SuitKind> = [SuitKind.Editor, SuitKind.WorkspaceHost, SuitKind.WorkspaceSpare, SuitKind.CompilerWorker,
 		SuitKind.LiveSession, SuitKind.LiveHost, SuitKind.TerminalHost, SuitKind.AgentProvider, SuitKind.LanguageServer, SuitKind.HelperProcess,
 		SuitKind.DevLauncher, SuitKind.Other];
 
@@ -329,26 +314,6 @@ class SuitReport {
 				found.push(id);
 		}
 		return found.length == 1 ? found[0] : null;
-	}
-
-	public static function relayText(inventory:SuitInventory):String {
-		var hosted = inventory.hosted();
-		if (hosted.length == 0)
-			return "No workspace is hosting remote access.\n";
-		var output = new StringBuf();
-		for (process in hosted) {
-			var relay = process.relay;
-			if (relay == null)
-				continue;
-			output.add(column(workspace(process), 22) + column(relayState(process), 16)
-				+ (relay.origin == null ? "" : relay.origin) + "  (pid " + process.pid + ")\n");
-			output.add("    root: " + process.root + "\n");
-			for (device in relay.devices)
-				output.add("    device " + device.deviceId + (device.revoked ? " revoked" : device.connected ? " connected" : " paired") + "\n");
-			if (relay.pending > 0)
-				output.add("    " + relay.pending + " pairing request(s) waiting for approval\n");
-		}
-		return output.toString();
 	}
 
 	public static function results(results:Array<TerminationResult>):String {

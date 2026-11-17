@@ -109,7 +109,7 @@ entire chunk, which reaches `nkui_text_layout_update` and rebuilds the one
 native layout. The new native edit call can receive chunk-relative offsets
 from that existing path; it does not need to rediscover a diff.
 
-The isolated `experiments/skribidi_edit_window/` probe retains old shaped
+The isolated `experiments/skribidi_edit_window/` probe (removed 2026-11-15; see git history) retained old shaped
 cluster and text-property pieces, shapes a small changed window, and compares
 their composition against fresh Skribidi layouts. In a 1 MiB repeated-`a`
 fixture, 30 consecutive varied replacements matched fresh cluster and

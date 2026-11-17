@@ -10,8 +10,6 @@ import sys.io.AtomicFile;
 	- Version 1, `{root}`: a folder's service, keyed by that folder (before M19 Phase 4).
 	- Version 2, `{workspace, folders, scratch}`: a workspace's service, keyed by the workspace's id in suit's machine
 	  catalog (docs/architecture/0006-workspaces-without-folders.md). Its folders are rewritten at each start.
-	- Version 2, `{root, migratedTo}`: a folder's old state, moved into workspace `migratedTo`. Older builds read
-	  any version but 1 as a mismatch, so they refuse it rather than start an empty service there.
 **/
 class AgentStateIdentity {
 	public static inline final FOLDER_VERSION = 1;
@@ -21,21 +19,19 @@ class AgentStateIdentity {
 	public final root:Null<String>;
 	public final folders:Array<String>;
 	public final scratch:Null<String>;
-	public final migratedTo:Null<String>;
 
-	function new(workspace:Null<String>, root:Null<String>, folders:Array<String>, scratch:Null<String>, migratedTo:Null<String>) {
+	function new(workspace:Null<String>, root:Null<String>, folders:Array<String>, scratch:Null<String>) {
 		this.workspace = workspace;
 		this.root = root;
 		this.folders = folders;
 		this.scratch = scratch;
-		this.migratedTo = migratedTo;
 	}
 
 	public static function forFolder(root:String):AgentStateIdentity
-		return new AgentStateIdentity(null, root, [root], null, null);
+		return new AgentStateIdentity(null, root, [root], null);
 
 	public static function forWorkspace(workspace:String, folders:Array<String>, scratch:Null<String>):AgentStateIdentity
-		return new AgentStateIdentity(workspace, null, folders.copy(), scratch, null);
+		return new AgentStateIdentity(workspace, null, folders.copy(), scratch);
 
 	/** The key a service's pipe, registry record and discovery check use: the workspace's id, or the folder. */
 	public function key():String {
@@ -70,26 +66,21 @@ class AgentStateIdentity {
 		return id != null && ~/^[a-z0-9_-]{1,128}$/.match(id) && !~/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.match(id);
 
 	public static function read(path:String):AgentStateIdentity {
-		var value = AgentManager.readPrivateJson(path, 16384);
-		if (!AgentManager.isObject(value)) throw "Workspace state directory identity mismatch";
-		var version = AgentManager.intField(value, "version");
+		var value = AgentState.readPrivateJson(path, 16384);
+		if (!AgentState.isObject(value)) throw "Workspace state directory identity mismatch";
+		var version = AgentState.intField(value, "version");
 		if (version == FOLDER_VERSION) {
-			var root = AgentManager.stringField(value, "root");
+			var root = AgentState.stringField(value, "root");
 			if (root == "") throw "Workspace state directory identity mismatch";
 			return forFolder(root);
 		}
 		if (version != WORKSPACE_VERSION) throw "Workspace state directory identity mismatch";
-		var migratedTo = AgentManager.stringField(value, "migratedTo");
-		if (migratedTo != "") {
-			if (!validWorkspaceId(migratedTo)) throw "Workspace state directory identity mismatch";
-			return new AgentStateIdentity(null, AgentManager.stringField(value, "root"), [], null, migratedTo);
-		}
-		var workspace = AgentManager.stringField(value, "workspace");
+		var workspace = AgentState.stringField(value, "workspace");
 		if (!validWorkspaceId(workspace)) throw "Workspace state directory identity mismatch";
 		var listed:Dynamic = Reflect.field(value, "folders");
 		if (!Std.isOfType(listed, Array)) throw "Workspace state directory identity mismatch";
 		var folders = [for (folder in (listed : Array<Dynamic>)) if (Std.isOfType(folder, String)) (folder : String)];
-		var scratch = AgentManager.stringField(value, "scratch");
+		var scratch = AgentState.stringField(value, "scratch");
 		return forWorkspace(workspace, folders, scratch == "" ? null : scratch);
 	}
 
@@ -97,10 +88,6 @@ class AgentStateIdentity {
 		var content = Json.stringify(json()) + "\n";
 		if (FileSystem.exists(path)) AtomicFile.write(path, content) else AtomicFile.create(path, content);
 	}
-
-	/** Marks a folder's old state as moved into workspace `id`. */
-	public static function markMigrated(path:String, root:String, id:String):Void
-		AtomicFile.write(path, Json.stringify({version: WORKSPACE_VERSION, root: root, migratedTo: id}) + "\n");
 
 	function json():Dynamic {
 		var id = workspace;
