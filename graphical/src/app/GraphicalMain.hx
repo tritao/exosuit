@@ -171,6 +171,9 @@ class GraphicalMain {
 		var reportedFirstFrame = false;
 		var memoryFrames = 0;
 		host.captureReady = function() {
+			// Runs after every rendered frame: the title bar's frame rate counts it.
+			var rendering = app;
+			if (rendering != null) rendering.frameRendered();
 			workspace.client.ConnectTimeline.markOnce("startup-first-frame", "first-frame");
 			workspace.client.ConnectTimeline.frameDrawn();
 			if (inspection != null) inspection.recordFrame();

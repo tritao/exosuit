@@ -174,6 +174,8 @@ class ExosuitApp implements DesktopUiApplication {
 	var remoteFileSearch:WorkspaceFileSearchController;
 	var pendingWorkspaceFolderReveal:Null<String>;
 	var workspaceStatus:String = "";
+	/** Frames rendered per second, shown in the title bar. Made on first use, so a live patch that adds it needs no initializer. */
+	var frameRate:Null<FrameRateMeter>;
 	var workspaceError:Null<String>;
 	public var saveConfirmation(default, null):Null<String>;
 	var saveConfirmationHandler:Null<String->Void>;
@@ -1532,6 +1534,8 @@ class ExosuitApp implements DesktopUiApplication {
 		// The window size, the right panel and the workspace decide what the rail hides.
 		layoutModes.syncRail((phoneLayoutActive ? 1 : 0) | (responsiveRightHidden ? 2 : 0) | (remoteAgentsLayout() ? 4 : 0));
 		var now = Sys.time();
+		var meter = frameRateMeter();
+		if (meter.sample(now)) requestFrame();
 		if (now < nextBackgroundPoll) {
 			// While a workspace connects, its attachment (and suit's link, which answers the open) is polled on every turn;
 			// everything else keeps its cadence.
@@ -2098,6 +2102,8 @@ class ExosuitApp implements DesktopUiApplication {
 			function() application.commands.perform("doc:save", application.context))));
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
 		var workspaceTitle = workspaceTitleText();
+		var fps = frameRateMeter().label();
+		if (fps.length > 0) workspaceTitle = workspaceTitle.length == 0 ? fps : workspaceTitle + " · " + fps;
 		if (application.activeContext.kind == workspace.ContextKind.Group) {
 			var back = new Button("Back to Workspace", null, function() {
 				application.activeContext.useWorkspace(); requestFrame();
@@ -2841,6 +2847,16 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** An open document whose folder was deleted or renamed cannot be normalized; compare it as written rather than fail the lookup. */
 	function normalizedPath(path:String):String return try application.workspace.fileSystem.normalize(path) catch (_:Dynamic) path;
+
+	/** The host calls this after each frame it renders. */
+	public function frameRendered():Void
+		frameRateMeter().frameRendered();
+
+	function frameRateMeter():FrameRateMeter {
+		var meter = frameRate;
+		if (meter == null) frameRate = meter = new FrameRateMeter();
+		return meter;
+	}
 
 	/** Invalidate application views as well as scheduling a host render. */
 	public function requestFrame():Void {
