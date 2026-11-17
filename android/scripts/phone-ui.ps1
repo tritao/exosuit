@@ -1,5 +1,5 @@
 # Finds and taps things on the phone by what the UI says they are, never by fixed pixels. Dot-source after emulator-lib.ps1.
-# The debug app writes its labelled elements and state to files/automation/snapshot.json (devtools.AutomationProbe) when
+# The debug app writes its labelled elements and state to files/automation/snapshot.json (android/haxe/src/PhoneSnapshotFile.hx) when
 # files/automation.on exists; positions there are logical pixels, the screen is logical * density.
 
 $script:PhonePackage = 'com.exosuit.mobile'

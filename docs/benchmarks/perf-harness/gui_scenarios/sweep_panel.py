@@ -19,8 +19,8 @@ norm = lambda p: p.replace("\\", "/").rstrip("/").lower()
 def resize(gui, width, height):
     """Sets the window's outer size in physical pixels, keeping its top left corner."""
     rect = ctypes.wintypes.RECT()
-    ctypes.windll.user32.GetWindowRect(gui.hwnd, ctypes.byref(rect))
-    ctypes.windll.user32.SetWindowPos(gui.hwnd, 0, rect.left, rect.top, int(width), int(height), 0x0004 | 0x0010)  # NOZORDER | NOACTIVATE
+    ctypes.windll.user32.GetWindowRect(gui.window(), ctypes.byref(rect))
+    ctypes.windll.user32.SetWindowPos(gui.window(), 0, rect.left, rect.top, int(width), int(height), 0x0004 | 0x0010)  # NOZORDER | NOACTIVATE
     time.sleep(1.0)
     return rect.right - rect.left, rect.bottom - rect.top
 
@@ -41,21 +41,20 @@ def run(gui):
     box = {}
 
     def group_with_folder():
-        menu(gui, wrow, "New Group" + ELLIPSIS)
+        menu(gui, wrow, "New Group")
         time.sleep(0.6)
         gui.type_text("Docs")
         gui.chord("enter")
         gui.check("group Docs made", lambda s: by_name(s["state"], "groups", "Docs"), 20, detail=lambda s: s["state"]["groups"])
         box["docs"] = by_name(gui.state(), "groups", "Docs")["id"]
-        with open(os.path.join(gui.dir, "pick-folder.txt"), "w") as f:
-            f.write(extra)
-        menu(gui, "g:" + box["docs"], "Change Working Directory" + ELLIPSIS)
+        menu(gui, open_row(gui, "g", box["docs"]), "Change Working Directory" + ELLIPSIS)
+        gui.answer_dialog(paths=[extra])
         gui.check("Docs has the folder 'extra'", lambda s: norm(by_name(s["state"], "groups", "Docs")["cwd"] or "") == norm(extra), 10,
                   detail=lambda s: s["state"]["groups"])
     stage(gui, "a group with a folder of its own", group_with_folder)
 
     def follows():
-        gui.click(gui.element("g:" + box["docs"]))
+        gui.click(gui.element(open_row(gui, "g", box["docs"])))
         gui.check("with Docs selected, Files shows its folder", lambda s: gui.find(s, "e1.txt", role="4") and not gui.find(s, "a1.txt", role="4"), 8,
                   detail=lambda s: (s["state"]["filesRoots"], [e["label"] for e in s["elements"] if e["role"] == "4" and e["label"].endswith(".txt")]))
         dump(gui, "files-docs")

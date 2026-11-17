@@ -60,7 +60,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
             // Secure WebSockets need the system CA roots; NativeKit reads this before its first connection.
             TlsTrust.install(this)
             // Debug builds: a test run that put `files/automation.on` there gets the app's labelled elements and state in
-            // `files/automation/snapshot.json` (AutomationProbe), so it taps what the UI shows instead of fixed pixels.
+            // `files/automation/snapshot.json` (PhoneSnapshotFile), so it taps what the UI shows instead of fixed pixels.
             if (automated())
                 android.system.Os.setenv("EXOSUIT_AUTOMATION_DIR", File(filesDir, "automation").path, true)
             check(HaxeonRuntime.load(assets, if (debuggable) File(filesDir, "dev").path else null) == 0) { "Haxeon module load failed" }

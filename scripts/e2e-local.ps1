@@ -143,11 +143,11 @@ function Write-Config($info) {
         screens = $screens
         fakeClaudeLog = (Join-Path $RunDir 'fake-claude.log')
         editorEnv = [ordered]@{
-            EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP = '1'; EXOSUIT_RELAY_VIA_SUIT = '1'
+            EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP = '1'
             EXOSUIT_RELAY_TEST_CREDENTIALS_DIR = (Join-Path $RunDir 'credentials')
             EXOSUIT_CODEX_BIN = $python; EXOSUIT_CODEX_SCRIPT = $fake
             EXOSUIT_CODEX_PROXY_LAUNCHER = (Join-Path $RepoRoot 'scripts\run-codex-proxy.py')
-            FAKE_CODEX_REPLY = '1'; EXOSUIT_AGENT_ALWAYS_AVAILABLE = '1'
+            FAKE_CODEX_REPLY = '1'; EXOSUIT_SERVICE_IDLE_SECONDS = '3000'
             EXOSUIT_CLAUDE_BIN = $python; EXOSUIT_CLAUDE_SCRIPT = (Join-Path $RepoRoot 'tests\workspace-terminals\fake-claude-tui.py')
             FAKE_CLAUDE_LOG = (Join-Path $RunDir 'fake-claude.log'); PYTHONIOENCODING = 'utf-8'
         }
@@ -177,22 +177,22 @@ function Start-Editor {
     $cfg = Get-Content $envFile -Raw | ConvertFrom-Json
     $extra = @{ EXOSUIT_E2E_CONFIG = $configPath; EXOSUIT_SUIT_IDLE_SECONDS = '86400' }
     foreach ($property in $cfg.env.PSObject.Properties) { if (-not $extra.ContainsKey($property.Name)) { $extra[$property.Name] = $property.Value } }
-    Remove-Item -Recurse -Force (Join-Path $editorDir 'automation') -ErrorAction SilentlyContinue   # a stale snapshot would pass for a live editor
     Say 'starting the editor in live mode (scripts/run.py --live)'
     $arguments = '"' + (Join-Path $RepoRoot 'scripts\run.py') + '" --live ' + ((@($cfg.appArgs) + @($cfg.open) | Where-Object { $_ } | ForEach-Object { '"' + $_ + '"' }) -join ' ')
     $launcher = Start-Child $python $arguments (Join-Path $RunDir 'editor.log') $extra $RepoRoot
     $state.editorLauncher = $launcher.Id
     Save-State $state
-    $snapshot = Join-Path $editorDir 'automation\snapshot.json'
+    # Ready once the window has linked to the rig's suit (suitctl list names its process).
     $deadline = (Get-Date).AddSeconds(600)
     $editor = $null
+    $ready = $false
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 1
         if (-not $editor) { $editor = Get-EditorProcess }
-        if ($editor -and (Test-Path $snapshot)) { break }
+        if ($editor -and (Get-EditorInstance ([int]$editor.ProcessId))) { $ready = $true; break }
         if (-not (Test-Alive $launcher.Id) -and -not $editor) { throw "The editor did not start; see $RunDir\editor.log" }
     }
-    if (-not ($editor -and (Test-Path $snapshot))) { throw "The editor was not ready after 600 s; see $RunDir\editor.log" }
+    if (-not $ready) { throw "The editor was not ready after 600 s; see $RunDir\editor.log" }
     $state.editorPid = [int]$editor.ProcessId
     Save-State $state
     Say "editor ready (pid $($editor.ProcessId))"
@@ -246,7 +246,29 @@ function Start-App {
     Say ("app launch to workspaces listed: {0:N1} s ({1})" -f $timer.Elapsed.TotalSeconds, $line)
 }
 
-# A real editor restart, for the `restart-editor` step: closes the editor window the way a user does (WM_CLOSE, no mouse),
+# suitctl against the rig's suit (its EXOSUIT_SUIT_HOME from the fixture): the output, or $null when it failed.
+function Invoke-SuitCtl([string[]]$Arguments) {
+    $cfg = Get-Content (Join-Path $editorDir 'ENV.json') -Raw | ConvertFrom-Json
+    $saved = $env:EXOSUIT_SUIT_HOME
+    try {
+        $env:EXOSUIT_SUIT_HOME = $cfg.env.EXOSUIT_SUIT_HOME
+        $output = & $python -I (Join-Path $RepoRoot 'scripts\suit.py') --ctl @Arguments 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return ($output -join "`n")
+    } finally { $env:EXOSUIT_SUIT_HOME = $saved }
+}
+
+# The window id suit knows the editor process `$ProcessId` by, or $null while it has not linked.
+function Get-EditorInstance([int]$ProcessId) {
+    $listed = Invoke-SuitCtl @('--output', 'json', 'list')
+    if (-not $listed) { return $null }
+    $found = @(($listed | ConvertFrom-Json).instances | Where-Object { $_.pid -eq $ProcessId })
+    if ($found.Count -eq 0) { return $null }
+    return $found[0].instance_id
+}
+
+# A real editor restart, for the `restart-editor` step: asks the editor to quit the way closing its window does
+# (`suitctl quit --mode prompt`, no mouse),
 # waits for the process to go, then starts the editor again exactly as `up` does. The request and the answer are files in the
 # run folder; the answer holds the epoch seconds of the close and of the moment the editor was ready again.
 function Restart-Editor {
@@ -255,8 +277,9 @@ function Restart-Editor {
     $editor = $null
     if ([int]$state.editorPid -gt 0) { $editor = Get-Process -Id ([int]$state.editorPid) -ErrorAction SilentlyContinue }
     if ($editor) {
-        $editor.CloseMainWindow() | Out-Null
-        if (-not $editor.WaitForExit(20000)) { Say 'the editor did not close its window in 20 s; ending it'; $editor.Kill() }
+        $instance = Get-EditorInstance $editor.Id
+        if ($instance) { Invoke-SuitCtl @('--instance', $instance, '--timeout', '20', 'quit', '--mode', 'prompt') | Out-Null }
+        if (-not $editor.WaitForExit(20000)) { Say 'the editor did not quit in 20 s; ending it'; $editor.Kill() }
     }
     $closed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
     if (Test-Alive $state.editorLauncher) { & taskkill /T /F /PID $state.editorLauncher 2>&1 | Out-Null }
@@ -340,7 +363,7 @@ function Invoke-Steps([string[]]$names) {
     try {
         Say "running step(s): $($names -join ', ')"
         $timer = [Diagnostics.Stopwatch]::StartNew()
-        & $python -I $scenario --pid $state.editorPid --dir (Join-Path $editorDir 'automation') --out $result --deadline 240 --wait-window 60
+        & $python -I $scenario --pid $state.editorPid --out $result --deadline 240 --wait-window 60
         $code = $LASTEXITCODE
         Say ("step(s) finished with exit {0} in {1:N1} s" -f $code, $timer.Elapsed.TotalSeconds)
     } finally { $lock.ReleaseMutex(); $lock.Dispose() }

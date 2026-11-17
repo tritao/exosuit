@@ -12,7 +12,7 @@ class SuitControl {
 	/** Returns the daemon's reply, or null when no daemon answers within `timeoutSeconds`. */
 	public static function request(message:Dynamic, timeoutSeconds:Float = 3):Null<Dynamic> {
 		var runtime = Runtime.start();
-		var hub = new NativeRpcHub(runtime.events);
+		var hub = new NativeRpcHub(runtime.events, 32, 4, SuitLink.MAX_MESSAGE_BYTES);
 		var transport:Null<NativeRpcTransport> = null;
 		var failed = false;
 		var reply:Null<Dynamic> = null;

@@ -67,6 +67,13 @@ class SuitPaths {
 		return "\\\\.\\pipe\\" + name;
 	}
 
+	/**
+		The Pragtical control protocol pipe of editor window `instance` (docs/design/suitctl/TDD-exosuit-ctl.md §5.4):
+		`\\.\pipe\exosuit-suitctl-<user>-<instance>` on Windows, a socket in suit's runtime folder elsewhere.
+	**/
+	public static function instanceEndpoint(instance:String):String
+		return Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-suitctl-" + user() + "-" + instance : Path.join([home(), "runtime", instance + ".sock"]);
+
 	static function user():String {
 		var name = Sys.getEnv("USERNAME");
 		if (name == null || name.length == 0)

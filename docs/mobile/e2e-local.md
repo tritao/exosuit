@@ -12,7 +12,7 @@ against the real pieces, with pictures, in a few minutes.
 | Development CA and server certificate | `scripts/e2e-local-host.py` (openssl from Git for Windows). The certificate names `localhost`, `127.0.0.1` and `10.0.2.2`; both are valid for 10 years. | Keys live in `<RunDir>\host\tls`, never committed (`.local/` is git-ignored). |
 | Relay Worker (`relay/worker`) | `wrangler dev --local` (workerd, no login) with the repo's pinned wrangler (`npm ci` in `relay/worker`, done by the script when missing). | Durable Object state under `<RunDir>\host\wrangler-state`. |
 | TLS front | `scripts/e2e-tls-proxy.mjs`: https/wss on a loopback port, piped to the Worker's plain port. | |
-| Suit, workspace service, graphical editor | The real built apps, started by the rig (`scripts/run.py --live`) with the harness's isolated state (`PRAGTICAL_PORTABLE`, `EXOSUIT_AGENT_STATE_HOME`, `EXOSUIT_SUIT_HOME`, `EXOSUIT_SUIT=isolated`) under `docs\benchmarks\perf-harness\runs\e2e-local`. Relay credentials go to a file store (`EXOSUIT_RELAY_TEST_CREDENTIALS_DIR`), not the OS credential store. | Nothing of the user's suit, agent state or settings is read or written. |
+| Suit, workspace service, graphical editor | The real built apps, started by the rig (`scripts/run.py --live`) with the harness's isolated state (`PRAGTICAL_PORTABLE`, `EXOSUIT_AGENT_STATE_HOME`, `EXOSUIT_SUIT_HOME`) under `docs\benchmarks\perf-harness\runs\e2e-local`. Relay credentials go to a file store (`EXOSUIT_RELAY_TEST_CREDENTIALS_DIR`), not the OS credential store. | Nothing of the user's suit, agent state or settings is read or written. |
 | Fake agent | `tests/workspace-agents/fake-codex.py` as the Codex provider (`FAKE_CODEX_REPLY=1`: it answers `FAKE-REPLY: <prompt>`), one session per workspace ("Fake session" in Alpha, "Beta fake session" in Beta) created through the services. | |
 | Phone | Android emulator `exosuit-mobile-e2e` (headless, `swiftshader_indirect`, console port 5556, quick-boot snapshot `rig`), the debug APK, `adb reverse` for the TLS port. | The emulator's own data. |
 
@@ -67,7 +67,7 @@ Common options: `-Build` (build the admin tool and the APK first), `-Avd`, `-Por
 - `pair` skips itself when the rig is already paired and the editor lists the phone; `EXOSUIT_E2E_FORCE_PAIR=1` forces it.
 - Control checks (phone must already show the Claude terminal): `takeover` (the editor opens it and presses Take control; prints the time), `hold` (a second client takes control for 15 s), `editor-state` (editor screenshot and control state after the phone pressed Take control).
 - Cold start checks (same precondition): `coldstart` (the app is killed and started; the terminal view must come back by itself) and `recontrol` (the phone controls the terminal, is killed and started: when the editor took the lease meanwhile the phone must come back read only and ask "Take control back?", and Take control must make an extra key reach the fake TUI; when nobody took it the phone controls at once and the key must arrive). `recontrol` was rewritten on 2026-11-12 for the ask-first behaviour and has not been run on the rig since.
-- `step -Step restart-editor` (run `terminal` first): the keeper closes the editor window with WM_CLOSE (no mouse), stops the old compiler worker and live host (a new launcher cannot reuse them; the suit and services stay), starts the editor again, and the phone must take input in its Claude terminal without pairing again. Measured: editor closed to ready again 37 to 43 s (live-mode start). Open: the step does not yet measure the phone's own time to first key (it waits up to 20 s for an `online` log line first, and the phone logs none when it never noticed the close).
+- `step -Step restart-editor` (run `terminal` first): the keeper asks the editor to quit with `suitctl quit --mode prompt` (as closing its window does; no mouse), stops the old compiler worker and live host (a new launcher cannot reuse them; the suit and services stay), starts the editor again, and the phone must take input in its Claude terminal without pairing again. Measured: editor closed to ready again 37 to 43 s (live-mode start). Open: the step does not yet measure the phone's own time to first key (it waits up to 20 s for an `online` log line first, and the phone logs none when it never noticed the close).
 - Steps are `pair`, `session` (open Alpha on the phone, send a prompt), `terminal` (the Claude Code terminal), `beta`
   (grant Beta). Each one sets up only its own precondition (the app in front, Alpha opened) and says plainly when the rig is
   not paired. The GUI steps take the machine-wide screen lock (`Global\exosuit-perf-gui`) and move the real mouse.
@@ -124,12 +124,12 @@ console (`<RunDir>\editor.log`) for `retyped` and the patch line rather than wai
 
 `docs/benchmarks/perf-harness/gui_scenarios/e2e_pair.py` (real input for the editor, adb for the phone; the harness's
 rules apply: machine-wide lock, the driver refuses input unless its window is in front). The editor has two
-workspaces, Alpha (attached) and Beta; its Remote Access panel is the machine's (suit on):
+workspaces, Alpha (open) and Beta; its Remote Access panel is the machine's:
 
 1. The fake sessions are created through each workspace's service (Beta's service is started by the scenario).
 2. Remote Access (activity bar). The relay field is set to the local relay and "Enable remote access" pressed.
-3. "Create pairing invitation". The one-time URL is read from the editor's automation snapshot
-   (`state.remoteAccess.invitationUrl`, written only when `EXOSUIT_AUTOMATION_DIR` is set, in an owner-only folder).
+3. "Create pairing invitation". The one-time URL is read over suit's control plane
+   (`exosuit.state.get`, `state.remoteAccess.invitationUrl`), which only a process of this user reaches.
    The desktop's Copy button is not used, so the real clipboard is left alone.
 4. The phone starts pairing from the URL (test-rig intent extra `pairing_url`, taken only with `files/automation.on`). Both sides must show the same 6-digit code.
 5. In the editor: "I checked both codes", "Access to Alpha" = All permissions (Beta stays No access), Approve. On the
@@ -154,10 +154,10 @@ at): steps 1 to 7 above. Step 8 (the Claude terminal) is written from the accept
 bottom of this section for whether it has run. The editor's Workbench shows the session as completed in the earlier per-workspace run; in
 this flow the phone's view of the reply is the check.
 
-Seams: the panel's automation snapshot reports the machine view when suit is on (relay, invitation, pending requests,
+Seams: the panel's automation snapshot reports the machine view (relay, invitation, pending requests,
 devices with their workspaces, the machine's workspace list). The scenario drives the two drop-downs with real input
 (`choose`). The phone taps use screen-relative positions. If another window is under the pointer the driver stops the
-run; run again. The scenario runs up to 150 s (`-DriveSeconds`), longer than the one-workspace flow it replaces.
+run; run again. The scenario runs up to 150 s (`-DriveSeconds`).
 
 ## Custom relay URL and a real relay
 

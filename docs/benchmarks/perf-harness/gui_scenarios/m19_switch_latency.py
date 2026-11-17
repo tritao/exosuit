@@ -1,4 +1,4 @@
-"""M19 Phase 7 budget: the time from real input to the first frame of the new group.
+"""M19 Phase 7 budget: the time from real input to the first frame of the new group. It is the one scenario that sends OS input (RealInputGui).
 
 One workspace (Alpha) gets six contexts: its root, Work and four more groups, each with its own document tab. The
 host keeps four inactive contexts attached (`warmLimit`), so toggling between two contexts is a warm switch and walking
@@ -18,7 +18,7 @@ from m19_folders import open_by_double_click
 from m19_sessions_drag import by_name, create
 
 FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"],
-           "env": {"EXOSUIT_SWITCH_TRACE": "{result}\switch.txt", "NK_LATENCY_TRACE": "{result}\nk.txt"}}
+           "env": {"EXOSUIT_SWITCH_TRACE": "{result}/switch.txt", "NK_LATENCY_TRACE": "{result}/nk.txt"}}
 GROUPS = ["Two", "Three", "Four", "Five", "Six", "Seven"]
 WARM = int(os.environ.get("SWITCH_WARM", "4"))
 
@@ -57,11 +57,10 @@ def run(gui):
     gui.step("setup: six sub-groups of Work, each entered by the quick switch and given a document")
     for name in GROUPS:
         show_workbench(gui)
-        create(gui, "g:" + work, "New group", name, "groups")
+        create(gui, open_row(gui, "g", work), "New Group", name, "groups")
     open_file(gui, "a1.txt")
-    # Work has the workspace's folder, so entering it is the workspace root's context; the groups below have no folder of
-    # their own and take their parent's. A click on a group row in the tree only expands it (reported in NEXT-PHASE.md),
-    # so the groups are entered by the quick switch.
+    # The groups are entered by the quick switch, which finds them by name wherever they are in the tree (the setup is
+    # not timed).
     contexts = [("Alpha", root_key)]
     for index, name in enumerate(GROUPS):
         before = current(gui)
@@ -89,4 +88,4 @@ def run(gui):
 
 
 if __name__ == "__main__":
-    main(run)
+    main(run, real_input=True)

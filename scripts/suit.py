@@ -5,7 +5,11 @@
     python scripts/suit.py kill --orphans  stop processes whose editor is gone
     python scripts/suit.py build           build suit/haxeon.json
 
-Everything after the script name goes to suit; `python scripts/suit.py help` lists its commands.
+    python scripts/suit.py --ctl list      suitctl: the open windows (scripts/suitctl.cmd runs this)
+    python scripts/suit.py --ctl open F    open a folder or file in the running editor
+
+Everything after the script name goes to suit; `python scripts/suit.py help` lists its commands and
+`python scripts/suit.py --ctl --help` suitctl's (suit/README.md, "Control plane").
 """
 from __future__ import annotations
 

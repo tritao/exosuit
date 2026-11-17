@@ -36,6 +36,8 @@ class FileController {
 	var closeDocuments:Array<Document> = [];
 	var closeIndex:Int = 0;
 	var closeAction:Null<Void->Bool>;
+	/** Told when the user cancels the quit under way (`requestQuit`). */
+	var quitCancelled:Null<Void->Void>;
 	var closePending:Bool = false;
 
 	public function new(documents:DocumentManager, workspace:Workspace, operations:FileOperations, root:WorkbenchHost, context:CommandContext,
@@ -70,17 +72,20 @@ class FileController {
 		return beginClose(root.documentsLostByClosingActivePane(), root.captureCloseActivePane(true));
 	}
 
-	public function requestQuit(?onReady:Void->Void):Bool {
+	/** Asks about each unsaved document, then calls `onReady`; `onCancelled` when the user cancels instead. */
+	public function requestQuit(?onReady:Void->Void, ?onCancelled:Void->Void):Bool {
 		if (quitReady) {
 			if (onReady != null) onReady();
 			return true;
 		}
+		quitCancelled = onCancelled;
 		var dirty:Array<Document> = [];
 		for (document in documents.documents)
 			if (document.dirty && dirty.indexOf(document) < 0) dirty.push(document);
 		return beginClose(dirty, function() {
 			// Recovery may have run while earlier documents were being confirmed.
 			for (document in closeDocuments) recovery.forget(document);
+			quitCancelled = null;
 			quitReady = true;
 			if (onReady != null) onReady();
 			return true;
@@ -271,6 +276,9 @@ class FileController {
 		closeDocuments.resize(0);
 		closeAction = null;
 		root.closeCommandView();
+		var cancelled = quitCancelled;
+		quitCancelled = null;
+		if (cancelled != null) cancelled();
 	}
 
 	function completeSaveAs(document:Document, onSuccess:Null<Void->Void>):Void {

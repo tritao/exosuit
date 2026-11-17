@@ -46,11 +46,20 @@ class NativeRpcHub {
 
 	final streams:Map<Int, NativeKitByteStream> = [];
 	final pending:Map<Int, Pending> = [];
-	final listeners:Map<Int, {owned:OwnedListenerHandle, callback:NativeRpcTransport->Void}> = [];
+	/** A listener hands each accepted stream to `callback` framed as RPC messages, or to `bytes` raw. */
+	final listeners:Map<Int, {owned:OwnedListenerHandle, ?callback:NativeRpcTransport->Void, ?bytes:NativeKitByteStream->Void, ?failed:Void->Void}> = [];
 	final subscription:EventSubscription;
 	var disposed:Bool = false;
+	/** The most streams open at once; an accept beyond it is closed. suit holds one per editor window and running service. */
+	final maxStreams:Int;
+	final maxListeners:Int;
+	/** The largest message a framed stream of this hub sends or receives. */
+	final maxMessageBytes:Int;
 
-	public function new(events:EventPump) {
+	public function new(events:EventPump, maxStreams:Int = 32, maxListeners:Int = 4, maxMessageBytes:Int = NativeRpcTransport.DEFAULT_MAX_MESSAGE_BYTES) {
+		this.maxStreams = maxStreams;
+		this.maxListeners = maxListeners;
+		this.maxMessageBytes = maxMessageBytes;
 		subscription = events.listen(onEvent);
 	}
 
@@ -60,13 +69,13 @@ class NativeRpcHub {
 				done(Failed({code: error == null ? "connect_failed" : error, message: error == null ? "Connect failed" : error, ambiguous: false}, true));
 				return;
 			}
-			done(Opened(new NativeRpcTransport(stream)));
+			done(Opened(new NativeRpcTransport(stream, maxMessageBytes)));
 		});
 	}
 
 	/** Opens a raw native byte stream for protocols which add their own framing. */
 	public function connectBytes(options:TransportOptions, done:NativeKitByteStream->Null<String>->Void):RpcConnectAttempt {
-		if (disposed || streamsCount() >= 32)
+		if (disposed || streamsCount() >= maxStreams)
 			throw "RPC transport hub unavailable";
 		var opened = NativeKit.nk_transport_connect(options);
 		if (opened.status != 0) {
@@ -84,12 +93,24 @@ class NativeRpcHub {
 		return attempt;
 	}
 
-	public function listen(options:TransportOptions, accepted:NativeRpcTransport->Void):OwnedListenerHandle {
-		if (disposed || listenersCount() >= 4)
-			throw "RPC listener limit";
-		var listener = NativeKit.nk_transport_listen_checked(options);
-		listeners.set(listener.borrow().rawValue(), {owned: listener, callback: accepted});
+	/** `failed` is called when the listener stops accepting (it accepts nothing more; `forget` it). */
+	public function listen(options:TransportOptions, accepted:NativeRpcTransport->Void, ?failed:Void->Void):OwnedListenerHandle {
+		var listener = startListener(options);
+		listeners.set(listener.borrow().rawValue(), {owned: listener, callback: accepted, failed: failed});
 		return listener;
+	}
+
+	/** Listens for raw byte streams, for a protocol with its own framing (Pragtical control protocol v1). */
+	public function listenBytes(options:TransportOptions, accepted:NativeKitByteStream->Void, ?failed:Void->Void):OwnedListenerHandle {
+		var listener = startListener(options);
+		listeners.set(listener.borrow().rawValue(), {owned: listener, bytes: accepted, failed: failed});
+		return listener;
+	}
+
+	function startListener(options:TransportOptions):OwnedListenerHandle {
+		if (disposed || listenersCount() >= maxListeners)
+			throw "RPC listener limit";
+		return NativeKit.nk_transport_listen_checked(options);
 	}
 
 	public function forget(listener:OwnedListenerHandle):Void {
@@ -121,20 +142,32 @@ class NativeRpcHub {
 					if (callback == null) return;
 					var payload:TransportAcceptedEvent = data;
 					var handle = OwnedTransportHandle.adopt(payload.get_transport());
-					if (streamsCount() >= 32) {
+					if (streamsCount() >= maxStreams) {
 						handle.close();
 						return;
 					}
 					var byteStream = new NativeKitByteStream(handle);
 					byteStream.markConnected();
 					streams.set(handle.borrow().rawValue(), byteStream);
-					try
-						callback.callback(new NativeRpcTransport(byteStream))
-					catch (error:Dynamic) {
+					try {
+						var raw = callback.bytes, framed = callback.callback;
+						if (raw != null)
+							raw(byteStream);
+						else if (framed != null)
+							framed(new NativeRpcTransport(byteStream, maxMessageBytes));
+					} catch (error:Dynamic) {
 						byteStream.close();
 						throw error;
 					}
 					return;
+				}
+				if (kind == EventKind.TransportFailed) {
+					var stopped = listeners.get(key);
+					if (stopped != null) {
+						var failed = stopped.failed;
+						if (failed != null) failed();
+						return;
+					}
 				}
 				var byteStream = streams.get(key);
 				if (byteStream == null)

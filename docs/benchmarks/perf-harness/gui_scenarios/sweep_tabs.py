@@ -54,8 +54,7 @@ def run(gui):
 
     def tooltip():
         target = tab(gui, "a3.txt")
-        x, y = gui.screen_point(target)
-        gui.glide(x, y)
+        gui.hover(target)
         time.sleep(1.5)
         dump(gui, "tab-tooltip")
         strip = target["y"] + target["h"]

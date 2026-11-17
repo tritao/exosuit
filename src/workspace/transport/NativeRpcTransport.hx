@@ -22,7 +22,9 @@ class NativeRpcTransport implements MessageTransport {
 	var offset:Int = 0;
 	var length:Int = 0;
 
-	public function new(stream:NativeKitByteStream, maxMessageBytes:Int = 262144) {
+	public static inline final DEFAULT_MAX_MESSAGE_BYTES = 262144;
+
+	public function new(stream:NativeKitByteStream, maxMessageBytes:Int = DEFAULT_MAX_MESSAGE_BYTES) {
 		this.stream = stream;
 		this.handle = stream.handle;
 		this.connected = stream.connected;
