@@ -65,13 +65,12 @@ class StatusBarView implements View {
 			if (remote) {
 				var connectionStyle = controlStyle(sizes.remote, HEIGHT);
 				connectionStyle.padding = new Insets(8, 0, 8, 0);
-				var connection = new Button("Remote", connectionStyle, data.openRemote, "status-remote");
-				connection.variant = ButtonVariant.Navigation;
-				connection.classes.push("status-remote");
-				connection.leadingView = new Icon("remote-icon", IconName.Remote, 16, context.theme.tokens.accent);
-				connection.labelView = new Text("Remote", null, null,
-					new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
-				connection.accessibilityLabel = data.remoteDetails + ". Open Remote Access";
+				var connection = new Button("Remote", connectionStyle, data.openRemote, "status-remote", null,
+					ButtonVariant.Navigation, null, ["status-remote"], null, null,
+					new Icon("remote-icon", IconName.Remote, 16, context.theme.tokens.accent), null,
+					new Text("Remote", null, null,
+						new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary)),
+					null, null, data.remoteDetails + ". Open Remote Access");
 				remoteNode = tooltip("remote", connection, data.remoteDetails).build(context);
 				remoteNode.layout.style.width = LayoutAxis.fixed(sizes.remote);
 				// Without hover tooltips (touch hosts) the tooltip draws only its anchor: the node is the button itself.
@@ -97,11 +96,11 @@ class StatusBarView implements View {
 			}
 			var indentationNode:Null<RenderNode> = null;
 			if (hasIndentation) {
-				var button = new Button(data.indentation, controlStyle(sizes.indentation, 22), data.openIndentation, "status-indentation");
-				button.variant = ButtonVariant.Navigation;
-				button.accessibilityLabel = data.indentation + ". Choose document indentation";
-				button.labelView = new MiddleEllipsisText("status-indentation-label", data.indentation, false,
-					new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+				var button = new Button(data.indentation, controlStyle(sizes.indentation, 22), data.openIndentation, "status-indentation",
+					null, ButtonVariant.Navigation, null, null, null, null, null, null,
+					new MiddleEllipsisText("status-indentation-label", data.indentation, false,
+						new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary)),
+					null, null, data.indentation + ". Choose document indentation");
 				indentationNode = tooltip("indentation", button, data.indentationDetails == null ? data.indentation : data.indentationDetails).build(context);
 				root.add(indentationNode);
 			}
@@ -110,28 +109,24 @@ class StatusBarView implements View {
 				var entry:Notification = cast toast;
 				var buttonStyle = controlStyle(0, 22); buttonStyle.width = LayoutAxis.grow();
 				buttonStyle.clipHorizontal = true;
-				var button = new Button("", buttonStyle, function() data.showNotification(entry), "status-notification");
-				button.variant = ButtonVariant.Navigation;
-				button.leadingIcon = switch entry.kind { case Error: IconName.ErrorCircle; case Warning: IconName.AlertTriangle; case Information: IconName.InfoCircle; };
-				button.iconSize = 14;
-				button.labelView = label("notification-label", entry.message, false, context);
-				button.accessibilityLabel = "Show notification details: " + entry.message;
+				var icon = switch entry.kind { case Error: IconName.ErrorCircle; case Warning: IconName.AlertTriangle; case Information: IconName.InfoCircle; };
+				var button = new Button("", buttonStyle, function() data.showNotification(entry), "status-notification", null,
+					ButtonVariant.Navigation, null, null, icon, null, null, null,
+					label("notification-label", entry.message, false, context), null, 14, "Show notification details: " + entry.message);
 				message = tooltip("notification", button, entry.message);
 			} else message = tooltip("language", label("language", data.status, false, context), data.status);
 			var messageNode = message.build(context);
 			messageNode.layout.style.width = LayoutAxis.fixed(sizes.message);
 			root.add(messageNode);
 			if (showToast) {
-				var dismiss = new Button("", controlStyle(sizes.dismiss, 22), data.dismissNotification, "notification-toast-dismiss");
-				dismiss.variant = ButtonVariant.Navigation; dismiss.leadingIcon = IconName.Close; dismiss.iconSize = 12;
-				dismiss.accessibilityLabel = "Hide notification";
+				var dismiss = new Button("", controlStyle(sizes.dismiss, 22), data.dismissNotification, "notification-toast-dismiss", null,
+					ButtonVariant.Navigation, null, null, IconName.Close, null, null, null, null, null, 12, "Hide notification");
 				dismissNode = dismiss.build(context);
 				root.add(dismissNode);
 			}
-			var bell = new Button("", controlStyle(sizes.bell, 22), data.toggleNotifications, "notifications-toggle");
-			bell.variant = ButtonVariant.Navigation; bell.leadingIcon = IconName.Bell; bell.iconSize = 16;
-			bell.accessibilityLabel = "Notifications, " + data.unread + " unread";
-			if (data.unread > 0) bell.trailingView = new CountBadge(data.unread);
+			var bell = new Button("", controlStyle(sizes.bell, 22), data.toggleNotifications, "notifications-toggle", null,
+				ButtonVariant.Navigation, null, null, IconName.Bell, null, null, data.unread > 0 ? new CountBadge(data.unread) : null,
+				null, null, 16, "Notifications, " + data.unread + " unread");
 			var bellNode = bell.build(context);
 			root.add(bellNode);
 			var rightItemsNode:Null<RenderNode> = null;
@@ -223,13 +218,11 @@ class StatusBarView implements View {
 			var action = function() {
 				if (callback != null && command != null && command.length > 0) callback(command);
 			};
-			var button = new Button(item.text, style, action, "status-item:" + item.owner + ":" + item.id);
-			button.variant = ButtonVariant.Navigation;
-			button.accessibilityLabel = item.tooltip.length == 0 ? item.text : item.tooltip;
-			button.leadingIcon = item.icon;
-			button.iconSize = 14;
-			button.labelView = new MiddleEllipsisText("status-item-label", item.text, false,
-				new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+			var button = new Button(item.text, style, action, "status-item:" + item.owner + ":" + item.id, null,
+				ButtonVariant.Navigation, null, null, item.icon, null, null, null,
+				new MiddleEllipsisText("status-item-label", item.text, false,
+					new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary)),
+				null, 14, item.tooltip.length == 0 ? item.text : item.tooltip);
 			var description = item.tooltip.length == 0 ? item.text : item.tooltip;
 			children.push(new KeyedView(item.owner + ":" + item.id,
 				tooltip("status-item:" + item.owner + ":" + item.id, button, description)));

@@ -137,7 +137,7 @@ private class CommandViewPickerModel implements SearchPickerModel {
 	public function enabledAt(index:Int):Bool return model.results[index].enabled;
 	public function setQuery(value:String):Void model.setQuery(value);
 	public function activate(index:Int):Void model.activate(index);
-	public function navigate(key:Int, modifiers:Int, pageSize:Int):Void {
+	public function navigate(key:Int, modifiers:UiModifier, pageSize:Int):Void {
 		var legacy = switch key {
 			case UiKey.Up, UiKey.PageUp: Platform.KEY_UP;
 			case UiKey.Down, UiKey.PageDown: Platform.KEY_DOWN;
@@ -147,7 +147,7 @@ private class CommandViewPickerModel implements SearchPickerModel {
 		};
 		if (legacy < 0) return;
 		var count = key == UiKey.PageUp || key == UiKey.PageDown ? pageSize : 1;
-		for (_ in 0...count) model.keyPressed(legacy, (modifiers & UiModifier.Shift) != 0 ? Platform.MOD_SHIFT : 0);
+		for (_ in 0...count) model.keyPressed(legacy, modifiers.contains(UiModifier.Shift) ? Platform.MOD_SHIFT : 0);
 	}
 }
 
