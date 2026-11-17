@@ -20,6 +20,7 @@ class RemoteFileTabs {
 	public function new(app:ExosuitApp)
 		this.app = app;
 
+	/** One step towards the folder a search result asked to reveal. The tree's onStateReady, after its build, runs it. */
 	function advanceWorkspaceFolderReveal(tree:TreeView, model:WorkspaceFileTreeModel):Void {
 		var path = app.pendingWorkspaceFolderReveal;
 		if (path == null || path.length == 0) return;
