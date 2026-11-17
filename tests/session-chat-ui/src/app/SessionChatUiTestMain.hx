@@ -62,7 +62,7 @@ class SessionChatUiTestMain {
 	}
 	static function settingValue(root:RenderNode,label:String,value:String):Void {
 		var semantics:haxeon.ui.semantics.Semantics=cast find(root,label).semantics;
-		require(semantics.value==value && (semantics.states & haxeon.ui.semantics.AccessibilityState.HasPopup)!=0,
+		require(semantics.value==value && semantics.states.contains(haxeon.ui.semantics.AccessibilityState.HasPopup),
 			"Setting menu lost its accessible value or popup state: "+label);
 	}
 	static function selectMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>,label:String):Void {
@@ -710,8 +710,8 @@ class SessionChatUiTestMain {
         var firstThumbnail:Null<haxeon.ui.Image> = null;
         for (stateId in draftContext.stateStore.paths.keys()) {
           var statePath = draftContext.stateStore.paths.get(stateId);
-          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.values.exists(stateId))
-            firstThumbnail = cast Reflect.field(draftContext.stateStore.values.get(stateId), "image");
+          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.handles.exists(stateId))
+            firstThumbnail = cast Reflect.field(draftContext.stateStore.handles.get(stateId).value, "image");
         }
         require(firstThumbnail != null && !firstThumbnail.isDisposed(), "Thumbnail texture was not created");
         require(draftContext.focusWidget(find(draftRoot, "Codex prompt").id), "Cannot focus context draft");
@@ -745,8 +745,8 @@ class SessionChatUiTestMain {
         var removedThumbnail:Null<haxeon.ui.Image> = null;
         for (stateId in draftContext.stateStore.paths.keys()) {
           var statePath = draftContext.stateStore.paths.get(stateId);
-          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.values.exists(stateId))
-            removedThumbnail = cast Reflect.field(draftContext.stateStore.values.get(stateId), "image");
+          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.handles.exists(stateId))
+            removedThumbnail = cast Reflect.field(draftContext.stateStore.handles.get(stateId).value, "image");
         }
         require(removedThumbnail != null && !removedThumbnail.isDisposed(), "Remove test thumbnail missing");
         click(draftContext, find(draftRoot, "Remove image"), 1000, 1000); draftRoot = draftBuild();
@@ -755,8 +755,8 @@ class SessionChatUiTestMain {
         var unmountedThumbnail:Null<haxeon.ui.Image> = null;
         for (stateId in draftContext.stateStore.paths.keys()) {
           var statePath = draftContext.stateStore.paths.get(stateId);
-          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.values.exists(stateId))
-            unmountedThumbnail = cast Reflect.field(draftContext.stateStore.values.get(stateId), "image");
+          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.handles.exists(stateId))
+            unmountedThumbnail = cast Reflect.field(draftContext.stateStore.handles.get(stateId).value, "image");
         }
         require(unmountedThumbnail != null && !unmountedThumbnail.isDisposed(), "Unmount test thumbnail missing");
         draftContext.dispose();
