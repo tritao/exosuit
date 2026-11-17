@@ -637,7 +637,12 @@ class ExosuitApp implements DesktopUiApplication {
 				return new SidebarHoverRebuild(view, requestFrame);
 			}),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
-			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, application.activeContext.roots, application.activeContext.kind == workspace.ContextKind.Group))
+			// Retained by what it reads: the problems and the active context are plain, and every change to them bumps
+			// frameTick (the change detector watches the registry's revision; a context switch calls requestFrame).
+			DockPanelContent.observing("problems", function(_) {
+				frameTick.value;
+				return new ProblemsPanel(host, application.activeContext.roots, application.activeContext.kind == workspace.ContextKind.Group);
+			})
 		];
 		if (capabilities.supports(HostCapability.Filesystem))
 			dockPanelContents.push(new DockPanelContent("context-panel", function(_) return contextPanel()));
