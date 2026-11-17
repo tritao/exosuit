@@ -70,6 +70,7 @@ class GitScmProvider implements ScmProvider {
 		trustStore.revoke(normalize(root));
 	}
 
+	@:allow(scm.git.GitDetectTask)
 	static function normalize(path:String):String {
 		var value = StringTools.replace(FileSystem.fullPath(path), "\\", "/");
 		while (value.length > 1 && StringTools.endsWith(value, "/")) value = value.substring(0, value.length - 1);

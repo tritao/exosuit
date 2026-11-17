@@ -20,6 +20,7 @@ import haxeon.ui.core.UiEvent;
 	stays where it is. Only what opens that workspace's tab takes the window there first (`goTo`; Workbench design Q2:
 	the window goes where the session is made).
 **/
+@:allow(ui)
 class WorkbenchActions {
 	/** The agent providers New Agent Session offers: the default one at once, the others in its submenu. */
 	public static final PROVIDERS = ["claude", "codex", "pi"];

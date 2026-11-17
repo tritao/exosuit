@@ -10,6 +10,7 @@ class MuxStream implements MessageTransport {
 	final owner:StreamMultiplexer;
 	final inbox:Array<Bytes> = [];
 	var inboxBytes = 0;
+	@:allow(workspace.transport.StreamMultiplexer)
 	var ended = false;
 
 	@:allow(workspace.transport.StreamMultiplexer)
