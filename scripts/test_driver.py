@@ -28,11 +28,13 @@ import sys
 import tempfile
 import time
 
+import haxeon_paths
+
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
 HAXEON_ROOT = Path(os.environ.get("HAXEON_ROOT") or ROOT / "haxeon").expanduser().resolve()
 MODE = ["--self-hosted"] if os.environ.get("HAXEON_SELF_HOSTED") == "1" else []
-HL = HAXEON_ROOT / ".tools" / "hashlink" / ("hl.exe" if WINDOWS else "hl")
+HL = haxeon_paths.hl(HAXEON_ROOT)
 LIBRARY_VARIABLE = "PATH" if WINDOWS else "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
 
 
@@ -44,9 +46,8 @@ def runtime_paths(root: Path) -> tuple[Path, Path]:
     if configured:
         runtime = Path(configured).expanduser()
     else:
-        executable = "hl.exe" if WINDOWS else "hl"
-        candidates = [haxeon / ".tools" / "hashlink" / executable]
-        found = shutil.which(executable)
+        candidates = [haxeon_paths.hl(haxeon)]
+        found = shutil.which(candidates[0].name)
         if found:
             candidates.append(Path(found))
         runtime = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
@@ -93,7 +94,7 @@ def service_environment(root: Path, launcher: Path | None = None) -> dict[str, s
     environment = os.environ.copy()
     agent_root = (launcher or bytecode).parent
     haxeon = Path(os.environ.get("HAXEON_ROOT", root / "haxeon")).expanduser()
-    libraries = [haxeon / "out", haxeon / ".tools" / "hashlink", agent_root / "native"]
+    libraries = [haxeon / "out", haxeon_paths.vm_dir(haxeon), agent_root / "native"]
     if (agent_root / "native").is_dir():
         libraries.extend(sorted(path for path in (agent_root / "native").iterdir() if path.is_dir()))
     libraries.append(runtime.parent)

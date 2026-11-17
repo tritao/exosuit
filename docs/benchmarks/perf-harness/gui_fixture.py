@@ -26,7 +26,10 @@ def arg(name):
 def main():
     root, out, scenario = Path(arg("--root")), Path(arg("--out")), arg("--scenario")
     sys.path.insert(0, str(root / "scripts"))
+    # A baseline checkout predates scripts/haxeon_paths.py; this harness's own copy knows its layout too.
+    sys.path.append(str(HERE.parents[2] / "scripts"))
     from exohost import library_path, library_variable
+    from haxeon_paths import hl as haxeon_hl
     from test_driver import agent_homes
     spec = importlib.util.spec_from_file_location("scenario", HERE / "gui_scenarios" / (scenario + ".py"))
     module = importlib.util.module_from_spec(spec)
@@ -35,7 +38,7 @@ def main():
     sys.argv = sys.argv_backup
     fixture = getattr(module, "FIXTURE", {"workspaces": ["alpha"], "open": "alpha"})
     haxeon = Path(os.environ.get("HAXEON_ROOT", root / "haxeon"))
-    hl = haxeon / ".tools" / "hashlink" / "hl.exe"
+    hl = haxeon_hl(haxeon)
     exohost = root / "exohost" / "build" / "host" / "main.hl"
     env = {
         "PRAGTICAL_PORTABLE": str(out / "state"),

@@ -18,6 +18,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import haxeon_paths
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -27,11 +29,12 @@ def library_path(bytecode: Path, runtime: Path, haxeon: Path, inherited: str = "
     The same rule as ExohostClient.nativePath in src/exohost/ExohostClient.hx, which starts exohost from an editor or a
     bundle; keep the two in the same order: the directories under <bytecode dir>/native, lib beside the
     bytecode directory (a bundle keeps tools/ and lib/ side by side),
-    the HashLink runtime's directory, Haxeon's out and .tools/hashlink, then the inherited value.
+    the HashLink runtime's directory, Haxeon's out and its VM directory (scripts/haxeon_paths.py), then the inherited
+    value.
     """
     native = bytecode.parent / "native"
     directories = sorted(path for path in native.iterdir() if path.is_dir()) if native.is_dir() else []
-    directories += [bytecode.parent.parent / "lib", runtime.parent, haxeon / "out", haxeon / ".tools" / "hashlink"]
+    directories += [bytecode.parent.parent / "lib", runtime.parent, haxeon / "out", haxeon_paths.vm_dir(haxeon)]
     unique = list(dict.fromkeys(str(path) for path in directories if path.is_dir()))
     return os.pathsep.join(unique + ([inherited] if inherited else []))
 
@@ -46,7 +49,7 @@ def main() -> int:
         from haxeon_cli import run_cli
         return run_cli(ROOT, ["build", "--project", str(ROOT / "exohost" / "haxeon.json"), *sys.argv[2:]])
     haxeon = Path(os.environ.get("HAXEON_ROOT", ROOT / "haxeon"))
-    runtime = haxeon / ".tools" / "hashlink" / ("hl.exe" if os.name == "nt" else "hl")
+    runtime = haxeon_paths.hl(haxeon)
     bytecode = ROOT / "exohost" / "build" / "host" / "main.hl"
     if not bytecode.is_file():
         print(f"exohost is not built; run: python {Path(__file__).name} build", file=sys.stderr)
