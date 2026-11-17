@@ -47,7 +47,12 @@ def run(gui):
     for chord in ("down", "down", "down", "up", "up"):
         key(gui, chord, 0.25)
     begin(gui, "expand")
+    # A click on a folder's row selects it and toggles it, so two clicks leave it selected and collapsed; the keyboard
+    # checks then start from a collapsed folder (else Right would be a no-op that passes).
     click(gui, gui.element("sub"))
+    gui.check("a first click expands sub (setup)", shown("s1.txt"), 4)
+    click(gui, gui.element("sub"))
+    gui.check("sub is collapsed before the keyboard checks", gone("s1.txt"), 4)
     key(gui, "right", 0.6)
     gui.check("Right expands sub (keyboard)", shown("s1.txt"), 4)
     key(gui, "left", 0.6)
