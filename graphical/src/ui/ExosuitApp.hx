@@ -228,8 +228,23 @@ class ExosuitApp implements DesktopUiApplication {
 	var contextMenu:Null<CommandMenu> = null;
 	var manageMenu:Null<CommandMenu> = null;
 	var layoutMenu:Null<CommandMenu> = null;
-	var viewRevision:Int = 0;
-	var submittedBuildKey:Null<String>;
+	/**
+		The root build's own invalidation: `view` reads it first, `requestFrame` and the change detector bump it. Exosuit's
+		state is mostly plain fields that a build cannot track, so a change to it asks for a full build through this signal.
+	**/
+	final frameTick = new haxeon.reactive.Signal<Int>(0);
+	/** The plain values the root build shows, compared before each frame (see submit). */
+	final rootChanges = new RootChangeDetector();
+	/** `view` as one closure for every frame: the cached submission reuses an idle frame only with the same build callback. */
+	final viewBuilder:Void->View;
+	/** The problems revision the Problems tab's badge counts; the count is taken again only when it moves. */
+	var badgedProblems:Int = -1;
+	/** Whether a frame was built yet; a repaint-only frame before the first one builds in full. */
+	var rootSubmitted:Bool = false;
+	/** The cache key of every root submission: what invalidates the root is `frameTick` and the tracked reads of its build. */
+	static inline final ROOT_KEY = "exosuit-root";
+	/** The title bar's frames-per-second reading, written once a second by pollBackground and read by the toolbar. */
+	final frameRateLabel = new haxeon.reactive.Signal<String>("");
 	var nextBackgroundPoll:Float = 0.0;
 	/**
 		Until then the background poll runs on every turn of the host loop instead of twenty times a second. Connecting to a
@@ -264,6 +279,7 @@ class ExosuitApp implements DesktopUiApplication {
 			?createWorkspaceTerminal:(String, String, Bool, Void->Void, TerminalPalette, Null<String>, Null<String>)->TerminalPanel) {
 		this.createTerminal = createTerminal;
 		this.createWorkspaceTerminal = createWorkspaceTerminal;
+		viewBuilder = view;
 		workbenchActions = new WorkbenchActions(this);
 		sourceControl = new ScmPanelController(this);
 		agentTabs = new AgentTabs(this);
@@ -305,6 +321,9 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		ui = new UiContext(null, fonts, this.theme);
 		ui.setStyleSheet(ExosuitPalette.styleSheet(this.theme, darkPalette));
+		// Menus, toolbar buttons and palette rows work out whether a command is enabled from plain state while building, so
+		// the frame after a command ran is a full build (haxeon's registry used to force one itself).
+		ui.commands.onInvoked = function(_, result) { if (result.succeeded) requestFrame(); };
 		ui.onModifiersChanged = function(modifiers) {
 			for (pane in editorPanes) pane.pointerModifiersChanged(modifiers);
 		};
@@ -355,7 +374,7 @@ class ExosuitApp implements DesktopUiApplication {
 			};
 			scmFocusSubscription = hostContext.events.listen(function(event) {
 				switch event {
-					case WindowStateChanged(_, flags) if ((flags & WindowStateFlags.Active) != 0):
+					case WindowStateChanged(_, flags) if (flags.contains(WindowStateFlags.Active)):
 						application.scm.windowFocused();
 					case _:
 				}
@@ -611,10 +630,10 @@ class ExosuitApp implements DesktopUiApplication {
 				view.headerActionsVisible = function(node) {
 					if (sidebar.activeId == "workbench") return true;
 					var focused = ui.focus.focusedId;
-					return haxeon.ui.style.StyleStateUtil.contains(node.states, haxeon.ui.style.StyleState.Hovered)
+					return node.states.contains(haxeon.ui.style.StyleState.Hovered)
 						|| (focused != null && node.find(focused) != null);
 				};
-				return view;
+				return new SidebarHoverRebuild(view, requestFrame);
 			}),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
 			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, application.activeContext.roots, application.activeContext.kind == workspace.ContextKind.Group))
@@ -672,7 +691,6 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function syncSidebar():Void {
-		viewRevision++;
 		layoutModes.invalidateRail();
 		if (phoneModeApplying) { requestFrame(); return; }
 		if (phoneLayoutActive) {
@@ -925,6 +943,8 @@ class ExosuitApp implements DesktopUiApplication {
 		return hostContext != null && (hostContext.safeLeft > 0 || hostContext.safeTop > 0 || hostContext.safeRight > 0 || hostContext.safeBottom > 0);
 
 	public function view():View {
+		// Read first, so every root build depends on it: a bump makes the next frame a full build.
+		frameTick.value;
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
 			var found = false;
@@ -1102,8 +1122,8 @@ class ExosuitApp implements DesktopUiApplication {
 			host.commandView.input.readClipboard = function(handler) { ui.clipboard.readText(handler); };
 			host.commandView.input.writeClipboard = function(value) { ui.clipboard.writeText(value); return true; };
 		}
-		if (hostContext != null && hostContext.repaintOnly && submittedBuildKey != null)
-			return ui.submitCached(view, frame, submittedBuildKey);
+		if (hostContext != null && hostContext.repaintOnly && rootSubmitted)
+			return ui.submitCached(viewBuilder, frame, ROOT_KEY);
 		// The application's viewport is the safe area: system bars, a cutout and the keyboard are not ours to draw under.
 		var safeWidth = hostContext == null ? frame.width : Math.max(1.0, frame.width - hostContext.safeLeft - hostContext.safeRight);
 		var safeHeight = hostContext == null ? frame.height : Math.max(1.0, frame.height - hostContext.safeTop - hostContext.safeBottom);
@@ -1120,30 +1140,25 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		responsive.syncResponsiveRightLayout();
 		layoutModes.resume();
-		dock.setPanelBadge("problems", host.getProblems().values().length);
-		var key = (hostContext == null ? 0 : hostContext.safeAreaRevision) + "/" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
-			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
-			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision +
-			":decorations=" + host.getPluginDecorations().revision + ":gutter-markers=" + host.getPluginGutterMarkers().revision +
-			":resource-decorations=" + host.getResourceDecorations().revision + ":status-items=" + host.getPluginStatusItems().revision +
-			":panels=" + host.getPluginPanels().revision + ":responsive-right=" + responsiveRightHidden;
-		var activeView = host.activeView();
-		key += ":active=" + (activeView == null ? -1 : activeView.id);
-		for (view in host.allViews()) {
-			key += ":reveal=" + view.cursorRevealRevision;
-			var selection = view.selection;
-			key += ":" + view.id + ":" + view.document.buffer.stateId + ":" +
-				selection.anchor.line + ":" + selection.anchor.column + ":" +
-				selection.cursor.line + ":" + selection.cursor.column + ":" +
-				view.scrollController.offsetX + ":" + view.scrollController.offsetY + ":" +
-				view.searchDecorationRevision() + ":" + view.preview + ":" + view.document.dirty + ":" +
-				view.document.title + ":" + view.document.path;
-			if (selection.rangeCount() > 1) for (range in selection.allRanges())
-				key += ":range=" + range.anchor.line + ":" + range.anchor.column + ":" +
-					range.cursor.line + ":" + range.cursor.column;
+		var problems = host.getProblems();
+		if (problems.revision != badgedProblems) {
+			badgedProblems = problems.revision;
+			dock.setPanelBadge("problems", problems.values().length);
 		}
-		submittedBuildKey = key;
-		var root = ui.submitCached(view, frame, key);
+		// The trees' models apply what their loads and decorations changed here, outside the build, which may not write them.
+		if (explorerModel != null) explorerModel.prepareBuild();
+		if (contextFiles != null) contextFiles.prepareBuild();
+		// The same for the Workbench rows and drafts, a Settings tab whose store was reloaded, and a language popup whose
+		// document stopped being the active one: each writes state or requests a frame, which the build may not.
+		if (workbenchPanel != null) workbenchPanel.prepareBuild();
+		settingsTab.syncStore();
+		host.dismissStaleLanguagePopup();
+		// Plain state the root build shows, which it cannot track: a change makes this frame a full build.
+		if (rootChanges.changed(host, hostContext, application.settings.current.minimapEnabled, application.settings.store.revision,
+			responsiveRightHidden))
+			frameTick.value = frameTick.value + 1;
+		rootSubmitted = true;
+		var root = ui.submitCached(viewBuilder, frame, ROOT_KEY);
 		if (explorerReturnPath != null && explorerRename == null && trashConfirmationHandler == null) {
 			var target:Null<RenderNode> = null;
 			root.walk(function(node) {
@@ -1535,7 +1550,12 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.syncRail((phoneLayoutActive ? 1 : 0) | (responsiveRightHidden ? 2 : 0) | (remoteAgentsLayout() ? 4 : 0));
 		var now = Sys.time();
 		var meter = frameRateMeter();
-		if (meter.sample(now)) requestFrame();
+		if (meter.sample(now)) {
+			// The toolbar reads the label: a new reading rebuilds it, an equal one changes nothing. The frame comes every
+			// second either way, and is counted, so an idle window reads about 1 fps.
+			frameRateLabel.value = meter.label();
+			scheduleFrame();
+		}
 		if (now < nextBackgroundPoll) {
 			// While a workspace connects, its attachment (and exohost's link, which answers the open) is polled on every turn;
 			// everything else keeps its cadence.
@@ -1573,15 +1593,12 @@ class ExosuitApp implements DesktopUiApplication {
 				var previousRevision = model.revision();
 				var changedPaths = localModel.pollLoads();
 				if (changedPaths.length > 0) {
-					var tree = explorerTree;
-					var treeStartedAt = Sys.time();
-					if (tree != null) tree.refreshBranches(changedPaths, model.revision());
+					// The tree flattens its rows again in the next build: what its model read there changed.
 					var tracePath = Sys.getEnv("EXOSUIT_TREE_TRACE");
-					var treeMs = Std.int((Sys.time() - treeStartedAt) * 1000);
 					var applyMs = Std.int((Sys.time() - applyStartedAt) * 1000);
-					if (tracePath != null && tracePath.length > 0 && (treeMs >= 50 || applyMs >= 50)) {
+					if (tracePath != null && tracePath.length > 0 && applyMs >= 50) {
 						try File.appendContent(tracePath,
-							'ui-apply=${applyMs}ms tree-refresh=${treeMs}ms paths=${changedPaths.join(",")}\n') catch (_:Dynamic) {}
+							'ui-apply=${applyMs}ms paths=${changedPaths.join(",")}\n') catch (_:Dynamic) {}
 					}
 					requestFrame();
 				}
@@ -2005,12 +2022,9 @@ class ExosuitApp implements DesktopUiApplication {
 	function layoutButton(region:String, label:String, command:String, selected:Bool):View {
 		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH); style.height = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH);
 		style.padding = new Insets(6, 6, 6, 6);
-		var button = new Button("", style, function() { ui.commands.executeContext(command, ui.commandContext); requestFrame(); }, "layout-" + region);
-		button.variant = ButtonVariant.Navigation; button.selected = selected;
-		button.classes.push("chrome-action");
-		button.accessibilityLabel = label;
-		if (region == "menu") button.leadingIcon = IconName.Grid;
-		else button.leadingView = new LayoutControlIcon(region, theme.tokens.textSecondary);
+		var button = new Button("", style, function() { ui.commands.executeContext(command, ui.commandContext); requestFrame(); }, "layout-" + region,
+			null, ButtonVariant.Navigation, selected, ["chrome-action"], region == "menu" ? IconName.Grid : null, null,
+			region == "menu" ? null : new LayoutControlIcon(region, theme.tokens.textSecondary), null, null, null, null, label);
 		var shortcut = layoutShortcut(command);
 		return new TabTooltip("layout-tooltip-" + region, button, new Text(label + (shortcut.length == 0 ? "" : " (" + shortcut + ")")),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
@@ -2064,8 +2078,9 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function topBar():View {
+		// The dock's open regions and the frame rate are tracked reads of buildTopBar; the string holds the plain inputs.
 		return new RetainedView("toolbar", function(_) return buildTopBar(),
-			function() return dock.revision + ":" + phoneLayoutActive + ":" + viewportWidth + ":" + application.activeContext.revision + ":" + explorerRoot + ":" + workspaceStatus + ":" + terminalTabs.canShowTerminal() + ":" + terminalTabs.terminalCreationFailure() + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
+			function() return phoneLayoutActive + ":" + viewportWidth + ":" + application.activeContext.revision + ":" + explorerRoot + ":" + workspaceStatus + ":" + terminalTabs.canShowTerminal() + ":" + terminalTabs.terminalCreationFailure() + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
 	}
 
 	function buildTopBar():View {
@@ -2102,13 +2117,12 @@ class ExosuitApp implements DesktopUiApplication {
 			function() application.commands.perform("doc:save", application.context))));
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
 		var workspaceTitle = workspaceTitleText();
-		var fps = frameRateMeter().label();
+		var fps = frameRateLabel.value;
 		if (fps.length > 0) workspaceTitle = workspaceTitle.length == 0 ? fps : workspaceTitle + " · " + fps;
 		if (application.activeContext.kind == workspace.ContextKind.Group) {
 			var back = new Button("Back to Workspace", null, function() {
 				application.activeContext.useWorkspace(); requestFrame();
-			}, "context-back-to-workspace");
-			back.variant = ButtonVariant.Navigation;
+			}, "context-back-to-workspace", null, ButtonVariant.Navigation);
 			items.push(new KeyedView("context-back", back));
 		}
 		if (custom) {
@@ -2145,12 +2159,9 @@ class ExosuitApp implements DesktopUiApplication {
 		var custom = phoneLayoutActive || hostContext != null && (hostContext.touchPrimary || hostContext.windowControls != null);
 		var style = new LayoutStyle();
 		if (custom) { style.width = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH); style.height = LayoutAxis.fixed(28); style.padding = new Insets(8, 0, 8, 0); }
-		var button = new Button(custom ? "" : label, style, action, "toolbar-" + label);
-		button.accessibilityLabel = label;
-		if (label == "Terminal") button.enabled = terminalTabs.canShowTerminal();
-		button.variant = custom ? ButtonVariant.Navigation : ButtonVariant.Secondary;
-		if (custom) button.classes.push("chrome-action");
-		button.leadingIcon = icon;
+		var button = new Button(custom ? "" : label, style, action, "toolbar-" + label,
+			label == "Terminal" ? terminalTabs.canShowTerminal() : null, custom ? ButtonVariant.Navigation : ButtonVariant.Secondary,
+			null, custom ? ["chrome-action"] : null, icon, null, null, null, null, null, null, label);
 		return custom || label == "Terminal" ? new TabTooltip("toolbar-tooltip:" + label, button,
 			new Text(label == "Terminal" && !terminalTabs.canShowTerminal() ? terminalTabs.terminalCreationFailure() : label),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay) : button;
@@ -2252,10 +2263,8 @@ class ExosuitApp implements DesktopUiApplication {
 		style.width = LayoutAxis.fixed(28); style.height = LayoutAxis.fixed(28);
 		style.padding = new Insets(6, 6, 6, 6);
 		style.childAlignY = LayoutAlignmentY.Center;
-		var button = new Button("", style, action, key);
-		button.variant = ButtonVariant.Navigation;
-		button.leadingIcon = icon; button.iconSize = 16;
-		button.accessibilityLabel = label;
+		var button = new Button("", style, action, key, null, ButtonVariant.Navigation, null, null, icon, null, null, null, null, null,
+			16, label);
 		return new TabTooltip(key + "-tooltip", button, new Text(label),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
 	}
@@ -2707,8 +2716,7 @@ class ExosuitApp implements DesktopUiApplication {
 		style.padding = new Insets(24.0, 24.0, 24.0, 24.0);
 		style.childGap = 10.0;
 		var actions = host.welcomeActions;
-		var newButton = new Button("New File", null, function() application.newDocument(), "welcome-new");
-		newButton.variant = ButtonVariant.Primary;
+		var newButton = new Button("New File", null, function() application.newDocument(), "welcome-new", null, ButtonVariant.Primary);
 		var openButton = new Button("Open File...", null, openFileDialog, "welcome-open");
 		var items:Array<KeyedView> = [
 			new KeyedView("title", new Text("exosuit", null, theme.tokens.text,
@@ -2734,11 +2742,11 @@ class ExosuitApp implements DesktopUiApplication {
 			for (index in 0...actions.recentProjects.length) {
 				var path = actions.recentProjects[index];
 				// A folder path can be wider than the editor area: the button fills at most the panel and the path ellipsizes in the middle.
-				var recent = new Button(path, null, function() actions.openRecent(path), "welcome-recent-" + index);
-				recent.style.width = LayoutAxis.grow(0, path.length * 8.0 + 32); recent.style.clipHorizontal = true;
-				recent.labelView = new haxeon.ui.widgets.text.MiddleEllipsisText("welcome-recent-label", path, true,
-					new TextStyleOverride(null, null, null, haxeon.ui.TextWrap.None));
-				recent.accessibilityLabel = path;
+				var buttonStyle = new LayoutStyle();
+				buttonStyle.width = LayoutAxis.grow(0, path.length * 8.0 + 32); buttonStyle.clipHorizontal = true;
+				var recent = new Button(path, buttonStyle, function() actions.openRecent(path), "welcome-recent-" + index, null, null, null,
+					null, null, null, null, null, new haxeon.ui.widgets.text.MiddleEllipsisText("welcome-recent-label", path, true,
+						new TextStyleOverride(null, null, null, haxeon.ui.TextWrap.None)), null, null, path);
 				recentRows.push(new KeyedView("recent" + index, recent));
 			}
 			items.push(new KeyedView("recent", new Column("welcome-recent", recentRows, recentStyle)));
@@ -2859,9 +2867,20 @@ class ExosuitApp implements DesktopUiApplication {
 		return meter;
 	}
 
-	/** Invalidate application views as well as scheduling a host render. */
+	/**
+		Invalidate application views as well as scheduling a host render: the next frame is a full root build. On the UI
+		thread and never inside a build (a tracked write there throws); a caller that runs in a build fixes its call site.
+	**/
 	public function requestFrame():Void {
-		viewRevision++;
+		frameTick.value = frameTick.value + 1;
+		scheduleFrame();
+	}
+
+	/**
+		Schedule a host render without invalidating anything. For writes to tracked sources whose readers are the root or
+		retained builds, which do not ask for a frame themselves (a poll, a timer, a callback).
+	**/
+	public function scheduleFrame():Void {
 		if (hostContext != null) hostContext.requestFrame();
 	}
 }
@@ -2877,4 +2896,35 @@ private typedef ScmMarkerTarget = {
 	var snapshot:Null<scm.ScmSnapshot>;
 	var untracked:Bool;
 	var worktree:Bool;
+}
+
+/**
+	The side bar, whose header actions show while the pointer is over it or the keyboard is in it
+	(`SidebarHost.headerActionsVisible`, read while building). Hover and focus alone change only how nodes look, which
+	haxeon updates without a build, so when entering, leaving, focusing or blurring changes whether they show, the side
+	bar asks for one.
+**/
+private class SidebarHoverRebuild implements View {
+	final host:haxeon.ui.widgets.sidebar.SidebarHost;
+	final rebuild:Void->Void;
+
+	public function new(host:haxeon.ui.widgets.sidebar.SidebarHost, rebuild:Void->Void) {
+		this.host = host;
+		this.rebuild = rebuild;
+	}
+
+	public function build(context:haxeon.ui.core.BuildContext):RenderNode {
+		var node = host.build(context);
+		var visible = host.headerActionsVisible;
+		if (visible == null) return node;
+		var shown = visible(node);
+		var changed = function(_:UiEvent) {
+			if (visible(node) != shown) { shown = !shown; rebuild(); }
+		};
+		node.on(UiEventKind.HoverEnter, changed, haxeon.ui.core.UiEventPhase.Target);
+		node.on(UiEventKind.HoverLeave, changed, haxeon.ui.core.UiEventPhase.Target);
+		node.on(UiEventKind.Focus, changed, haxeon.ui.core.UiEventPhase.Capture);
+		node.on(UiEventKind.Blur, changed, haxeon.ui.core.UiEventPhase.Capture);
+		return node;
+	}
 }

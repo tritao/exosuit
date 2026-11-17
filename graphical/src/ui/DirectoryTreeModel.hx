@@ -3,6 +3,8 @@ package ui;
 import sys.FileSystem;
 import sys.io.File;
 import sys.thread.Mutex;
+import haxeon.reactive.ReactiveRuntime;
+import haxeon.reactive.Signal;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
@@ -36,7 +38,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		value = Math.max(6.0, Math.min(96.0, value));
 		if (fontSize != value) {
 			fontSize = value;
-			listRevision++;
+			noteChangeBeforeReads();
 		}
 		return fontSize;
 	}
@@ -59,6 +61,12 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	var generation:Int = 0;
 	var requestSequence:Int = 0;
 	var listRevision:Int = 0;
+	/**
+		What TreeView sees of `listRevision`: every TreeViewModel method reads it, so the tree re-flattens when a
+		listing, its paging, its busy state or the rows' look changed. Written on the UI thread only, outside builds;
+		the loader threads never touch it.
+	**/
+	final changes:Signal<Int> = new Signal(0);
 	var decorationProvider:Null<PluginResourceDecorationRegistry>;
 	var observedDecorationRevision:Int = -1;
 	var listings:Map<String, DirectoryListing> = [];
@@ -101,7 +109,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 
 	function cancelExpansion(path:String):Void {
 		requestedExpansions.remove(path);
-		if (busyExpansions.remove(path)) listRevision++;
+		if (busyExpansions.remove(path)) noteChange();
 	}
 
 	public function cancelRequestedExpansions():Void {
@@ -117,7 +125,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 				ready.push(path);
 			} else if (!busyExpansions.exists(path) && now - requestedExpansions.get(path) >= EXPANSION_GRACE_SECONDS) {
 				busyExpansions.set(path, true);
-				listRevision++;
+				noteChange();
 			}
 		}
 		return ready;
@@ -132,7 +140,10 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		}
 	}
 
-	public function rootCount():Int return roots.length;
+	public function rootCount():Int {
+		track();
+		return roots.length;
+	}
 	public function rootIdentity():String return roots.join("\n");
 	public function watchesChanges():Bool return watchChanges;
 	public function dispose():Void invalidate();
@@ -140,19 +151,24 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		if (decorationProvider == provider) return;
 		decorationProvider = provider;
 		observedDecorationRevision = provider == null ? -1 : provider.revision;
-		listRevision++;
+		noteChangeBeforeReads();
 	}
 
-	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
+	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata> {
+		track();
 		return [for (index in start...Std.int(Math.min(roots.length, start + count))) new TreeRootMetadata(roots[index], true)];
+	}
 
 	public function rootKeyAt(index:Int):String return roots[index];
 
 	/** Directory identity controls expandability, even when the listing is empty. */
-	public function hasChildrenHint(key:String):Bool
+	public function hasChildrenHint(key:String):Bool {
+		track();
 		return isDirectoryPath(key);
+	}
 
 	public function childCount(parentKey:String):Int {
+		track();
 		if (roots.indexOf(parentKey) >= 0 && !sys.FileSystem.exists(parentKey)) return 0;
 		if (isSyntheticRow(parentKey)) return 0;
 		if (!isKnownDirectory(parentKey)) return 0;
@@ -166,6 +182,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	}
 
 	public function childKeyAt(parentKey:String, index:Int):String {
+		track();
 		if (isSyntheticRow(parentKey) || index < 0) return "";
 		if (!listings.exists(parentKey)) {
 			if (index != 0) return "";
@@ -182,19 +199,34 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		return "";
 	}
 
-	public function initiallyExpanded(key:String):Bool return roots.indexOf(key) >= 0;
+	public function initiallyExpanded(key:String):Bool {
+		track();
+		return roots.indexOf(key) >= 0;
+	}
 
-	public function estimatedExtent():Float return rowHeight();
+	public function estimatedExtent():Float {
+		track();
+		return rowHeight();
+	}
 
-	public function extentIsUniform():Bool return true;
+	public function extentIsUniform():Bool {
+		track();
+		return true;
+	}
 
-	public function extentAt(key:String):Float return rowHeight();
+	public function extentAt(key:String):Float {
+		track();
+		return rowHeight();
+	}
 
-	public function buildItem(key:String):View
+	public function buildItem(key:String):View {
+		track();
 		return new MiddleEllipsisText("filename", rowLabel(key), false,
 			new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text));
+	}
 
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View {
+		track();
 		if (roots.indexOf(key) >= 0 && !sys.FileSystem.exists(key)) return new haxeon.ui.widgets.text.Text(baseName(key) + " (unavailable)", null, theme.tokens.textSecondary);
 		if (isSyntheticRow(key))
 			return new MiddleEllipsisText("filename", rowLabel(key), false,
@@ -229,13 +261,35 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		return new Row("explorer-item", children, style);
 	}
 
-	public function revision():Int {
+	public function revision():Int return listRevision;
+
+	public function prepareBuild():Void {
 		var current = decorationProvider == null ? -1 : decorationProvider.revision;
 		if (current != observedDecorationRevision) {
 			observedDecorationRevision = current;
 			listRevision++;
 		}
-		return listRevision;
+		changes.update(listRevision);
+	}
+
+	function track():Void {
+		changes.value;
+	}
+
+	/** Publishes a change to TreeView now, or, inside a build, where the signal cannot be written, at `prepareBuild`. */
+	function noteChange():Void {
+		listRevision++;
+		if (!ReactiveRuntime.isTracking()) changes.update(listRevision);
+	}
+
+	/**
+		For the setters the panel builds call before their tree reads this model (font size, decorations): the change
+		must reach the tree in the same build.
+	**/
+	function noteChangeBeforeReads():Void {
+		listRevision++;
+		// The panel builds set these before their TreeView reads `changes`, so the write precedes every read this frame.
+		ReactiveRuntime.withoutTracking(() -> changes.update(listRevision));
 	}
 
 	function decorationColor(value:PluginResourceDecoration):haxeon.ui.Color return switch value.color {
@@ -263,7 +317,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			var oldSize = pageSizes.exists(directory) ? pageSizes.get(directory) : PAGE_SIZE;
 			if (oldSize >= names.length) return false;
 			pageSizes.set(directory, Std.int(Math.min(names.length, oldSize + PAGE_SIZE)));
-			listRevision++;
+			noteChange();
 			return true;
 		}
 		if (StringTools.endsWith(key, "/" + RETRY_SUFFIX)) {
@@ -329,7 +383,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			}
 			if (observeDirectory != null) observeDirectory(result.path);
 		}
-		if (changedPaths.length > 0) listRevision++;
+		if (changedPaths.length > 0) noteChange();
 		return changedPaths;
 	}
 
@@ -383,7 +437,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		jobs.resize(0);
 		prefetchJobs.resize(0);
 		queueLock.release();
-		listRevision++;
+		noteChange();
 	}
 
 	function requestLoad(path:String, priority:Bool = true):Void {
@@ -472,7 +526,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 
 	function failQueued(queue:Array<DirectoryLoadJob>):Void {
 		while (queue.length > 0) {
-			var job = queue.shift();
+			var job = queue.shift() ?? throw "No queued directory load";
 			completed.push({path: job.path, generation: job.generation, requestId: job.requestId,
 				names: [], kinds: [], unchanged: false, invalidated: [], failed: true,
 				queuedAt: job.queuedAt, startedAt: 0, finishedAt: Sys.time()});
@@ -488,7 +542,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 				queueLock.release();
 				return;
 			}
-			job = jobs.shift();
+			job = jobs.shift() ?? throw "No directory load job";
 			queueLock.release();
 			var result = loadJob(job);
 			queueLock.acquire();
@@ -506,7 +560,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 				queueLock.release();
 				return;
 			}
-			job = prefetchJobs.shift();
+			job = prefetchJobs.shift() ?? throw "No directory prefetch job";
 			activePrefetch.set(job.path, job.requestId);
 			queueLock.release();
 			var result = loadJob(job);

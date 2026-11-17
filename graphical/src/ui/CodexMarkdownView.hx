@@ -115,16 +115,15 @@ class CodexMarkdownView implements View {
           bar.radiusTopLeft = bar.radiusTopRight = bar.radiusBottomLeft = bar.radiusBottomRight = 6;
           var title = new LayoutStyle(); title.width = LayoutAxis.grow();
           var actionStyle = new LayoutStyle(); actionStyle.height = LayoutAxis.fixed(30); actionStyle.padding = new Insets(6, 4, 6, 4);
-          var show = new Button("Show source", actionStyle, function() shown.update(true), key + "-show-source");
-          show.variant = ButtonVariant.Navigation;
-          var copy = new Button("", actionStyle, function() context.clipboard.writeText(raw), key + "-copy-source");
-          copy.accessibilityLabel = "Copy source"; copy.leadingIcon = IconName.Copy; copy.iconSize = 16; copy.variant = ButtonVariant.Navigation;
+          var show = new Button("Show source", actionStyle, function() shown.update(true), key + "-show-source", null, ButtonVariant.Navigation);
+          var copy = new Button("", actionStyle, function() context.clipboard.writeText(raw), key + "-copy-source", null, ButtonVariant.Navigation,
+            null, null, IconName.Copy, null, null, null, null, null, 16, "Copy source");
           var controls:Array<KeyedView> = [new KeyedView("title", new Text(artifact, title, context.theme.tokens.textSecondary))];
           if (previewArtifact != null && (block.language == "html" || block.language == "htm" || block.language == "svg")) {
             var preview:(String, String)->Void = cast previewArtifact;
             var language = block.language;
-            var button = new Button(language == "svg" ? "Open static SVG" : "Preview HTML", actionStyle, function() preview(language, raw), key + "-render");
-            button.variant = ButtonVariant.Navigation;
+            var button = new Button(language == "svg" ? "Open static SVG" : "Preview HTML", actionStyle, function() preview(language, raw), key + "-render",
+              null, ButtonVariant.Navigation);
             controls.push(new KeyedView("preview", button));
           }
           controls.push(new KeyedView("show", show)); controls.push(new KeyedView("copy", copy));
@@ -154,12 +153,8 @@ class CodexMarkdownView implements View {
         field.presentationRevision = model.presentationRevision;
         var code = raw;
         var copyStyle = new LayoutStyle(); copyStyle.height = LayoutAxis.fixed(30); copyStyle.padding = new Insets(8, 4, 8, 4);
-        var copy = new Button("", copyStyle, function() context.clipboard.writeText(code), key + "-copy");
-        copy.accessibilityLabel = "Copy code";
-        copy.leadingIcon = IconName.Copy;
-        copy.iconSize = 16;
-        copy.variant = ButtonVariant.Navigation;
-        copy.classes.push("viewport-tool");
+        var copy = new Button("", copyStyle, function() context.clipboard.writeText(code), key + "-copy", null, ButtonVariant.Navigation,
+          null, ["viewport-tool"], IconName.Copy, null, null, null, null, null, 16, "Copy code");
         var header = new LayoutStyle(); header.width = LayoutAxis.fit(); header.childGap = 8;
         header.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
         var label = new LayoutStyle(); label.width = LayoutAxis.fit();

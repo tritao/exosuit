@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
 import haxeon.ui.core.WidgetId;
 import haxeon.ui.widgets.controls.Button;
 
@@ -11,8 +12,9 @@ import haxeon.ui.widgets.controls.Button;
 	up. The ordinary Button is focusable, and focus leaving a text input hides the keyboard on a phone.
 **/
 class TouchKeyButton extends Button {
-	public function new(label:String, ?style:LayoutStyle, ?onClick:Void->Void, ?key:String) {
-		super(label, style, onClick, key);
+	public function new(label:String, style:LayoutStyle, onClick:Void->Void, key:String, selected:Bool, labelView:View,
+			accessibilityLabel:String) {
+		super(label, style, onClick, key, null, null, selected, null, null, null, null, null, labelView, null, null, accessibilityLabel);
 	}
 
 	override function buildButton(context:BuildContext, id:WidgetId):RenderNode {

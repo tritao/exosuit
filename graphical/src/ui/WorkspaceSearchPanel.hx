@@ -87,10 +87,10 @@ class WorkspaceSearchPanel implements View {
 			var modeButton = new Button(remoteSearch.mode == "content" ? "Contents" : "File names", null, function() {
 				remoteSearch.toggleMode();
 				this.search(queryValue);
-			}, "workspace-search-remote-mode");
-			modeButton.accessibilityLabel = remoteSearch.mode == "content"
+			}, "workspace-search-remote-mode", null, null, null, null, null, null, null, null, null, null, null,
+				remoteSearch.mode == "content"
 				? "Search file contents; activate to search file names"
-				: "Search file names; activate to search file contents";
+				: "Search file names; activate to search file contents");
 			rows.push(new KeyedView("remote-mode", modeButton));
 			rows.push(new KeyedView("status", new Text(remoteStatus())));
 			if (remoteSearch.error != null) rows.push(new KeyedView("error", new Text(remoteSearch.error)));
@@ -101,12 +101,11 @@ class WorkspaceSearchPanel implements View {
 					var preview = match.line < 0 ? "" : "  " + match.preview;
 					var folder = remoteSearch.rootLabel(match);
 					var label = (folder == null ? "" : folder + " · ") + (match.kind == "directory" ? "Folder · " : "") + displayPath(match.path) + location + preview;
-					var button = new Button(label, rowStyle(48), function() {
+					return new Button(label, rowStyle(48), function() {
 						if (generation != -remoteSearch.generation - 1 || !remoteSearch.active) return;
 						if (openRemoteResult != null) openRemoteResult(match);
-					}, "workspace-remote-search-result-" + index);
-					button.accessibilityLabel = label;
-					return button;
+					}, "workspace-remote-search-result-" + index, null, null, null, null, null, null, null, null, null, null, null,
+						label);
 				}, fill(), null, scroll)));
 		} else {
 			var replaceStyle = new LayoutStyle(); replaceStyle.width = LayoutAxis.grow();
@@ -114,8 +113,8 @@ class WorkspaceSearchPanel implements View {
 				replacement = value; previewVisible = false; application.search.clearReplacementPreview(); requestFrame();
 			}, replaceStyle);
 			replace.placeholder = "Replace with…";
-			var previewButton = new Button("Preview replacement", null, function() preview(replacement), "workspace-search-preview");
-			previewButton.enabled = search.complete && !search.capped && search.errors.length == 0 && search.results.length > 0;
+			var previewButton = new Button("Preview replacement", null, function() preview(replacement), "workspace-search-preview",
+				search.complete && !search.capped && search.errors.length == 0 && search.results.length > 0);
 			rows.push(new KeyedView("replacement", replace));
 			rows.push(new KeyedView("preview", previewButton));
 			var status = queryValue.length == 0 ? "Search the open projects" : search.complete
@@ -136,8 +135,9 @@ class WorkspaceSearchPanel implements View {
 			rows.push(new KeyedView("results", new VirtualList("workspace-replacement-files", snapshot.files.length, 96,
 				function(index) {
 					var file = snapshot.files[index];
-					var changed = previewOffsets.get(file.path);
-					if (changed == null) { changed = firstDifference(file.originalText, file.proposedText); previewOffsets.set(file.path, changed); }
+					var known = previewOffsets.get(file.path);
+					var changed = known ?? firstDifference(file.originalText, file.proposedText);
+					if (known == null) previewOffsets.set(file.path, changed);
 					return new Column("preview-file-" + index, [new KeyedView("path", new Text(displayPath(file.path) + " (" + file.matchCount + ")")),
 						new KeyedView("before", new Text("- " + snippet(file.originalText, changed))),
 						new KeyedView("after", new Text("+ " + snippet(file.proposedText, changed)))], rowStyle(96));
@@ -146,14 +146,13 @@ class WorkspaceSearchPanel implements View {
 			rows.push(new KeyedView("results", new VirtualList("workspace-search-results", host.workspaceSearchResults.length, 48,
 				function(index) {
 					var match = host.workspaceSearchResults[index];
-					var button = new Button(displayPath(match.path) + ":" + (match.line + 1) + ":" + (match.column + 1) + "  " + match.preview,
+					return new Button(displayPath(match.path) + ":" + (match.line + 1) + ":" + (match.column + 1) + "  " + match.preview,
 						rowStyle(48), function() {
 							if (search.generation != generation) return;
 							if (!host.activateSearchResult(index)) this.search(queryValue);
 							requestFrame();
-						}, "workspace-search-result-" + index);
-					button.accessibilityLabel = match.path + ":" + (match.line + 1) + ":" + (match.column + 1) + " " + match.preview;
-					return button;
+						}, "workspace-search-result-" + index, null, null, null, null, null, null, null, null, null, null, null,
+						match.path + ":" + (match.line + 1) + ":" + (match.column + 1) + " " + match.preview);
 				}, fill(), null, scroll)));
 		}
 		var node = new Column("workspace-search-panel", rows, style).build(context);

@@ -10,6 +10,7 @@ import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
 import haxeon.ui.core.UiEvent;
+import haxeon.ui.core.UiEventPhase;
 import haxeon.ui.icons.IconName;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.collections.TreeView;
@@ -732,11 +733,11 @@ class WorkbenchPanel implements View {
 		}
 		batchTerminalError = terminalError; batchAgentError = agentError;
 		if (batchPlan.length > 0) {
-			placeNode(known, batchPlan.shift());
+			placeNode(known, batchPlan.shift() ?? throw "No placement step");
 			requestFrame();
 			return;
 		}
-		var key = batchKeys.shift(), target = batchTarget;
+		var key = batchKeys.shift() ?? throw "No selected row", target = batchTarget;
 		if (target == null) removeNode(key); else moveNode(key, target);
 		requestFrame();
 	}
@@ -1096,13 +1097,26 @@ class WorkbenchPanel implements View {
 		requestFrame();
 	}
 
-	function toolbarButton(label:String, icon:IconName, action:Void->Void, key:String):Button {
+	function toolbarButton(label:String, icon:IconName, action:Null<Void->Void>, key:String, enabled:Bool, ?onClickEvent:UiEvent->Void):Button {
 		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(24); style.height = LayoutAxis.fixed(24);
 		style.padding = new Insets(4, 4, 4, 4);
-		var button = new Button("", style, action, key);
-		button.accessibilityLabel = label; button.leadingIcon = icon; button.variant = ButtonVariant.Navigation;
-		button.classes.push("chrome-action");
-		return button;
+		return new Button("", style, action, key, enabled, ButtonVariant.Navigation, false, ["chrome-action"], icon,
+			null, null, null, null, null, null, label, onClickEvent);
+	}
+
+	/**
+		Brings the rows and drafts up to date with the machine, the catalogs and the panel's own state, and reports a new
+		error. The app calls it before every build, outside tracking: it writes the tree model, the tree's selection and
+		expansion, and requests frames, none of which a build may do.
+	**/
+	public function prepareBuild():Void {
+		syncState();
+		var error = draftError == null ? client.terminalCatalogError() : draftError;
+		if (error == null) error = client.agentService().agentError();
+		if (error != lastReportedError) {
+			lastReportedError = error;
+			if (error != null) reportError(error);
+		}
 	}
 
 	function syncState():Void {
@@ -1170,16 +1184,15 @@ class WorkbenchPanel implements View {
 
 	/** The header's buttons act in the selected row's workspace, else in the one the window shows. */
 	public function buildHeaderActions(context:BuildContext, availableWidth:Float):RenderNode {
-		syncState();
 		var selectedKey = tree.selectedKey, workspace = model.workspaceOfRow(selectedKey);
 		if (workspace == null) workspace = model.openWorkspace;
 		var id = workspace, here = workspace == model.openWorkspace, known = clientOf(workspace);
 		var selected = groupFor(selectedKey), into = createTarget(selectedKey);
-		var terminal = toolbarButton("New terminal", IconName.Terminal, function() make(id, into, true), "workbench-new-terminal");
-		terminal.enabled = known == null ? !here && id != null : known.canCreateGroupedTerminals() && !known.terminalCatalogBusy();
+		var terminal = toolbarButton("New terminal", IconName.Terminal, function() make(id, into, true), "workbench-new-terminal",
+			known == null ? !here && id != null : known.canCreateGroupedTerminals() && !known.terminalCatalogBusy());
 		var provider = defaultProvider(), agentLabel = "New " + WorkbenchActions.providerLabel(provider) + " session";
-		var agent = toolbarButton(agentLabel, IconName.Plus, function() make(id, into, false, provider), "workbench-new-agent");
-		agent.enabled = here ? canCreateAgent() : id != null;
+		var agent = toolbarButton(agentLabel, IconName.Plus, function() make(id, into, false, provider), "workbench-new-agent",
+			here ? canCreateAgent() : id != null);
 		var selectedAgentId = WorkbenchRowKey.idOf(selectedKey, WorkbenchRowKind.Agent), rows = liveRows(workspace);
 		var selectedAgent = selectedAgentId == null || rows == null ? null : rows.agents.get(selectedAgentId);
 		var selection = tree.selectedKeys();
@@ -1189,17 +1202,16 @@ class WorkbenchPanel implements View {
 			if (multiple) startBatch(removable, null);
 			else if (selectedAgent != null && selectedKey != null) removeAgent(selectedKey);
 		};
-		var deleteAgent = toolbarButton("Remove selected leaf from Workbench", IconName.Trash, removeSelected, "workbench-delete-codex");
-		deleteAgent.enabled = multiple ? removable.length > 0 && batchIdle()
-			: known != null && agentCanBeRemoved(selectedAgent) && known.agentService().canControlAgents() && !known.agentService().agentBusy();
+		var deleteAgent = toolbarButton("Remove selected leaf from Workbench", IconName.Trash, removeSelected, "workbench-delete-codex",
+			multiple ? removable.length > 0 && batchIdle()
+			: known != null && agentCanBeRemoved(selectedAgent) && known.agentService().canControlAgents() && !known.agentService().agentBusy());
 		var overflow:Array<MenuItem> = [];
 		if (availableWidth < 260 && (selectedAgent != null || multiple))
 			overflow.push(new MenuItem("delete-selected-agent", multiple ? closeSelectionLabel(selection, removable) : "Remove from Workbench",
 				removeSelected, deleteAgent.enabled));
-		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions");
-		more.onClickEvent = function(event) {
+		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions", true, function(event) {
 			if (liveRows(id) != null) menu(id, selected, event, null, overflow);
-		};
+		});
 		var toolbarStyle = new LayoutStyle(); toolbarStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center; toolbarStyle.childGap = 2;
 		toolbarStyle.padding = new Insets(2, 0, 4, 0);
 		var delay = tooltipDelay();
@@ -1229,15 +1241,8 @@ class WorkbenchPanel implements View {
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		syncState();
 		var rows:Array<KeyedView> = [];
 		rows.push(new KeyedView("tree", tree));
-		var error = draftError == null ? client.terminalCatalogError() : draftError;
-		if (error == null) error = client.agentService().agentError();
-		if (error != lastReportedError) {
-			lastReportedError = error;
-			if (error != null) reportError(error);
-		}
 		var creation = client.agentService().agentCreation();
 		var progress = creation != null ? "Starting " + creation.name + " session…"
 			: client.agentService().agentBusy() || client.terminalCatalogBusy() ? "Session operation in progress…" : null;
@@ -1264,7 +1269,7 @@ class WorkbenchPanel implements View {
 			// The row under the press is the one a drag would carry; hover queries of the tree must not decide that.
 			var pressed = model.rowAt(event.y);
 			dragSource = pressed != null && canDragRow(pressed.key) ? pressed.key : null;
-		}, "capture");
+		}, UiEventPhase.Capture);
 		node.on(haxeon.ui.core.UiEventKind.PointerMove, function(event) {
 			pointerY = event.y;
 			if (dragSource == null) return;
@@ -1276,7 +1281,7 @@ class WorkbenchPanel implements View {
 			// Outside the panel nothing would be placed, so no line is shown there.
 			if (overPanel(node, event.x, event.y)) dragMovedTo(event.y);
 			else if (model.insertion != null) { model.setInsertion(null); requestFrame(); }
-		}, "capture");
+		}, UiEventPhase.Capture);
 		node.on(haxeon.ui.core.UiEventKind.PointerUp, function(event) {
 			pointerY = event.y;
 			var source = dragSource, moved = dragMoved;
@@ -1291,18 +1296,18 @@ class WorkbenchPanel implements View {
 			var workspace = model.workspaceOfRow(source);
 			if (workspace != null) startPlan(workspace, placement.steps);
 			requestFrame();
-		}, "capture");
-		node.on(haxeon.ui.core.UiEventKind.PointerCancel, function(_) endDrag(), "capture");
+		}, UiEventPhase.Capture);
+		node.on(haxeon.ui.core.UiEventKind.PointerCancel, function(_) endDrag(), UiEventPhase.Capture);
 		node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
 			if (event.key == haxeon.ui.core.UiKey.Escape && dragSource != null) {
 				// The tree's own drag ends too, so a release after Escape cannot still move a row into a group.
 				endDrag(); tree.cancelDrag(); event.cancelPointerCapture();
 			}
-			else if ((event.key == haxeon.ui.core.UiKey.Up || event.key == haxeon.ui.core.UiKey.Down) && (event.modifiers & haxeon.ui.core.UiModifier.Alt) != 0
+			else if ((event.key == haxeon.ui.core.UiKey.Up || event.key == haxeon.ui.core.UiKey.Down) && event.modifiers.contains(haxeon.ui.core.UiModifier.Alt)
 				&& draft == null && agentDraft == null && nudge(event.key == haxeon.ui.core.UiKey.Up ? -1 : 1)) {
 				event.preventDefault(); event.stopPropagation();
 			}
-		}, "capture");
+		}, UiEventPhase.Capture);
 		node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
 			if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && agentDraft == null) {
 				var key = tree.selectedKey, row = WorkbenchRowKey.parse(key);
@@ -1319,7 +1324,7 @@ class WorkbenchPanel implements View {
 					if (group != null) { event.preventDefault(); event.stopPropagation(); beginGroup(row.workspace, group, false); }
 				}
 			}
-		}, "capture");
+		}, UiEventPhase.Capture);
 		node.on(haxeon.ui.core.UiEventKind.PointerDown, function(event) {
 			if (event.button == 1 && !event.defaultPrevented) {
 				var open = model.openWorkspace;
@@ -1379,7 +1384,7 @@ private class WorkbenchNameEditor implements View {
                 event.preventDefault(); event.stopImmediatePropagation();
                 if (event.key == haxeon.ui.core.UiKey.Enter) save(); else cancel();
             }
-        }, "capture");
+        }, UiEventPhase.Capture);
         return node;
     }
 }

@@ -86,14 +86,18 @@ class AgentTabs {
 	  if (checked != null && Sys.time() - checked >= 30) { githubOrigins.remove(key); githubOriginsCheckedAt.remove(key); }
   if (!githubOrigins.exists(key) && !githubOriginsPending.exists(key)) {
    githubOriginsPending.set(key, true);
+   // The session panel's build asks this, and a frame request there would be a write during the build; an answer that
+   // arrives before origin() returns (a source that fails at once) is read below by that same build.
+   var returned = false;
    selected.source.origin(selected.repository.id, function(result) {
     githubOriginsPending.remove(key);
     var current = sessionGithubSource(resource, root);
     if (current == null || current.source != selected.source || current.repository.id != selected.repository.id) return;
     githubOrigins.set(key, result.error == null && result.value != null ? result.value : "");
 	   githubOriginsCheckedAt.set(key, Sys.time());
-    app.requestFrame();
+    if (returned) app.requestFrame();
    });
+   returned = true;
   }
   var origin = githubOrigins.get(key);
   return origin == null || origin == "" ? null : origin;

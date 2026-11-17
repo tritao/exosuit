@@ -17,8 +17,8 @@ import platform.HostFileDialogs;
 /** Font chooser uses the same validation and mutation callback as typed paths. */
 class SettingsPathEditor extends StructuredPropertyEditor {
 	public static inline var TYPE = "exosuit.font-path";
-	public var previewPath:Null<String>;
-	var previewBase:Null<String>;
+	/** Text typed into the path field since the saved path last changed (ExosuitSettingsPanel clears it); the font preview shows it. */
+	public final previewPath = new haxeon.reactive.Signal<Null<String>>(null);
 	final dialogs:Null<HostFileDialogs>;
 	public function new(dialogs:Null<HostFileDialogs>) { super(TYPE); this.dialogs = dialogs; }
 	override public function display(value:Dynamic):String return Std.string(value);
@@ -29,9 +29,8 @@ class SettingsPathEditor extends StructuredPropertyEditor {
 	override public function build(key:String, descriptor:PropertyDescriptor, value:PropertyValue,
 		context:BuildContext, enabled:Bool, apply:PropertyValue->Void):View {
 		var path = switch value { case Custom(_, data): Std.string(data); default: ""; };
-		if (previewBase != path) { previewBase = path; previewPath = null; }
 		var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.childGap = 4;
-		var field = new TextField(key + ":path", path, function(text) { previewPath = text; context.commands.refresh(); }, style, descriptor.label);
+		var field = new TextField(key + ":path", path, function(text) previewPath.update(text), style, descriptor.label);
 		field.enabled = enabled;
 		field.onSubmit = text -> apply(Custom(TYPE, text));
 		var children = [new KeyedView("path", field)];
@@ -41,8 +40,7 @@ class SettingsPathEditor extends StructuredPropertyEditor {
 				chooser.openFile(function(accepted, paths) {
 					if (accepted && paths.length > 0) apply(Custom(TYPE, paths[0]));
 				}, "Choose font", path);
-			}, key + ":browse");
-			browse.enabled = enabled;
+			}, key + ":browse", enabled);
 			children.push(new KeyedView("browse", browse));
 		}
 		return new Column(key, children, style);

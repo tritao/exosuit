@@ -50,12 +50,13 @@ class SessionMessageImageView implements View {
   }
   var controls:Array<KeyedView>=[];
   if(state.image==null) {
-   var preview=new Button(state.loading ? "Loading image…" : state.error==null ? "Preview image" : "Retry image preview",null,function() request(false),key+"-preview");
-   preview.enabled=!state.loading;controls.push(new KeyedView("preview",preview));
+   var preview=new Button(state.loading ? "Loading image…" : state.error==null ? "Preview image" : "Retry image preview",null,function() request(false),key+"-preview",
+    !state.loading);
+   controls.push(new KeyedView("preview",preview));
   }
   if(open!=null) {
-   var openButton=new Button("Open image",null,function() request(true),key+"-open");
-   openButton.enabled=!state.loading;controls.push(new KeyedView("open",openButton));
+   var openButton=new Button("Open image",null,function() request(true),key+"-open",!state.loading);
+   controls.push(new KeyedView("open",openButton));
   }
   var rows:Array<KeyedView>=[new KeyedView("caption",new Text("Sent image"))];
   if(state.image!=null) {

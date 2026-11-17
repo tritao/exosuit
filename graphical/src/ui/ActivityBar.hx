@@ -15,6 +15,7 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.core.View;
 import haxeon.ui.core.UiEvent;
+import haxeon.ui.core.UiEventPhase;
 import haxeon.ui.core.UiEventKind;
 import haxeon.ui.core.UiKey;
 import haxeon.ui.Point;
@@ -59,6 +60,7 @@ class ActivityBar implements View {
 		hover.delaySeconds = tooltipDelay;
 		var drag = context.resourceState(context.id("activity-drag"),
 			function() return new ActivityBarDrag(), function(value) value.dispose()).value;
+		drag.bind(context);
 		drag.items.clear();
 		var order:Array<String> = [];
 		for (mode in model.modes) if (mode.visible && hiddenIds.indexOf(mode.id) < 0) order.push(mode.id);
@@ -78,13 +80,10 @@ class ActivityBar implements View {
 			var buttonStyle = new LayoutStyle();
 			buttonStyle.width = LayoutAxis.fixed(40);
 			buttonStyle.height = LayoutAxis.fixed(40);
-			var button = new Button("", buttonStyle, function() activate(id), BUTTON_KEY_PREFIX + id);
-			button.variant = ButtonVariant.Navigation;
-			button.classes.push("chrome-action");
-			button.leadingIcon = icons.exists(id) ? icons.get(id) : IconName.FolderOpen;
-			button.iconSize = 20;
-			button.accessibilityLabel = mode.label;
-			button.selected = model.visible && model.activeId == id;
+			var icon = icons.get(id);
+			var button = new Button("", buttonStyle, function() activate(id), BUTTON_KEY_PREFIX + id, true, ButtonVariant.Navigation,
+				model.visible && model.activeId == id, ["chrome-action"], icon == null ? IconName.FolderOpen : icon,
+				null, null, null, null, null, 20, mode.label);
 			items.push(new KeyedView(id, new ActivityBarItem(new TabTooltip("activity-tooltip:" + id, button,
 				new Text(mode.label, null, null, TextStyleOverride.paragraph(TextWrap.None)),
 				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
@@ -95,14 +94,8 @@ class ActivityBar implements View {
 		var manageStyle = new LayoutStyle();
 		manageStyle.width = LayoutAxis.fixed(40);
 		manageStyle.height = LayoutAxis.fixed(40);
-		var gear = new Button("", manageStyle, null, "activity-manage");
-		gear.onClickEvent = function(event) { hover.cancel(); manage(event); };
-		gear.variant = ButtonVariant.Navigation;
-		gear.classes.push("chrome-action");
-		gear.leadingIcon = IconName.Settings;
-		gear.iconSize = 22;
-		gear.accessibilityLabel = "Manage";
-		gear.selected = manageOpen;
+		var gear = new Button("", manageStyle, null, "activity-manage", true, ButtonVariant.Navigation, manageOpen, ["chrome-action"],
+			IconName.Settings, null, null, null, null, null, 22, "Manage", function(event) { hover.cancel(); manage(event); });
 		items.push(new KeyedView("manage", new ActivityBarItem(new TabTooltip("activity-tooltip:manage", gear,
 			new Text("Manage"),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
@@ -177,6 +170,8 @@ private class ActivityBarDrag {
 	public var insertion(default, null):Int = -1;
 	var order:Array<String> = [];
 	var revision:Null<haxeon.ui.core.State<Int>>;
+	/** The repaint counter as the last build read it. */
+	var painted:Int = 0;
 	var source:Null<String>;
 	var pointer:Int = -1;
 	var startX:Float = 0.0;
@@ -190,8 +185,17 @@ private class ActivityBarDrag {
 	public function dispose():Void {
 		clear(); items.clear(); revision = null;
 	}
+	/**
+		Takes this build's repaint counter and reads it, so the rail's build depends on it: `repaint()` from a pointer
+		or key handler then rebuilds the rail (a State write rebuilds only what read it).
+	**/
+	public function bind(context:BuildContext):Void {
+		var state = context.state(context.id("activity-drag-revision"), 0);
+		revision = state;
+		painted = state.value;
+	}
 	function repaint():Void {
-		if (revision != null) revision.update(revision.value + 1);
+		if (revision != null) revision.update(painted + 1);
 	}
 	function itemAt(x:Float, y:Float):Null<String> {
 		var point = new Point(x, y);
@@ -214,7 +218,6 @@ private class ActivityBarDrag {
 	public function attach(root:RenderNode, order:Array<String>, model:SidebarModel, move:(String, Null<String>)->Void,
 			context:BuildContext, menu:Null<(Null<String>, UiEvent)->Void>, started:Void->Void):Void {
 		this.order = order;
-		revision = context.state(context.id("activity-drag-revision"), 0);
 		if (source != null && order.indexOf(source) < 0) clear();
 		root.on(UiEventKind.PointerDown, function(event) {
 			if (event.button == 1) {
@@ -267,9 +270,9 @@ private class ActivityBarDrag {
 			var id = key != null && StringTools.startsWith(key, prefix) ? key.substr(prefix.length) : null;
 			menu(id != null && model.find(id) != null ? id : null, event);
 			event.preventDefault(); event.stopPropagation();
-		}, "capture");
+		}, UiEventPhase.Capture);
 		root.on(UiEventKind.Click, function(event) {
 			if (suppressClick) { event.preventDefault(); event.stopImmediatePropagation(); }
-		}, "capture");
+		}, UiEventPhase.Capture);
 	}
 }

@@ -70,9 +70,8 @@ class WorkspaceFilePreviewView implements View {
 			contents.onSelectionChange = function(_) file.clearSearchSelection();
 		}
 		var refreshButton = new Button(file.loading ? "Loading…" : file.loadError != null ? "Retry" : file.refreshing ? "Refreshing…" : "Refresh", null, refresh,
-			"workspace-file-refresh:" + file.id);
-		refreshButton.enabled = !file.refreshing && !file.loading;
-		refreshButton.accessibilityLabel = "Refresh saved workspace file";
+			"workspace-file-refresh:" + file.id, !file.refreshing && !file.loading, null, null, null, null, null, null, null, null, null, null,
+			"Refresh saved workspace file");
 		var rows:Array<KeyedView> = [
 			new KeyedView("header", new Row("workspace-file-header:" + file.id, [
 				new KeyedView("path", new MiddleEllipsisText("path-label", label, false,

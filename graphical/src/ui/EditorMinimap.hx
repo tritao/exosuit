@@ -85,11 +85,20 @@ class EditorMinimap implements View {
 		built.setStyleIdentity("editor-minimap", "editor-minimap:" + document.id);
 		node = built;
 		built.focusable = true;
+		// The overlay and the preview tile are painted from the scroll offset and the overlay's opacity, read when the node
+		// paints. A scroll or fade repaints this node in place (as ScrollView's scrollbars do), so it rebuilds nothing.
+		var repaint = function() {
+			var latest = RenderNode.latest(built);
+			context.willEditRetained(latest);
+			latest.invalidatePaint();
+		};
 		var visibility = context.resourceState(context.id("minimap-viewport-visibility:" + document.id),
 			function() return new ScrollbarVisibilityController(), function(value) value.dispose()).value;
-		visibility.attach(context.animations, function() context.commands.refresh());
+		// While building, the node is not submitted yet and paints the current opacity: only later changes repaint it.
+		visibility.attach(context.animations, function() {});
 		visibility.configure(ScrollbarVisibility.Auto, context.environment.reducedMotion);
 		visibility.setAvailable(true);
+		visibility.attach(context.animations, repaint);
 		built.on(UiEventKind.HoverEnter, function(_) visibility.setHovered(true));
 		built.on(UiEventKind.HoverLeave, function(_) visibility.setHovered(false));
 		built.on(UiEventKind.Focus, function(_) visibility.setFocused(true));
@@ -106,7 +115,7 @@ class EditorMinimap implements View {
 				default: return;
 			};
 			scroll.jumpTo(scroll.offsetX, target);
-			context.commands.refresh();
+			repaint();
 			event.preventDefault(); event.stopPropagation();
 		});
 		var painting = context.resourceState(built.id, function() return new MinimapPainting(), function(value) value.dispose()).value;
@@ -134,7 +143,7 @@ class EditorMinimap implements View {
 				painting.dispose();
 				var positions = [for (row in model.rows) row.line * scale - tileTop];
 				var bitmap = model.rasterize(colors, positions, tileHeight, tileHeight, markHeight, previewDensity.rasterScale);
-				painting.image = Image.create(bitmap.width, bitmap.height, ImageFormat.RGBA8,
+				painting.image = Image.create(bitmap.width, bitmap.height, ImageFormat.Rgba8,
 					bitmap.pixels, ImageFilter.Nearest);
 				painting.key = key;
 			}
@@ -150,7 +159,7 @@ class EditorMinimap implements View {
 			var mapping = mapGeometry(built.resolved.height);
 			var target = mapping.scrollAt(event.localY - dragOffset);
 			scroll.jumpTo(scroll.offsetX, target);
-			context.commands.refresh();
+			repaint();
 			event.preventDefault();
 			event.stopPropagation();
 		};
@@ -175,7 +184,7 @@ class EditorMinimap implements View {
 		built.on(UiEventKind.PointerCancel, function(_) { dragging = false; visibility.setDragging(false); });
 		built.on(UiEventKind.Scroll, function(event) {
 			scroll.scrollBy(0, event.deltaY);
-			context.commands.refresh();
+			repaint();
 			event.preventDefault();
 			event.stopPropagation();
 		});
