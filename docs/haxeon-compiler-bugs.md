@@ -281,6 +281,14 @@ and the status.
   module published, and its fields to their published slots. The resumed build patches; no reload needed. Checked on the
   real case: graphical published before `bb6d77ed`, compiler stopped, then built with it: `resuming the published live
   module`, patch revision 2, 46 functions changed, no reload reasons.
+- **Seen again on upstream main** (`ff7e29aac`, 2026-11-17, haxeon port): upstream does not have the fix, and since it
+  verifies the whole program before a resumed build lowers it, the same test fails one step earlier:
+  `IR verification failed for $lambda:Pane.build:build#onResolved(0)@279E7C81#0: Unknown IR object
+  "$lambda-env:Pane.build:build#onResolved(0)@279E7C81#0"`. Fixed again on haxeon `exosuit-upstream` ("Live: a resumed
+  session patches an edit that changes what a lambda captures, or deletes it"): lowering verifies only the program's own
+  functions, not the frozen ones (retired signatures, dropped lambdas), and resolves their objects to the published types
+  as before. `resumed-capture-change-patch` passes, with `added-class-patch`, `lambda-renumber-patch` and
+  `LiveKeptCheckMain`.
 
 ### The compiler worker reports negative allocation bytes for a large compile
 
