@@ -237,6 +237,8 @@ class ExosuitApp implements DesktopUiApplication {
 	final rootChanges = new RootChangeDetector();
 	/** `view` as one closure for every frame: the cached submission reuses an idle frame only with the same build callback. */
 	final viewBuilder:Void->View;
+	/** The problems revision the Problems tab's badge counts; the count is taken again only when it moves. */
+	var badgedProblems:Int = -1;
 	/** Whether a frame was built yet; a repaint-only frame before the first one builds in full. */
 	var rootSubmitted:Bool = false;
 	/** The cache key of every root submission: what invalidates the root is `frameTick` and the tracked reads of its build. */
@@ -1138,7 +1140,11 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		responsive.syncResponsiveRightLayout();
 		layoutModes.resume();
-		dock.setPanelBadge("problems", host.getProblems().values().length);
+		var problems = host.getProblems();
+		if (problems.revision != badgedProblems) {
+			badgedProblems = problems.revision;
+			dock.setPanelBadge("problems", problems.values().length);
+		}
 		// The trees' models apply what their loads and decorations changed here, outside the build, which may not write them.
 		if (explorerModel != null) explorerModel.prepareBuild();
 		if (contextFiles != null) contextFiles.prepareBuild();
