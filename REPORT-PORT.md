@@ -132,7 +132,11 @@ issues).
 - All six compile gates are clean: root, agent, agent/terminal-host, exohost, graphical, devtools. So is the Android
   compile.
 - The haxeon live test subset passes 8/8, plus the new resumed-capture test.
-- check-self-hosting: TODO.
+- `haxeon scripts/check-self-hosting.hx` on the pin passes its gates: the compiler builds itself to a fixed point
+  (stage 1 = stage 2), and the self-hosted compiler builds all 9 entry points with no known gaps. Its later "programs"
+  step fails on Windows at upstream main as well; that is an upstream bug, recorded.
+- After the last fix the app was rebuilt from the clean tree in 73 s. G01 on those final binaries passes 7/7, and 7/7
+  with the retention check.
 
 ### Targeted suites (test-windows.ps1)
 
@@ -260,6 +264,14 @@ git -C C:\Users\corbi\projects\exosuit-port push origin haxeon-port-topics:haxeo
 git -C C:\Users\corbi\projects\exosuit push origin haxeon-port-topics:main
 ```
 
+**Push the haxeon branches before you remove the `exosuit-port` worktree.** `exosuit-upstream` and
+`tooltip-scope-fix` exist only in that worktree's own haxeon repository
+(`C:\Users\corbi\projects\exosuit\.git\worktrees\exosuit-port\modules\haxeon`), and removing the worktree deletes them.
+
+The baseline worktree `C:\Users\corbi\projects\exosuit-baseline` (detached at `6ee0435b`, built) is left in place for
+side-by-side checks. Remove it with `git -C C:\Users\corbi\projects\exosuit worktree remove --force
+C:\Users\corbi\projects\exosuit-baseline` when you are done comparing.
+
 `exosuit-upstream` is new on tritao/haxeon. Upstream `origin/main` has moved past `ff7e29aac` since the night began
 (it was at `2071f2aa5` at 03:30). Rebase the series before you open an upstream PR, then move the exosuit pin with it.
 
@@ -277,6 +289,11 @@ dot-source `.port\env.ps1`, then run `python scripts\run.py`; it starts in isola
   checkout, under `C:\Users\corbi\projects\exosuit\haxeon\out\native-cache\host\`: `exosuit-ui-native-5c873c8ea8` and
   `pluginhost-ef9e216aec`, plus their `.lock` and `.lock.holder` files. Deleting them was blocked by the permission
   rules, so please remove them.
+- **Untracked `suit/` in your checkout.** Your checkout shows an untracked `suit/` folder, left over from the
+  suit→exohost rename that another session landed on main. It is not from this work and was left alone.
+- **Upstream has a Windows bug in check-self-hosting.** The step that compiles the program cases with the self-hosted
+  compile server cannot start on Windows, because the compile server's secure token is unavailable when haxeon itself
+  builds it. The compiler-bugs doc has the entry. The fixed point and all 9 entry points pass.
 - **CLAUDE.md PATH rule is out of date.** It names `haxeon\.tools\hashlink`, which no longer exists. The new wording is
   in `.port/docs/C-claude-md-change.md`; it is yours to apply.
 - **Scenario gaps.** G06 (palette toggles the side bar) and G09 (the last of 400 terminal lines) fail the same way on
