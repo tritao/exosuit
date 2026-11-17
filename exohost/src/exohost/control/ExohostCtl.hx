@@ -5,6 +5,7 @@ import haxe.io.Bytes;
 import haxe.io.Path;
 import haxeon.platform.Runtime;
 import haxeon.rpc.RpcConnectResult;
+import exohost.ExohostControl;
 import sys.FileSystem;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
