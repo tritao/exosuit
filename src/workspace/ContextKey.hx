@@ -20,17 +20,6 @@ class ContextKey {
 		if (parts.length != 3) return null;
 		return {machine: unescape(parts[0]), workspace: unescape(parts[1]), group: unescape(parts[2])};
 	}
-	/** A saved key in the current scheme. Old group keys carry no workspace, so they join `workspace`, the one open at restore. */
-	public static function migrate(key:String, machine:String, workspace:String):String {
-		if (StringTools.startsWith(key, "workspace:")) return make(machine, key.substr(10), "");
-		if (StringTools.startsWith(key, "group:")) return make(machine, workspace, key.substr(6));
-		return key;
-	}
-	/** The same key under another workspace id: a workspace given its real id after groups were keyed. */
-	public static function withWorkspace(key:String, workspace:String):String {
-		var parsed = parse(key);
-		return parsed == null ? key : make(parsed.machine, workspace, parsed.group);
-	}
 	/** The same key on another machine id; used once the catalog replaces the placeholder machine. */
 	public static function withMachine(key:String, machine:String):String {
 		var parsed = parse(key);

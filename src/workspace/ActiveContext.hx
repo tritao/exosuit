@@ -47,7 +47,6 @@ class ActiveContext {
 		return function() { listeners.remove(listener); };
 	}
 	public function updateWorkspace(id:String, label:String, roots:Array<String>):Void {
-		// An identity assignment calls renameWorkspace first, so only another workspace opening counts as moved.
 		var moved = workspaceId != id;
 		workspaceId = id; workspaceLabel = label; workspaceRoots = roots.copy();
 		// A group belongs to its workspace: another workspace shows its own root context.
@@ -75,18 +74,6 @@ class ActiveContext {
 		machineId = id;
 		for (info in recent) info.machine = id;
 		onMachineAssigned(id);
-	}
-	/**
-		A workspace got its real id (it was saved): the active context, a focused group included, keeps its place under
-		the new id instead of being treated as another workspace opening.
-	**/
-	public function renameWorkspace(previous:String, next:String):Void {
-		if (previous == next) return;
-		if (workspaceId == previous) workspaceId = next;
-		if (contextWorkspaceId == previous) contextWorkspaceId = next;
-		for (info in recent) if (info.workspace == previous) info.workspace = next;
-		var seen:Map<String, Bool> = [];
-		for (info in recent.copy()) if (seen.exists(info.key())) recent.remove(info); else seen.set(info.key(), true);
 	}
 	/** Workspace ids the machine catalog has listed in this run, and the ids it lists now. */
 	final seenWorkspaces:Map<String, Bool> = [];

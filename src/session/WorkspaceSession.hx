@@ -13,7 +13,6 @@ class WorkspaceSession {
 	public final documents:Array<String> = [];
 	public var activeDocument:String = "";
 	public var savedWorkspace:Null<workspace.SavedWorkspace>;
-	public var workspaceFile:String = "";
 	public var groupId:String = "";
 	public var groupLabel:String = "";
 	public var groupDirectory:String = "";
@@ -35,7 +34,6 @@ class WorkspaceSession {
 	public static function capture(application:Application):WorkspaceSession {
 		var result = new WorkspaceSession();
 		if (application.savedWorkspaces.current != null) result.savedWorkspace = application.savedWorkspaces.current.copy();
-		result.workspaceFile = application.savedWorkspaces.path;
 		if (application.activeContext.kind == workspace.ContextKind.Group) {
 			result.groupId = application.activeContext.id; result.groupLabel = application.activeContext.label;
 			result.groupDirectory = application.activeContext.cwd;
@@ -121,7 +119,7 @@ class WorkspaceSession {
 		}
 		// Saved contexts are keyed by the machine id of the last run; adopt it before anything is keyed or restored.
 		if (machineId.length > 0) application.activeContext.assignMachine(machineId);
-		if (savedWorkspace != null) application.savedWorkspaces.restore(savedWorkspace, workspaceFile);
+		if (savedWorkspace != null) application.savedWorkspaces.restore(savedWorkspace);
 		else for (root in projects)
 			if (FileSystem.exists(root) && FileSystem.isDirectory(root)) application.openArgument(root);
 		application.activeContext.restoreRecent(recent);
@@ -160,7 +158,6 @@ class WorkspaceSession {
 		var output = "version=" + VERSION + "\n";
 		if (savedWorkspace != null) {
 			output += "workspace=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(savedWorkspace.encode())) + "\n";
-			output += "workspaceFile=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(workspaceFile)) + "\n";
 		}
 		if (machineId.length > 0) output += "contextMachine=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(machineId)) + "
 ";
@@ -191,7 +188,6 @@ class WorkspaceSession {
 			var key = line.substring(0, separator), value = line.substring(separator + 1);
 			if (key == "version") version = Std.parseInt(value);
 			else if (key == "workspace") result.savedWorkspace = workspace.SavedWorkspace.decode(haxe.crypto.Base64.decode(value).toString());
-			else if (key == "workspaceFile") result.workspaceFile = haxe.crypto.Base64.decode(value).toString();
 			else if (key == "contextRecent" && value.length <= 32768 && result.recent.length < workspace.ActiveContext.RECENT_LIMIT) {
 				var fields = value.split(":");
 				if (fields.length == 6) try {

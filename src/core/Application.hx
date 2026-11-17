@@ -215,7 +215,6 @@ class Application {
 	}
 
 	public function openArgument(path:String):Null<View> {
-		if (StringTools.endsWith(path, ".exosuit-workspace")) { savedWorkspaces.open(path); return null; }
 		if (FileSystem.isDirectory(path)) {
 			// Opening a folder that is not one of the open workspace's replaces it; Add Folder (attachFolder) joins it.
 			if (savedWorkspaces.workspaceId() != null && !savedWorkspaces.hasRoot(workspace.fileSystem.normalize(path))) savedWorkspaces.close();

@@ -24,10 +24,6 @@ class SavedWorkspace {
 	public static function create(name:String, roots:Array<String>):SavedWorkspace
 		return new SavedWorkspace(haxe.crypto.Sha256.encode(Std.string(Sys.time()) + ":" + Math.random()).substring(0, 24), name, roots);
 	public function copy():SavedWorkspace return new SavedWorkspace(id, name, roots);
-	public static function nameFromPath(path:String):String {
-		var name = haxe.io.Path.withoutDirectory(path), suffix = ".exosuit-workspace";
-		return StringTools.endsWith(name, suffix) ? name.substring(0, name.length - suffix.length) : name;
-	}
 	public function encode():String {
 		var lines = ["version=1", "id=" + pack(id), "name=" + pack(name)];
 		for (root in roots) lines.push("root=" + pack(root));
