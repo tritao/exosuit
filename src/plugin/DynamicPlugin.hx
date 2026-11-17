@@ -3,7 +3,8 @@ package plugin;
 import command.CommandContext;
 import compiler.Compiler;
 import compiler.runtime.CompilerIntrinsics;
-import compiler.Diagnostic.CompileError;
+import compiler.compilation.BackendArtifact.BackendArtifacts;
+import compiler.core.Diagnostic.CompileError;
 import compiler.hl.HlWriter;
 import runtime.LoadedModule;
 import runtime.PatchSet;
@@ -49,9 +50,9 @@ class DynamicPlugin implements Plugin {
 			sourceStamps.push(sourceStamp(source));
 			compiler.update(modulePath(source), content);
 		}
-		var build = compilePlugin();
-		module = Runtime.load(HlWriter.encode(build.module), build.runtimeIdentity);
-		functionIds = build.functionIds;
+		var build = compilePlugin(), artifact = BackendArtifacts.hashLink(build.artifact);
+		module = Runtime.load(HlWriter.encode(artifact.module).flatten(), artifact.runtimeIdentity);
+		functionIds = artifact.functionIds;
 		revision = build.revision;
 		compiler.acknowledgePublication(build.revision);
 	}
@@ -193,10 +194,11 @@ class DynamicPlugin implements Plugin {
 
 	function publish(build:compiler.CompileResult):Bool {
 		try {
-			if (build.patchBytes != null && !build.requiresReload) {
+			var artifact = BackendArtifacts.hashLink(build.artifact), patchBytes = artifact.patchBytes;
+			if (patchBytes != null && !build.requiresReload) {
 				try {
-					Runtime.patchSet(requireModule(), new PatchSet(revision, build.revision, build.patchBytes, build.changedFunctions));
-					functionIds = build.functionIds;
+					Runtime.patchSet(requireModule(), new PatchSet(revision, build.revision, patchBytes, build.changedFunctions));
+					functionIds = artifact.functionIds;
 					revision = build.revision;
 					compiler.acknowledgePublication(build.revision);
 				} catch (error:RuntimeError) {
@@ -261,13 +263,14 @@ class DynamicPlugin implements Plugin {
 	}
 
 	function reload(build:compiler.CompileResult):Void {
-		var previous = requireModule(),
+		var artifact = BackendArtifacts.hashLink(build.artifact),
+			previous = requireModule(),
 			previousIds = functionIds,
 			previousRevision = revision,
 			previousStateVersion = Runtime.callInt(previous, functionId("stateVersion")),
 			state = Runtime.callString(previous, functionId("saveState")),
-			replacement = Runtime.load(HlWriter.encode(build.module), build.runtimeIdentity),
-			nextIds = build.functionIds,
+			replacement = Runtime.load(HlWriter.encode(artifact.module).flatten(), artifact.runtimeIdentity),
+			nextIds = artifact.functionIds,
 			nextStateVersion = Runtime.callInt(replacement, requiredId(nextIds, "stateVersion"));
 		if (context == null) {
 			Runtime.dispose(replacement);
