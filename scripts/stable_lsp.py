@@ -10,6 +10,8 @@ import sys
 import time
 from pathlib import Path
 
+import haxeon_paths
+
 
 def is_dynamic_library(path: Path) -> bool:
     name = path.name.lower()
@@ -17,14 +19,13 @@ def is_dynamic_library(path: Path) -> bool:
 
 
 bundle = Path(__file__).resolve().parent
-runtime_name = "hl.exe" if os.name == "nt" else "hl"
-runtime = bundle / "haxeon" / ".tools" / "hashlink" / runtime_name
+runtime = haxeon_paths.hl(bundle / "haxeon")
 server = bundle / "haxeon" / "out" / "haxeon-lsp.hl"
 if not runtime.is_file() or not server.is_file():
     raise SystemExit(f"Stable Haxeon language server is incomplete: {bundle}")
 
 roots = [
-    bundle / "haxeon" / ".tools" / "hashlink",
+    haxeon_paths.vm_dir(bundle / "haxeon"),
     bundle / "haxeon" / "out",
     bundle / "graphical" / "native",
     bundle / "agent" / "native",

@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import haxeon_paths
+
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 # The promoted launcher lives in .local/stable/<platform>, alongside the pointers.
@@ -144,39 +146,41 @@ def write_pointer(path: Path, version: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def ensure_language_server() -> None:
+def language_server_build() -> Path:
+    """The language server's bytecode, built by `haxeon lsp`'s own tool cache (`haxeon dev tool-path`)."""
     haxeon = ROOT / "haxeon"
-    haxe = haxeon / ".tools" / "haxe" / ("haxe.exe" if os.name == "nt" else "haxe")
-    project = haxeon / "haxeon-lsp.hxml"
-    output = haxeon / "out" / "haxeon-lsp.hl"
-    sources = [project, *haxeon.joinpath("src").rglob("*.hx")]
-    if output.is_file() and not any(source.stat().st_mtime_ns > output.stat().st_mtime_ns for source in sources):
-        return
-    if not haxe.is_file():
-        raise RuntimeError(f"Haxeon language server needs its pinned compiler: {haxe}")
-    result = subprocess.run([str(haxe), "--cwd", str(haxeon), str(project)], cwd=ROOT, check=False)
-    if result.returncode != 0 or not output.is_file():
-        raise RuntimeError("Could not build the Haxeon language server for the stable snapshot")
+    program = haxeon_paths.vm_dir(haxeon) / ("haxeon.exe" if os.name == "nt" else "haxeon")
+    if not program.is_file():
+        raise RuntimeError(f"Required build output is missing: {program}
+Build Exosuit first with python scripts/build.py")
+    environment = {**os.environ, "HAXEON_HOME": str(haxeon)}
+    result = subprocess.run([str(program), "dev", "tool-path", "LspMain"], cwd=ROOT, env=environment, check=False,
+                            capture_output=True, text=True)
+    path = Path(result.stdout.strip())
+    if result.returncode != 0 or not path.is_file():
+        raise RuntimeError(f"Could not build the Haxeon language server for the stable snapshot
+{result.stderr}")
+    return path
 
 
 def save() -> Path:
-    runtime_source = ROOT / "haxeon" / ".tools" / "hashlink"
+    runtime_source = haxeon_paths.vm_dir(ROOT / "haxeon")
     agent_source = ROOT / "agent" / "build" / "host"
     app_source = ROOT / "graphical" / "build" / "host"
     haxeon_output = ROOT / "haxeon" / "out"
-    ensure_language_server()
     runtime = runtime_source / hashlink_name()
+    cli = haxeon_paths.cli(ROOT / "haxeon")
     required = [
         app_source / "main.hl",
         agent_source / "main.hl",
         runtime,
-        haxeon_output / "haxeon_runtime.hdll",
-        haxeon_output / "haxeon-lsp.hl",
+        cli,
     ]
     for path in required:
         if not path.is_file():
             raise RuntimeError(f"Required build output is missing: {path}\nBuild Exosuit first with python scripts/build.py")
 
+    language_server = language_server_build()
     VERSIONS.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     version = f"{timestamp}-{revision()}"
@@ -191,15 +195,17 @@ def save() -> Path:
         if copy_libraries(agent_source / "native", staging / "agent" / "native", immediate_subdirs=True) == 0:
             raise RuntimeError(f"No workspace-agent libraries were found under {agent_source / 'native'}")
         copy_required(ROOT / "scripts" / "stable_lsp.py", staging / "run-lsp.py")
+        copy_required(ROOT / "scripts" / "haxeon_paths.py", staging / "haxeon_paths.py")
 
+        # The bundle keeps Haxeon's layout, so the path table finds the VM in it as it does in a checkout.
         bundled_runtime = staging / "haxeon"
-        hashlink_destination = bundled_runtime / ".tools" / "hashlink"
+        copy_required(ROOT / "haxeon" / "cmake" / "hashlink-output-paths.txt", bundled_runtime / "cmake" / "hashlink-output-paths.txt")
+        hashlink_destination = haxeon_paths.vm_dir(bundled_runtime)
         copy_required(runtime, hashlink_destination / runtime.name)
-        if copy_libraries(runtime_source, hashlink_destination) == 0:
-            raise RuntimeError(f"No HashLink runtime libraries were found under {runtime_source}")
+        copy_required(cli, haxeon_paths.cli(bundled_runtime))
+        copy_libraries(runtime_source, hashlink_destination)
         copy_libraries(haxeon_output, bundled_runtime / "out")
-        copy_required(haxeon_output / "haxeon_runtime.hdll", bundled_runtime / "out" / "haxeon_runtime.hdll")
-        copy_required(haxeon_output / "haxeon-lsp.hl", bundled_runtime / "out" / "haxeon-lsp.hl")
+        copy_required(language_server, bundled_runtime / "out" / "haxeon-lsp.hl")
 
         stdlib = ROOT / "haxeon" / "stdlib"
         if not stdlib.is_dir():
@@ -219,6 +225,7 @@ def save() -> Path:
         with stable_lock():
             if os.name == "nt":
                 copy_atomic(ROOT / "scripts" / "stable.py", STABLE_ROOT / "stable.py")
+                copy_atomic(ROOT / "scripts" / "haxeon_paths.py", STABLE_ROOT / "haxeon_paths.py")
                 copy_atomic(ROOT / "graphical" / "assets" / "exosuit.ico", STABLE_ROOT / "exosuit.ico")
             os.replace(staging, final)
             old_current = pointer_path(CURRENT)
@@ -236,7 +243,7 @@ def save() -> Path:
 
 def stable_library_directories(bundle: Path) -> list[Path]:
     roots = [
-        bundle / "haxeon" / ".tools" / "hashlink",
+        haxeon_paths.vm_dir(bundle / "haxeon"),
         bundle / "haxeon" / "out",
         bundle / "graphical" / "native",
         bundle / "agent" / "native",
@@ -264,7 +271,7 @@ def launch(arguments: list[str]) -> int:
         bundle = current_bundle()
         marker = bundle / f".running-launch-{os.getpid()}-{time.time_ns()}"
         marker.write_text(str(os.getpid()) + "\n", encoding="ascii")
-    runtime = bundle / "haxeon" / ".tools" / "hashlink" / hashlink_name()
+    runtime = haxeon_paths.hl(bundle / "haxeon")
     app = bundle / "graphical" / "main.hl"
     if not runtime.is_file() or not app.is_file():
         marker.unlink(missing_ok=True)
