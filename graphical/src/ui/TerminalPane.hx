@@ -16,6 +16,7 @@ import haxe.io.Bytes;
 import haxeon.ui.core.BuildContext;
 import haxeon.platform.input.TextEdit;
 import nativekit.ffi.NativeKitTypes.TextEditAction;
+import nativekit.ffi.NativeKitTypes.TextInputFlags;
 import haxeon.ui.widgets.text.TextInputWindow;
 import haxeon.ui.core.CachePolicy;
 import haxeon.ui.core.RenderNode;
@@ -725,7 +726,7 @@ class TerminalPane implements AgentTerminalPanel {
 		var syncTextInput = function() {
 			if (!focused || !context.textInput.isOwner(node.id)) return;
 			var bounds = node.globalBounds();
-			context.textInput.update(new TextInputWindow("", 0, 0), 0, 0, 0, -1, -1, 0, 0,
+			context.textInput.update(new TextInputWindow("", 0, 0), 0, 0, 0, -1, -1, 0, TextInputFlags.empty(),
 				new Rect(bounds.x + 8 + Math.max(0, cursorColumn) * cellWidth,
 					bounds.y + terminalTop + Math.max(0, cursorRow) * rowHeight,
 					cellWidth, rowHeight), [], []);
