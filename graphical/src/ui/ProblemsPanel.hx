@@ -1,6 +1,5 @@
 package ui;
 
-import haxeon.ui.Color;
 import haxeon.ui.Path;
 
 import haxeon.ui.Insets;
@@ -107,9 +106,9 @@ class ProblemsPanel implements View {
 			], iconsStyle);
 			var header = new Button(label, headerStyle, function() {
 				var next = collapsed.value.copy(); next.set(key, !hidden); collapsed.update(next);
-			}, "problem-group:" + key, null, ButtonVariant.Navigation, null, null, null, null, groupIcons, groupMetadata, null, null,
+			}, "problem-group:" + key, null, ButtonVariant.Navigation, null, ["problem-row"], null, null, groupIcons, groupMetadata, null, null,
 				null, problems[0].scopeLabel() + ", " + problems.length + " problems");
-			rows.push(new KeyedView("group:" + key, new FlatProblemControl(header)));
+			rows.push(new KeyedView("group:" + key, header));
 			if (hidden) continue;
 			for (problem in problems) {
 				var rowStyle = new LayoutStyle();
@@ -128,12 +127,12 @@ class ProblemsPanel implements View {
 					problem.severity <= 1 ? context.theme.tokens.danger : problem.severity == 2 ? context.theme.tokens.warning : context.theme.tokens.info);
 				var button = new Button(problem.message, buttonStyle, function() {
 					selected.update(problem.key()); host.activateProblem(problem);
-				}, "problem:" + problem.key(), null, ButtonVariant.Navigation, selectedKey == problem.key(), null, null, null,
+				}, "problem:" + problem.key(), null, ButtonVariant.Navigation, selectedKey == problem.key(), ["problem-row"], null, null,
 					severityIcon, null, new MiddleEllipsisText("message-summary", summary, false), null, null, severity + ": " + problem.message);
 				var metadata = problem.source + (problem.code == "" ? "" : " (" + problem.code + ")");
 				if (problem.location != null) metadata += "  [" + (problem.line + 1) + ", " + (problem.column + 1) + "]";
 				rows.push(new KeyedView("row:" + problem.key(), new Row("problem-row:" + problem.key(), [
-					new KeyedView("message", new FlatProblemControl(button)), new KeyedView("metadata", new Text(metadata, null, context.theme.tokens.textSecondary, TextStyleOverride.text(12)))
+					new KeyedView("message", button), new KeyedView("metadata", new Text(metadata, null, context.theme.tokens.textSecondary, TextStyleOverride.text(12)))
 				], rowStyle)));
 				if (selectedKey == problem.key()) {
 					var messageStyle = new LayoutStyle();
@@ -162,19 +161,6 @@ class ProblemsPanel implements View {
 		var listStyle = new LayoutStyle(); listStyle.width = LayoutAxis.grow();
 		var node = new ScrollView("problems-scroll", new Column("problems-list", rows, listStyle), style).build(context);
 		if (!selectedExists && selected.value != "") node.onResolved(function(_) selected.update(""));
-		return node;
-	}
-}
-
-/** Diagnostic rows are flat; only hover, focus and selection receive a fill. */
-private class FlatProblemControl implements View {
-	final button:Button;
-	public function new(button:Button) this.button = button;
-	public function build(context:BuildContext):RenderNode {
-		var node = button.build(context);
-		var hovered = node.states.contains(haxeon.ui.style.StyleState.Hovered);
-		node.layout.style.background = button.selected ? context.theme.tokens.selection : hovered ? context.theme.tokens.surfaceHover : Color.rgba(0, 0, 0, 0);
-		node.layout.style.radiusTopLeft = node.layout.style.radiusTopRight = node.layout.style.radiusBottomLeft = node.layout.style.radiusBottomRight = 0;
 		return node;
 	}
 }
