@@ -17,6 +17,7 @@ import haxeon.editor.TextDocument;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.Key;
 import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.State;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.core.View;
 import haxeon.ui.theme.TextRole;
@@ -58,11 +59,14 @@ class EditorTabsView implements View {
 			hover.delaySeconds = tooltipDelay;
 			var atlas = context.resourceState(context.id("seti-atlas"), function() return new SetiIconAtlas(),
 				function(value) value.dispose()).value;
-			var scrollState = context.state(context.id("tab-scroll-state"), new TabScrollState());
-			var state = scrollState.value;
+			var state = context.state(context.id("tab-scroll-state"), new TabScrollState()).value;
+			// The rail's width at the last layout. Labels are ellipsized to it here, so a resize the rail's onResolved writes
+			// is a tracked change that rebuilds them in the same frame.
+			var labelViewport = context.state(context.id("tab-label-viewport-width"), -1.0);
+			var labelViewportWidth = labelViewport.value;
 			tabs.headerRevision = function() {
 				var revision = dark + ":" + tooltipDelay + ":" + decorationRevision + ":" + visibleTooltip.value + ":" + context.animations.revision + ":" +
-					state.controller.offsetX + ":" + state.controller.viewportWidth + ":" + state.labelViewportWidth;
+					state.controller.offsetX + ":" + state.controller.viewportWidth + ":" + labelViewportWidth;
 				for (item in tabs.items) {
 					var filename = filenames.get(item.key);
 					var tint = tabColors.get(item.key);
@@ -105,7 +109,7 @@ class EditorTabsView implements View {
 				chrome += 20.0 + (filenames.get(item.key) != null ? 28.0 : item.icon != null ? 22.0 : 0.0) +
 					(item.onClose != null ? 28.0 : 0.0);
 			}
-			var available = (state.labelViewportWidth > 0 ? state.labelViewportWidth : context.viewportWidth) - chrome;
+			var available = (labelViewportWidth > 0 ? labelViewportWidth : context.viewportWidth) - chrome;
 			var low = LABEL_WIDTH, high = Math.max(LABEL_WIDTH, available);
 			// Share spare width among long titles; short titles keep their natural width.
 			for (_ in 0...16) {
@@ -147,11 +151,11 @@ class EditorTabsView implements View {
 				tabs.items[index] = displayed;
 			}
 			tabs.transformHeaderStrip = function(strip, buildContext) return buildRail(strip, buildContext, state,
-				function() { scrollState.update(state); }, hover, visibleTooltip.value);
+				labelViewport, hover, visibleTooltip.value);
 			return tabs.build(context);
 		});
 	}
-	function buildRail(strip:RenderNode, context:BuildContext, state:TabScrollState, invalidate:Void->Void,
+	function buildRail(strip:RenderNode, context:BuildContext, state:TabScrollState, labelViewport:State<Float>,
 			hover:TooltipHoverGroup, visibleTooltip:Null<String>):RenderNode {
 		strip.layout.style.width = LayoutAxis.fit();
 		var headers = strip.children.copy();
@@ -185,9 +189,8 @@ class EditorTabsView implements View {
 		viewport.setStyleIdentity("scroll-view", "editor-tab-scroll");
 		viewport.onResolved(function(_) {
 			var width = viewport.globalBounds().width;
-			if (Math.abs(state.labelViewportWidth - width) < 0.01) return;
-			state.labelViewportWidth = width;
-			invalidate();
+			if (Math.abs(labelViewport.value - width) < 0.01) return;
+			labelViewport.update(width);
 		});
 		if (active != null) active.onResolved(function(_) {
 			if (active == null || viewport.resolved == null || active.resolved == null) return;
@@ -216,6 +219,5 @@ private class TabScrollState {
 	public final controller = new ScrollController();
 	public var selected:String = "";
 	public var width:Float = -1;
-	public var labelViewportWidth:Float = -1;
 	public function new() {}
 }
