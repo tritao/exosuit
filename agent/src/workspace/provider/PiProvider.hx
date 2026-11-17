@@ -535,7 +535,7 @@ class PiProvider implements AgentMessageSource {
     ctx.fail({code:"conflict",message:"Agent identity is reserved",ambiguous:false});
    else ctx.respond(copy(previous.record));return;
   }
-  var cwd=directories.forAgent(groups(),q.group,q.directory,ctx.fail);
+  var cwd=directories.forAgent(groups(),q.group,q.directory,error->ctx.fail(error));
   if(cwd == null) return;
   var s=session({id:q.id,name:q.name,group:q.group,cwd:cwd,thread:"",state:"disconnected",turn:null,workspaceRoot:directories.root,
    provider:"pi",permissionMode:selected,preferredModel:q.defaultModel,preferredEffort:q.defaultEffort});

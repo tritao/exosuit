@@ -914,7 +914,7 @@ class CodexProvider implements AgentMessageSource implements AgentRequestCounts 
 			ctx.fail({code: "invalid_request", message: "Invalid agent identity", ambiguous: false});
 			return;
 		}
-		var cwd = directories.forAgent(groups(), q.group, q.directory, ctx.fail);
+		var cwd = directories.forAgent(groups(), q.group, q.directory, error -> ctx.fail(error));
 		if (cwd == null) return;
 		var previous = sessions.get(q.id);
 		if (previous != null) {
