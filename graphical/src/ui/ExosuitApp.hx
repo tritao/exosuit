@@ -23,6 +23,7 @@ import sys.io.File;
 import haxeon.ui.core.Command;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.RetainedView;
+import haxeon.ui.component.TrackedScope;
 import haxeon.ui.core.Shortcut;
 import haxeon.ui.core.UiContext;
 import haxeon.ui.core.UiEvent;
@@ -1153,9 +1154,12 @@ class ExosuitApp implements DesktopUiApplication {
 		if (workbenchPanel != null) workbenchPanel.prepareBuild();
 		settingsTab.syncStore();
 		host.dismissStaleLanguagePopup();
-		// Plain state the root build shows, which it cannot track: a change makes this frame a full build.
+		// Plain state the root build shows, which it cannot track: a change makes this frame a full build. A document view's
+		// scroll offset, queued reveal and search marks run only its pane's scope, unless something built at the root reads
+		// them too: the language popup (placed at the caret), the command view and a context menu do.
+		var overlayOpen = host.isLanguagePopupVisible() || host.isCommandViewActive() || contextMenu != null;
 		if (rootChanges.changed(host, hostContext, application.settings.current.minimapEnabled, application.settings.store.revision,
-			responsiveRightHidden))
+			responsiveRightHidden, overlayOpen))
 			frameTick.value = frameTick.value + 1;
 		rootSubmitted = true;
 		var root = ui.submitCached(viewBuilder, frame, ROOT_KEY);
@@ -2369,105 +2373,11 @@ class ExosuitApp implements DesktopUiApplication {
 				if (decoration != null) tabColors.set(UiEditorTabs.key(item),
 					ResourceDecorationBadge.colorFor(decoration, theme));
 			}
-			// Reused across frames (not rebuilt each `view()` call) so its
-			// `BufferSelection` (shared with `documentView`, see `UiDocumentView`'s
-			// doc comment) persists between edits instead of resetting.
-			var pane = editorPanes.get(documentView.id);
-			if (pane == null) {
-				pane = new EditorPane(document, theme, function() {
-					requestFrame();
-				}, documentView.selection, editorPalette,
-					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision,
-					documentView.scrollController, host.getPluginGutterMarkers());
-				editorPanes.set(documentView.id, pane);
-			}
-			pane.readOnly = documentView.readOnly;
-			pane.onGutterMarkerClick = gutterMarkerClickHandler == null
-				? function(marker) host.selectGutterMarker(marker) : gutterMarkerClickHandler;
-			pane.setSemanticTokens(application.language.semanticTokensFor(document));
-			var editSettings = application.configuration.settingsFor(document);
-			if (documentView.sideBySideDiff) { editSettings = editSettings.copy(); editSettings.wordWrap = false; }
-			pane.editSettings = editSettings;
-			documentView.editSettings = pane.editSettings;
-			documentView.deletionBoundary = pane.deletionBoundary;
-			pane.minimapEnabled = application.settings.current.minimapEnabled;
-			documentView.clipboard = ui.clipboard;
-			documentView.onStateChanged = requestFrame;
-			documentView.isActive = function() return host.activeView() == documentView;
-			pane.onEditorAction = documentView.performEditorAction;
-			pane.onNavigationKey = event -> CommandBridge.navigationKey(application.keymap, application.context, event.key, event.modifiers);
-			pane.onDefinition = diffDocument == null ? function() {
-				host.activateTab(document, paneId);
-				application.commands.perform("language:go-to-definition", application.context);
-			} : null;
-			pane.requestCursorReveal = documentView.cursorChanged;
-			pane.consumeCursorReveal = documentView.consumeCursorReveal;
-			pane.applyRestoredScroll = documentView.applyRestoredScroll;
-			pane.fontSize = application.settings.current.fontSize;
-			pane.applicationZoom = application.settings.current.applicationZoom / 100.0;
-			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
-			pane.onActivated = function() host.activateTab(document, paneId);
-			pane.onContextMenu = function(event) {
-				host.activateTab(document, paneId);
-				if (diffDocument != null) {
-					var entries = [new CommandMenuEntry("doc:copy", "Copy")];
-					if (!documentView.sideBySideDiff) {
-						entries.push(new CommandMenuEntry("scm:previous-hunk", "Previous Hunk"));
-						entries.push(new CommandMenuEntry("scm:next-hunk", "Next Hunk"));
-						entries.push(new CommandMenuEntry("scm:open-file-at-line", "Open File at Line"));
-					}
-					showContextMenu(entries, event, function() return host.activeView() == documentView);
-					return;
-				}
-				showContextMenu([
-					new CommandMenuEntry("doc:undo", "Undo"),
-					new CommandMenuEntry("doc:redo", "Redo"),
-					new CommandMenuEntry("doc:cut", "Cut"),
-					new CommandMenuEntry("doc:copy", "Copy"),
-					new CommandMenuEntry("doc:paste", "Paste"),
-					new CommandMenuEntry("doc:select-all", "Select All"),
-					new CommandMenuEntry("find:open", "Find…"),
-					new CommandMenuEntry("find:replace", "Replace…"),
-					new CommandMenuEntry("language:go-to-definition", "Go to Definition"),
-					new CommandMenuEntry("language:go-to-type-definition", "Go to Type Definition"),
-					new CommandMenuEntry("navigation:go-back", "Go Back"),
-					new CommandMenuEntry("navigation:go-forward", "Go Forward")
-				], event, function() return host.activeView() == documentView);
-			};
-			pane.onCaretRectChanged = function() {
-				if (host.isLanguagePopupVisible()) {
-					if (host.textInputArea() == null) host.dismissLanguagePopup();
-					else requestFrame();
-				}
-			};
+			configureDocumentPane(documentView, paneId);
+			// The pane's own changes (scroll, reveal, search marks, definition underline) run only this scope again; see documentContent.
+			var content = new TrackedScope("document-scope:" + documentView.id, function() return documentContent(documentView, paneId));
 			var documentKey = UiEditorTabs.key(item);
 			filenames.set(documentKey, diffDocument == null ? document.title : diffDocument.path);
-			var breadcrumbRoot:Null<String> = null;
-			if (document.path != null) for (project in application.workspace.projects) {
-				var root = StringTools.replace(project.root, "\\", "/");
-				var path = StringTools.replace(document.path, "\\", "/");
-				var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
-				if (StringTools.startsWith(path, prefix) && (breadcrumbRoot == null || root.length > breadcrumbRoot.length))
-					breadcrumbRoot = root;
-			}
-			// The file explorer can also own a local folder outside a saved workspace.
-			if (breadcrumbRoot == null && document.path != null && explorerRoot != null) {
-				var root = StringTools.replace(explorerRoot, "\\", "/");
-				var path = StringTools.replace(document.path, "\\", "/");
-				var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
-				if (StringTools.startsWith(path, prefix)) breadcrumbRoot = root;
-			}
-			var contentStyle = new LayoutStyle();
-			contentStyle.width = LayoutAxis.grow();
-			contentStyle.height = LayoutAxis.grow();
-			var contentItems:Array<KeyedView> = [];
-			if (diffDocument == null) contentItems.push(new KeyedView("breadcrumbs", new EditorBreadcrumbs(document, breadcrumbRoot,
-				theme.tokens.textSecondary, Color.fromBytes((editorPalette.editorBackground >>> 24) & 255,
-					(editorPalette.editorBackground >>> 16) & 255, (editorPalette.editorBackground >>> 8) & 255,
-					editorPalette.editorBackground & 255), darkPalette,
-				function(path, event) showBreadcrumbMenu(document, paneId, path, event))));
-			contentItems.push(new KeyedView("editor", pane));
-			var content = new Column("document-content:" + documentView.id, contentItems, contentStyle);
 			var title = diffDocument == null ? (document.dirty ? "* " : "") + document.title :
 				documentView.sideBySideDiff ? document.title : haxe.io.Path.withoutDirectory(diffDocument.path) + " (diff)";
 			// A document's tab shows only the file's name; its tooltip says where the file is.
@@ -2565,6 +2475,126 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		return new EditorTabsView(widget, filenames, darkPalette, application.settings.current.tabTooltipDelay,
 			tabColors, host.getResourceDecorations().revision, tooltips);
+	}
+
+	/**
+		Sets up the editor pane of one document tab from the current settings, language and host state, making the pane the
+		first time. editorPanel runs it for every document tab of a pane in each root build, and documentContent again for the
+		tab it shows, so a frame in which only that scope runs sees current semantic tokens and indentation.
+	**/
+	function configureDocumentPane(documentView:UiDocumentView, paneId:String):EditorPane {
+		var document = documentView.document;
+		var diffDocument = documentView.diffDocument;
+		// Reused across frames (not rebuilt each `view()` call) so its
+		// `BufferSelection` (shared with `documentView`, see `UiDocumentView`'s
+		// doc comment) persists between edits instead of resetting.
+		var pane = editorPanes.get(documentView.id);
+		if (pane == null) {
+			// Its own state (the definition underline) runs its scope again; what it edits, the detector sees before the frame.
+			pane = new EditorPane(document, theme, documentView.invalidate, documentView.selection, editorPalette,
+				host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision,
+				documentView.scrollController, host.getPluginGutterMarkers());
+			editorPanes.set(documentView.id, pane);
+		}
+		pane.readOnly = documentView.readOnly;
+		pane.onGutterMarkerClick = gutterMarkerClickHandler == null
+			? function(marker) host.selectGutterMarker(marker) : gutterMarkerClickHandler;
+		pane.setSemanticTokens(application.language.semanticTokensFor(document));
+		var editSettings = application.configuration.settingsFor(document);
+		if (documentView.sideBySideDiff) { editSettings = editSettings.copy(); editSettings.wordWrap = false; }
+		pane.editSettings = editSettings;
+		documentView.editSettings = pane.editSettings;
+		documentView.deletionBoundary = pane.deletionBoundary;
+		pane.minimapEnabled = application.settings.current.minimapEnabled;
+		documentView.clipboard = ui.clipboard;
+		documentView.onStateChanged = requestFrame;
+		documentView.isActive = function() return host.activeView() == documentView;
+		pane.onEditorAction = documentView.performEditorAction;
+		pane.onNavigationKey = event -> CommandBridge.navigationKey(application.keymap, application.context, event.key, event.modifiers);
+		pane.onDefinition = diffDocument == null ? function() {
+			host.activateTab(document, paneId);
+			application.commands.perform("language:go-to-definition", application.context);
+		} : null;
+		pane.requestCursorReveal = documentView.cursorChanged;
+		pane.consumeCursorReveal = documentView.consumeCursorReveal;
+		pane.applyRestoredScroll = documentView.applyRestoredScroll;
+		pane.fontSize = application.settings.current.fontSize;
+		pane.applicationZoom = application.settings.current.applicationZoom / 100.0;
+		pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
+		pane.onActivated = function() host.activateTab(document, paneId);
+		pane.onContextMenu = function(event) {
+			host.activateTab(document, paneId);
+			if (diffDocument != null) {
+				var entries = [new CommandMenuEntry("doc:copy", "Copy")];
+				if (!documentView.sideBySideDiff) {
+					entries.push(new CommandMenuEntry("scm:previous-hunk", "Previous Hunk"));
+					entries.push(new CommandMenuEntry("scm:next-hunk", "Next Hunk"));
+					entries.push(new CommandMenuEntry("scm:open-file-at-line", "Open File at Line"));
+				}
+				showContextMenu(entries, event, function() return host.activeView() == documentView);
+				return;
+			}
+			showContextMenu([
+				new CommandMenuEntry("doc:undo", "Undo"),
+				new CommandMenuEntry("doc:redo", "Redo"),
+				new CommandMenuEntry("doc:cut", "Cut"),
+				new CommandMenuEntry("doc:copy", "Copy"),
+				new CommandMenuEntry("doc:paste", "Paste"),
+				new CommandMenuEntry("doc:select-all", "Select All"),
+				new CommandMenuEntry("find:open", "Find…"),
+				new CommandMenuEntry("find:replace", "Replace…"),
+				new CommandMenuEntry("language:go-to-definition", "Go to Definition"),
+				new CommandMenuEntry("language:go-to-type-definition", "Go to Type Definition"),
+				new CommandMenuEntry("navigation:go-back", "Go Back"),
+				new CommandMenuEntry("navigation:go-forward", "Go Forward")
+			], event, function() return host.activeView() == documentView);
+		};
+		pane.onCaretRectChanged = function() {
+			if (host.isLanguagePopupVisible()) {
+				if (host.textInputArea() == null) host.dismissLanguagePopup();
+				else requestFrame();
+			}
+		};
+		return pane;
+	}
+
+	/**
+		The body of a document tab's scope: breadcrumbs over the editor pane. It runs in every root build that builds the tab,
+		and alone when the view's `presentation` signal moves (RootChangeDetector before a frame, or the pane itself).
+	**/
+	function documentContent(documentView:UiDocumentView, paneId:String):View {
+		// The read is the subscription.
+		documentView.presentation.value;
+		var document = documentView.document;
+		var diffDocument = documentView.diffDocument;
+		var pane = configureDocumentPane(documentView, paneId);
+		var breadcrumbRoot:Null<String> = null;
+		if (document.path != null) for (project in application.workspace.projects) {
+			var root = StringTools.replace(project.root, "\\", "/");
+			var path = StringTools.replace(document.path, "\\", "/");
+			var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
+			if (StringTools.startsWith(path, prefix) && (breadcrumbRoot == null || root.length > breadcrumbRoot.length))
+				breadcrumbRoot = root;
+		}
+		// The file explorer can also own a local folder outside a saved workspace.
+		if (breadcrumbRoot == null && document.path != null && explorerRoot != null) {
+			var root = StringTools.replace(explorerRoot, "\\", "/");
+			var path = StringTools.replace(document.path, "\\", "/");
+			var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
+			if (StringTools.startsWith(path, prefix)) breadcrumbRoot = root;
+		}
+		var contentStyle = new LayoutStyle();
+		// Stretch, as Tabs sets on the panel content it builds: when this scope runs alone, its new root keeps it.
+		contentStyle.width = LayoutAxis.stretch();
+		contentStyle.height = LayoutAxis.grow();
+		var contentItems:Array<KeyedView> = [];
+		if (diffDocument == null) contentItems.push(new KeyedView("breadcrumbs", new EditorBreadcrumbs(document, breadcrumbRoot,
+			theme.tokens.textSecondary, Color.fromBytes((editorPalette.editorBackground >>> 24) & 255,
+				(editorPalette.editorBackground >>> 16) & 255, (editorPalette.editorBackground >>> 8) & 255,
+				editorPalette.editorBackground & 255), darkPalette,
+			function(path, event) showBreadcrumbMenu(document, paneId, path, event))));
+		contentItems.push(new KeyedView("editor", pane));
+		return new Column("document-content:" + documentView.id, contentItems, contentStyle);
 	}
 
 	function showBreadcrumbMenu(document:editor.Document, paneId:String, path:String, event:UiEvent):Void {

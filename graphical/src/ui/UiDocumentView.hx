@@ -48,6 +48,13 @@ class UiDocumentView extends View {
 	/** Preview is view-local and permanently clears on the first buffer edit. */
 	public var preview:Bool = false;
 	public final scrollController:ScrollController = new ScrollController();
+	/**
+		What this view's editor pane shows, as a tracked source: the pane's scope (`ExosuitApp.documentContent`) reads it,
+		and a bump runs that scope again alone. Before each frame `ExosuitApp.submit` bumps it (through RootChangeDetector)
+		when the scroll offset, a queued reveal or the search marks changed; the pane bumps it through `invalidate` for its
+		own pointer and modifier state (the definition underline).
+	**/
+	public final presentation = new haxeon.reactive.Signal<Int>(0);
 	final bufferSubscription:BufferSubscription;
 	final matches:Array<SearchMatch> = [];
 	var searchRevision:Int = 0;
@@ -84,6 +91,10 @@ class UiDocumentView extends View {
 			this.selection.transform(document.buffer, change);
 		});
 	}
+
+	/** Runs the pane's scope again. UI thread, outside a build (a handler, a callback, or `submit` before the build). */
+	public function invalidate():Void
+		presentation.value = presentation.value + 1;
 
 	public function applyScrollSettings(settings:config.Settings):Void
 		scrollController.configureAnimation(settings.scrollAnimationType == "smooth", settings.scrollAnimationDuration);
