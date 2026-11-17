@@ -18,8 +18,8 @@ class CodexMarkdownLayoutMain {
   static function codeModel(context:UiContext):ui.WorkspaceFileTextModel {
     for (id in context.stateStore.paths.keys()) {
       var path = context.stateStore.paths.get(id);
-      if (path != null && path.indexOf("code-model") >= 0 && context.stateStore.values.exists(id)) {
-        var model:ui.WorkspaceFileTextModel = cast Reflect.field(context.stateStore.values.get(id),"model");
+      if (path != null && path.indexOf("code-model") >= 0 && context.stateStore.handles.exists(id)) {
+        var model:ui.WorkspaceFileTextModel = cast Reflect.field(context.stateStore.handles.get(id).value,"model");
         if (model != null) return model;
       }
     }

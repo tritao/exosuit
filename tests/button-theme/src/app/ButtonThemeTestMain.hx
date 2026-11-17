@@ -37,7 +37,7 @@ class ButtonThemeTestMain {
 			require(fill.red == expected.red && fill.green == expected.green && fill.blue == expected.blue,
 				"Selected tab does not match editor canvas");
 			var resolver = new StyleResolver();
-			var quiet = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], 0), null, palette.styles);
+			var quiet = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.empty()), null, palette.styles);
 			var hovered = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.Hovered), null, palette.styles);
 			var selectedChrome = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.Selected), null, palette.styles);
 			var focused = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.Focused), null, palette.styles);
@@ -47,7 +47,7 @@ class ButtonThemeTestMain {
 			var selectedFill = selectedChrome.getColor(StyleProperty.Background);
 			require(selectedFill.red == t.surfaceHover.red && selectedFill.green == t.surfaceHover.green && selectedFill.blue == t.surfaceHover.blue,
 				"Chrome selection should use a neutral surface");
-			var popup = resolver.resolve(new StyleTarget("selection-popup", "options", "options", null, ["selection-popup"], 0), null, palette.styles);
+			var popup = resolver.resolve(new StyleTarget("selection-popup", "options", "options", null, ["selection-popup"], StyleState.empty()), null, palette.styles);
 			require(popup.getDecorations().decorations.length > 0, "Selection popup lost elevation");
 		}
 		var live = ExosuitPalette.theme(false);
@@ -58,8 +58,7 @@ class ButtonThemeTestMain {
 			ExosuitPalette.theme(dark, live);
 			liveContext.setTheme(live);
 			liveContext.setStyleSheet(ExosuitPalette.styleSheet(live, dark));
-			var chrome = new Button("Action", null, function() {}, "live-chrome");
-			chrome.variant = ButtonVariant.Navigation; chrome.classes.push("chrome-action"); chrome.selected = true;
+			var chrome = new Button("Action", null, function() {}, "live-chrome", null, ButtonVariant.Navigation, true, ["chrome-action"]);
 			var node = liveContext.submit(chrome, new haxeon.ui.LayoutFrame(200, 80));
 			var background = node.computedStyle.getColor(StyleProperty.Background);
 			require(background.red == live.tokens.surfaceHover.red && background.green == live.tokens.surfaceHover.green
@@ -86,7 +85,7 @@ class ButtonThemeTestMain {
 				&& terminal.ansi[0].red == expected.ansi[0].red && terminal.fontSize == 18,
 				"Terminal theme switching retained old colors or changed font size");
 		}
-		var states = [0, StyleState.Hovered, StyleState.Pressed, StyleState.Focused,
+		var states = [StyleState.empty(), StyleState.Hovered, StyleState.Pressed, StyleState.Focused,
 			StyleState.Selected, StyleState.Focused | StyleState.Hovered,
 			StyleState.Selected | StyleState.Focused, StyleState.Disabled];
 		var count = 0;
@@ -95,11 +94,11 @@ class ButtonThemeTestMain {
 			for (variant in ["primary", "secondary", "navigation"]) {
 				var classes = variant == "primary" ? [] : [variant];
 				var context = new BuildContext(new StateStore(), null, null, null, theme);
-				var button = new Button("Probe", null, function() {}, "actual-button");
-				button.variant = variant == "primary" ? ButtonVariant.Primary : variant == "secondary" ? ButtonVariant.Secondary : ButtonVariant.Navigation;
+				var buttonVariant = variant == "primary" ? ButtonVariant.Primary : variant == "secondary" ? ButtonVariant.Secondary : ButtonVariant.Navigation;
+				var button = new Button("Probe", null, function() {}, "actual-button", null, buttonVariant);
 				context.beginFrame();
 				var buttonId = button.build(context).id;
-				var normal = resolver.resolve(new StyleTarget("button", "normal", "normal", classes, ["button"], 0), null, theme.styles);
+				var normal = resolver.resolve(new StyleTarget("button", "normal", "normal", classes, ["button"], StyleState.empty()), null, theme.styles);
 				for (state in states) {
 					var computed = resolver.resolve(new StyleTarget("button", "probe", "probe", classes, ["button"], state), null, theme.styles);
 					var background = computed.getColor(StyleProperty.Background);
@@ -116,8 +115,8 @@ class ButtonThemeTestMain {
 					}
 					context.interactionStates.set(buttonId, state);
 					context.beginFrame();
-					button.enabled = !disabled; button.selected = (state & StyleState.Selected) != 0;
-					var actual = button.build(context);
+					var stateButton = new Button("Probe", null, function() {}, "actual-button", !disabled, buttonVariant, state.contains(StyleState.Selected));
+					var actual = stateButton.build(context);
 					if (!disabled) require(Theme.contrastRatio(actual.children[0].layout.textColor, actual.layout.style.background) >= 4.5,
 						"Button widget ignored foreground contrast for " + variant + " state " + state);
 					count++;

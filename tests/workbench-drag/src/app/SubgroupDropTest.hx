@@ -60,7 +60,7 @@ class SubgroupDropTest {
   var fonts=haxeon.ui.FontCollection.create();fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
   var context=new UiContext(null,fonts),frame=new haxeon.ui.LayoutFrame(320,600);
   var root:RenderNode=null;
-  function submit():Void {for(_ in 0...3) root=context.submit(panel,frame);}
+  function submit():Void {for(_ in 0...3) {panel.prepareBuild();root=context.submit(panel,frame);}}
   function row(label:String):haxeon.ui.Rect {
    var result:RenderNode=null;
    root.walk(function(node) {if(node.semantics!=null && node.semantics.label==label) result=node;});
