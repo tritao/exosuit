@@ -8,6 +8,12 @@ import haxeon.ui.host.UiHostContext;
 	frame whether any of them changed since the last time, and if so marks the root stale, so the frame is a full build as
 	it was when they were all part of the root cache key. It compares scalars and keeps what it saw in fields reused
 	across frames, so a frame in which nothing changed allocates nothing here.
+
+	A document view's scroll offset, queued reveal and search marks are read only by its editor pane, which is built in a
+	scope of its own: a change to them bumps the view's `presentation` signal, which runs that scope again, instead of the
+	whole root. While a popup or menu that reads them is open (the language popup, the command view, a context menu), they
+	mark the root stale as well, as before. The caret, the selection and the text stay root values: the status bar shows
+	them.
 **/
 class RootChangeDetector {
 	var first = true;
@@ -31,7 +37,7 @@ class RootChangeDetector {
 
 	/** Records the current values; true when one differs from the last call (always on the first). */
 	public function changed(host:UiWorkbenchHost, hostContext:Null<UiHostContext>, minimapEnabled:Bool, settingsRevision:Int,
-			responsiveRightHidden:Bool):Bool {
+			responsiveRightHidden:Bool, overlayOpen:Bool):Bool {
 		var differs = first;
 		first = false;
 		var nextSafeArea = hostContext == null ? 0 : hostContext.safeAreaRevision;
@@ -61,7 +67,7 @@ class RootChangeDetector {
 			var view = UiEditorTabs.document(item);
 			if (view == null) continue;
 			if (index == views.length) views.push(new SeenView());
-			if (views[index].update(view)) differs = true;
+			if (views[index].update(view, overlayOpen)) differs = true;
 			index++;
 		}
 		if (index != viewCount) differs = true;
@@ -70,7 +76,11 @@ class RootChangeDetector {
 	}
 }
 
-/** The values of one document view the root build shows: caret, selection, scroll, search marks, tab state. */
+/**
+	The values of one document view: what the root build shows (identity, tab title, unsaved and preview marks, caret,
+	selection, text) and what only its pane shows (scroll, reveal, search marks), which the pane's scope reads through
+	the view's `presentation` signal.
+**/
 private class SeenView {
 	var id = -1;
 	var reveal = 0;
@@ -92,16 +102,20 @@ private class SeenView {
 
 	public function new() {}
 
-	/** Records the view's values; true when one differs from what was recorded before. */
-	public function update(view:UiDocumentView):Bool {
+	/**
+		Records the view's values. Bumps the view's `presentation` signal when the scroll, the reveal or the search marks
+		changed. True when the root must build: a root value changed, the view at this place is another one, or
+		`overlayOpen` and a pane value changed.
+	**/
+	public function update(view:UiDocumentView, overlayOpen:Bool):Bool {
 		var selection = view.selection, document = view.document;
 		var nextDeleted = document.externalState == editor.ExternalState.Deleted;
-		var differs = view.id != id || view.cursorRevealRevision != reveal || document.buffer.stateId != state
+		var differs = view.id != id || view.preview != preview || document.dirty != dirty || document.path != path || nextDeleted != deleted
+			|| document.buffer.stateId != state
 			|| selection.anchor.line != anchorLine || selection.anchor.column != anchorColumn
-			|| selection.cursor.line != cursorLine || selection.cursor.column != cursorColumn
-			|| view.scrollController.offsetX != offsetX || view.scrollController.offsetY != offsetY
-			|| view.searchDecorationRevision() != search || view.preview != preview || document.dirty != dirty
-			|| document.path != path || nextDeleted != deleted;
+			|| selection.cursor.line != cursorLine || selection.cursor.column != cursorColumn;
+		var shown = view.cursorRevealRevision != reveal || view.scrollController.offsetX != offsetX
+			|| view.scrollController.offsetY != offsetY || view.searchDecorationRevision() != search;
 		id = view.id;
 		reveal = view.cursorRevealRevision;
 		state = document.buffer.stateId;
@@ -133,6 +147,9 @@ private class SeenView {
 			differs = true;
 			ranges.resize(0);
 		}
-		return differs;
+		// Written before the build, outside tracking, on the UI thread: the scope that reads it runs again in this frame. A
+		// root build runs it anyway.
+		if (shown) view.invalidate();
+		return differs || overlayOpen && shown;
 	}
 }
