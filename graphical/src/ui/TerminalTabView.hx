@@ -27,8 +27,11 @@ class TerminalTabView implements View {
 	}
 
 	public function build(context:BuildContext):RenderNode {
+		// A TerminalPane runs its body again on its own, onto a new root node; a node field set here would not carry over.
+		var pane = Std.downcast(terminal.panel, TerminalPane);
+		if (pane != null && commandFilter != null) pane.commandFilter = commandFilter;
 		var node = terminal.panel.build(context);
-		if (commandFilter != null) node.commandShortcutFilter = commandFilter;
+		if (pane == null && commandFilter != null) node.commandShortcutFilter = commandFilter;
 		node.on(UiEventKind.Focus, function(_) activate(), UiEventPhase.Capture);
 		node.on(UiEventKind.PointerDown, function(event) {
 			activate();
@@ -38,7 +41,8 @@ class TerminalTabView implements View {
 			var menu = contextMenu;
 			if (event.button == 1 && menu != null) { menu(event); event.preventDefault(); event.stopPropagation(); }
 		});
-		node.onResolved(function(_) resolved(node.globalBounds(), node.id));
+		// The handler moves to the pane's next root node when its body runs alone: read the bounds it is given.
+		node.onResolved(function(item) resolved(item.viewportBounds(), node.id));
 		return node;
 	}
 }

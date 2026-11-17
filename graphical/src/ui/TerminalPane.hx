@@ -13,6 +13,8 @@ import haxeon.ui.TextColorRange;
 import haxeon.ui.TextStyle;
 import haxeon.ui.TextWrap;
 import haxe.io.Bytes;
+import haxeon.reactive.Signal;
+import haxeon.ui.component.TrackedScope;
 import haxeon.ui.core.BuildContext;
 import haxeon.platform.input.TextEdit;
 import nativekit.ffi.NativeKitTypes.TextEditAction;
@@ -65,7 +67,20 @@ class TerminalPane implements AgentTerminalPanel {
 	var paneNode:Null<RenderNode> = null;
 	var pasteContext:Null<BuildContext> = null;
 	public final session:TerminalSession;
+	/** Rebuilds the whole application view: only for what the pane changes outside itself (a focus request). */
 	final requestFrame:Void->Void;
+	/**
+		Bumped by every change only the pane shows (rows, cursor, selection, focus, scroll, size, control strip, touch keys).
+		The pane's body reads it in its own scope, which runs again by itself and asks for its frame: no root build.
+	**/
+	final changes = new Signal<Int>(0);
+	/** Made once, with a body closure made once: the scope a root build mounts is the same component each time. */
+	final scope:TrackedScope;
+	/**
+		Which commands a key chord may run while the pane has focus. TerminalTabView sets the user's skip list here: the
+		scope's root is a new node each time the body runs alone, and a caller's own node fields do not carry over.
+	**/
+	public var commandFilter:String->Bool;
 	final fonts:FontCollection;
 	final renderedRows:Array<TerminalRow> = [];
 	final revisions:Array<Int> = [];
@@ -183,6 +198,13 @@ class TerminalPane implements AgentTerminalPanel {
 		this.requestFrame = requestFrame;
 		this.palette = palette;
 		this.remoteBackend = remoteBackend;
+		commandFilter = function(id:String):Bool return TerminalShortcutPolicy.allows(id);
+		var body = new TerminalPaneBody(this);
+		scope = new TrackedScope("terminal-pane-scope", function():View {
+			// The read is the subscription: invalidate() runs this scope again.
+			changes.value;
+			return body;
+		});
 		ownsFonts = providedFonts == null;
 		foreground = palette.foreground;
 		background = palette.background;
@@ -215,6 +237,10 @@ class TerminalPane implements AgentTerminalPanel {
 		}
 	}
 
+	/** Rebuild the pane alone (contract C6). UI thread, outside any build. */
+	public function invalidate():Void
+		changes.value = changes.value + 1;
+
 	static function rgbColor(color:Color):Int
 		return (Math.round(color.red * 255) << 16) | (Math.round(color.green * 255) << 8) | Math.round(color.blue * 255);
 
@@ -227,18 +253,18 @@ class TerminalPane implements AgentTerminalPanel {
 			syncDefaultColors();
 			for (row in renderedRows) row.layout.setColor(foreground);
 			refreshRows(true);
-			requestFrame();
+			invalidate();
 		}
 		if (fontSize != palette.fontSize) {
 			updateFontSize();
 			resizeToViewport(resolvedWidth, resolvedHeight);
-			requestFrame();
+			invalidate();
 		}
 		session.pollEvents();
 		if (remoteBackend != null) syncControlLayout();
 		// Shell echo and cursor motion arrive asynchronously, often after the
 		// frame requested by the key itself. Schedule their presentation too.
-		if (refreshRows(false)) requestFrame();
+		if (refreshRows(false)) invalidate();
 	}
 
 	/** Keep the normal writable terminal quiet; show states that need attention. */
@@ -251,16 +277,16 @@ class TerminalPane implements AgentTerminalPanel {
 		if (status != controlStatusText) {
 			viewportHeight = -1; // The notice can appear or disappear without a viewport resize.
 			controlStatusText = status;
-			requestFrame();
+			invalidate();
 		}
 		if (action != controlActionText) {
 			controlActionText = action;
-			requestFrame();
+			invalidate();
 		}
 		var decline = remoteBackend.controlDeclineAction();
 		if (decline != controlDeclineText) {
 			controlDeclineText = decline;
-			requestFrame();
+			invalidate();
 		}
 	}
 
@@ -471,7 +497,7 @@ class TerminalPane implements AgentTerminalPanel {
 		session.emulator.focus(value);
 		session.flushInput();
 		refreshRows(false, true);
-		requestFrame();
+		invalidate();
 	}
 
 	/** Typed text follows the shell's input mode; ConPTY asks for Win32 key events. `exosuit.terminal.send` types this way. */
@@ -484,7 +510,7 @@ class TerminalPane implements AgentTerminalPanel {
 	function sendTyped(text:String):Void {
 		if (ctrlSticky) {
 			ctrlSticky = false;
-			requestFrame();
+			invalidate();
 			var code = text.length == 1 ? text.toUpperCase().charCodeAt(0) : 0;
 			if (code >= 65 && code <= 90) {
 				session.write(Bytes.ofString(String.fromCharCode(code - 64)));
@@ -507,7 +533,7 @@ class TerminalPane implements AgentTerminalPanel {
 		var current = session.emulator.scrollback(-1).current;
 		session.emulator.scrollback(Std.int(Math.max(0, current + lines)));
 		refreshRows(false);
-		requestFrame();
+		invalidate();
 	}
 
 	function touchKeysStyle():LayoutStyle {
@@ -547,7 +573,7 @@ class TerminalPane implements AgentTerminalPanel {
 	function touchKey(id:String):Void {
 		if (id == "ctrl") {
 			ctrlSticky = !ctrlSticky;
-			requestFrame();
+			invalidate();
 			return;
 		}
 		if (id == "paste") {
@@ -561,7 +587,7 @@ class TerminalPane implements AgentTerminalPanel {
 			// The terminfo back-tab, sent as is so no emulator mapping can turn it into a plain Tab.
 			prepareInput();
 			session.write(Bytes.ofString("\x1b[Z"));
-			requestFrame();
+			invalidate();
 			return;
 		}
 		var key = switch id {
@@ -575,7 +601,7 @@ class TerminalPane implements AgentTerminalPanel {
 		};
 		handleKey(new UiEvent(UiEventKind.KeyDown, paneNode.id, 0.0, 0.0, 0.0, 0.0, 0, key, modifiers));
 		session.flushInput();
-		requestFrame();
+		invalidate();
 	}
 
 	/** Reads the clipboard and pastes it (bracketed when the program asked for that); with no text it passes ^V on when asked. */
@@ -590,7 +616,7 @@ class TerminalPane implements AgentTerminalPanel {
 			else return;
 			session.flushInput();
 			session.pollEvents();
-			requestFrame();
+			invalidate();
 		}) catch (e:Dynamic) {}
 	}
 
@@ -601,7 +627,11 @@ class TerminalPane implements AgentTerminalPanel {
 		return count;
 	}
 
-	public function build(context:BuildContext):RenderNode {
+	public function build(context:BuildContext):RenderNode
+		return scope.build(context);
+
+	/** The scope's body: the pane as it is now. */
+	function buildBody(context:BuildContext):RenderNode {
 		var highlight = focused ? context.theme.textSelection : context.theme.textSelectionInactive;
 		if (selectionColor != highlight) { selectionColor = highlight; selectionPaintChanged = true; refreshRows(false); }
 		// Resize before creating row painters; painting must not invalidate this frame.
@@ -638,13 +668,14 @@ class TerminalPane implements AgentTerminalPanel {
 				buttonStyle.padding = new haxeon.ui.Insets(8, 0, 8, 0);
 				var action = new haxeon.ui.widgets.controls.Button(controlActionText == "Restart Terminal" ? (remoteBackend.resumesConversation() ? "Resume" : "Restart") : controlActionText,buttonStyle,function() {
 					remoteBackend.activateControl();syncControlLayout();
+					// A focus request is applied by a full build only (C-probe-results point 2).
 					if (terminalNode != null) context.requestFocusAfterLayout(terminalNode.id);
 					requestFrame();
 				},"terminal-control-action",null,haxeon.ui.widgets.controls.ButtonVariant.Secondary,null,null,null,null,null,null,null,null,null,controlActionText);
 				controls.push(new haxeon.ui.widgets.KeyedView("action",action));
 				if (controlDeclineText.length > 0) {
 					var decline = new haxeon.ui.widgets.controls.Button(controlDeclineText,buttonStyle,function() {
-						remoteBackend.declineControl();syncControlLayout();requestFrame();
+						remoteBackend.declineControl();syncControlLayout();invalidate();
 					},"terminal-control-decline",null,haxeon.ui.widgets.controls.ButtonVariant.Secondary,null,null,null,null,null,null,null,null,null,controlDeclineText);
 					controls.push(new haxeon.ui.widgets.KeyedView("decline",decline));
 				}
@@ -720,7 +751,7 @@ class TerminalPane implements AgentTerminalPanel {
 		var node = new Stack("terminal-pane", layers, fill).build(context);
 		terminalNode = node;
 		paneNode = node;
-		node.commandShortcutFilter = function(id) return TerminalShortcutPolicy.allows(id);
+		node.commandShortcutFilter = commandFilter;
 		// A terminal is an input stream, not an editable copy of its screen. Publish
 		// an empty surrounding document so IME edits cannot target the last editor.
 		var syncTextInput = function() {
@@ -733,12 +764,15 @@ class TerminalPane implements AgentTerminalPanel {
 		};
 		node.onResolved(function(_) {
 			selectionDrag.layoutResolved();
+			// Not in the build: focusing dispatches Focus at once, and its handlers (setFocused, the tab view's activate)
+			// write tracked state, which throws inside a build.
+			if (!focusRequested) focusRequested = context.requestFocus(node.id);
 			syncTextInput();
 			var bounds = node.globalBounds();
 			if (bounds.width != resolvedWidth || bounds.height != resolvedHeight) {
 				resolvedWidth = bounds.width;
 				resolvedHeight = bounds.height;
-				requestFrame();
+				invalidate();
 			}
 		});
 		node.focusable = true;
@@ -754,7 +788,7 @@ class TerminalPane implements AgentTerminalPanel {
 				var before = session.emulator.scrollback(-1).current;
 				var after = session.emulator.scrollback(Std.int(Math.max(0, before - lines))).current;
 				if (before == after) return false;
-				selectionMoved = true; refreshRows(false); requestFrame(); return true;
+				selectionMoved = true; refreshRows(false); invalidate(); return true;
 			});
 		node.on(UiEventKind.PointerDown, function(event) {
 			if (closed) return;
@@ -797,7 +831,7 @@ class TerminalPane implements AgentTerminalPanel {
 				else session.emulator.selectionStart(cell.column, cell.row);
 				hasSelection = true;
 				refreshRows(false);
-				requestFrame();
+				invalidate();
 				event.capturePointer();
 				event.preventDefault();
 				event.stopPropagation();
@@ -942,7 +976,7 @@ class TerminalPane implements AgentTerminalPanel {
 					else return;
 					session.flushInput();
 					session.pollEvents();
-					requestFrame();
+					invalidate();
 				}) catch (e:Dynamic) {}
 			} else handleKey(event);
 		});
@@ -969,10 +1003,9 @@ class TerminalPane implements AgentTerminalPanel {
 			if (step == 0) step = event.deltaY > 0 ? 1 : -1;
 			session.emulator.scrollback(current + step);
 			refreshRows(false);
-			requestFrame();
+			invalidate();
 			event.preventDefault();
 		});
-		if (!focusRequested) focusRequested = context.requestFocus(node.id);
 		return node;
 	}
 
@@ -993,7 +1026,7 @@ class TerminalPane implements AgentTerminalPanel {
 		if (session.emulator.scrollback(-1).current == 0) return;
 		session.emulator.scrollback(0);
 		refreshRows(false);
-		requestFrame();
+		invalidate();
 	}
 
 	function clearSelection():Void {
@@ -1001,7 +1034,7 @@ class TerminalPane implements AgentTerminalPanel {
 		session.emulator.selectionClear();
 		hasSelection = false;
 		refreshRows(false);
-		requestFrame();
+		invalidate();
 	}
 
 	function updateSelection(event:UiEvent):Void {
@@ -1015,7 +1048,7 @@ class TerminalPane implements AgentTerminalPanel {
 		if (cell.column != selectionColumn || cell.row != selectionRow) selectionMoved = true;
 		session.emulator.selectionTarget(cell.column, cell.row);
 		refreshRows(false);
-		requestFrame();
+		invalidate();
 	}
 
 	/** UIKit button/modifier values differ from the terminal wire protocol. */
@@ -1031,7 +1064,7 @@ class TerminalPane implements AgentTerminalPanel {
 		session.pollEvents();
 		event.preventDefault();
 		event.stopPropagation();
-		requestFrame();
+		invalidate();
 		return true;
 	}
 
@@ -1165,9 +1198,9 @@ class TerminalPane implements AgentTerminalPanel {
 			// Consume the local backend's ordered geometry event before rebuilding row painters.
 			// A geometry-only change must not wait for the background output poll.
 			session.pollEvents();
-			// Re-render all rows now; waiting for PTY output leaves stale/missing rows while dragging.
+			// Re-render all rows now; waiting for PTY output leaves stale/missing rows while dragging. The build that
+			// called this paints them; poll(), the other caller, invalidates the pane itself.
 			refreshRows(true);
-			requestFrame();
 		}
 	}
 
@@ -1203,4 +1236,16 @@ class TerminalPane implements AgentTerminalPanel {
 		if (ownsFonts) fonts.dispose();
 		session.close();
 	}
+}
+
+/** The body a TerminalPane's scope runs: the pane's build, read under the scope's tracking. */
+@:access(ui.TerminalPane)
+private class TerminalPaneBody implements View {
+	final pane:TerminalPane;
+
+	public function new(pane:TerminalPane)
+		this.pane = pane;
+
+	public function build(context:BuildContext):RenderNode
+		return pane.buildBody(context);
 }
