@@ -501,7 +501,7 @@ class TerminalPane implements AgentTerminalPanel {
 		focused = value;
 		focusGeneration++;
 		session.emulator.focus(value);
-		session.flushInput();
+		deliverInput(session.flushInput);
 		refreshRows(false, true);
 		invalidate();
 	}
@@ -509,7 +509,7 @@ class TerminalPane implements AgentTerminalPanel {
 	/** Typed text follows the shell's input mode; ConPTY asks for Win32 key events. `exosuit.terminal.send` types this way. */
 	public function sendText(text:String):Void {
 		session.emulator.text(Bytes.ofString(text));
-		session.flushInput();
+		deliverInput(session.flushInput);
 	}
 
 	/** Typed text; with the sticky Ctrl of the extra-keys row set, one letter becomes its control character. */
@@ -519,7 +519,7 @@ class TerminalPane implements AgentTerminalPanel {
 			requestFrame(); // the touch keys' Ctrl, outside the rows
 			var code = text.length == 1 ? text.toUpperCase().charCodeAt(0) : 0;
 			if (code >= 65 && code <= 90) {
-				session.write(Bytes.ofString(String.fromCharCode(code - 64)));
+				writeInput(Bytes.ofString(String.fromCharCode(code - 64)));
 				return;
 			}
 		}
@@ -593,7 +593,7 @@ class TerminalPane implements AgentTerminalPanel {
 		if (id == "shift-tab") {
 			// The terminfo back-tab, sent as is so no emulator mapping can turn it into a plain Tab.
 			prepareInput();
-			session.write(Bytes.ofString("\x1b[Z"));
+			writeInput(Bytes.ofString("\x1b[Z"));
 			invalidate();
 			return;
 		}
@@ -607,7 +607,7 @@ class TerminalPane implements AgentTerminalPanel {
 			default: UiKey.Enter;
 		};
 		handleKey(new UiEvent(UiEventKind.KeyDown, paneNode.id, 0.0, 0.0, 0.0, 0.0, 0, key, modifiers));
-		session.flushInput();
+		deliverInput(session.flushInput);
 		invalidate();
 	}
 
@@ -619,7 +619,7 @@ class TerminalPane implements AgentTerminalPanel {
 			if (closed || session.status != "running" || !canSendInput()) return;
 			prepareInput();
 			if (text.length > 0) session.emulator.paste(Bytes.ofString(text));
-			else if (passControlV) session.write(Bytes.ofString("\x16"));
+			else if (passControlV) writeInput(Bytes.ofString("\x16"));
 			else return;
 			sendInput();
 			invalidate();
@@ -997,7 +997,7 @@ class TerminalPane implements AgentTerminalPanel {
 					prepareInput();
 					if (text.length > 0) session.emulator.paste(Bytes.ofString(text));
 					// No text (an image, say): pass ^V through so programs read the clipboard themselves.
-					else if (controlV) session.write(Bytes.ofString("\x16"));
+					else if (controlV) writeInput(Bytes.ofString("\x16"));
 					else return;
 					sendInput();
 					invalidate();
@@ -1081,11 +1081,17 @@ class TerminalPane implements AgentTerminalPanel {
 	**/
 	var inputFailure:Null<Dynamic> = null;
 
-	function sendInput():Void {
-		try {
+	function sendInput():Void
+		deliverInput(function() {
 			session.flushInput();
 			session.pollEvents();
-		} catch (error:Dynamic) {
+		});
+
+	function writeInput(bytes:Bytes):Void
+		deliverInput(() -> session.write(bytes));
+
+	function deliverInput(send:() -> Void):Void {
+		try send() catch (error:Dynamic) {
 			if (inputFailure == null) inputFailure = error;
 		}
 	}
@@ -1164,7 +1170,7 @@ class TerminalPane implements AgentTerminalPanel {
 				&& (event.modifiers & (UiModifier.Control | UiModifier.Shift | UiModifier.Alt | UiModifier.Super)) == UiModifier.Control) {
 			prepareInput();
 			// ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _ : VK_BACK, scan code 14, char 0x7f, down then up, LEFT_CTRL_PRESSED.
-			session.write(Bytes.ofString(session.emulator.win32InputMode() ? "\x1b[8;14;127;1;8;1_\x1b[8;14;127;0;8;1_" : "\x08"));
+			writeInput(Bytes.ofString(session.emulator.win32InputMode() ? "\x1b[8;14;127;1;8;1_\x1b[8;14;127;0;8;1_" : "\x08"));
 			event.preventDefault();
 			return;
 		}
@@ -1176,7 +1182,7 @@ class TerminalPane implements AgentTerminalPanel {
 				&& session.emulator.win32InputMode()) {
 			prepareInput();
 			// VK_ESCAPE, scan code 1, char 0x1b, down then up, no modifiers.
-			session.write(Bytes.ofString("\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"));
+			writeInput(Bytes.ofString("\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"));
 			event.preventDefault();
 			return;
 		}
@@ -1227,7 +1233,7 @@ class TerminalPane implements AgentTerminalPanel {
 			bytes = "\x1b" + String.fromCharCode((event.modifiers.contains(UiModifier.Shift) ? 65 : 97) + event.key - UiKey.A);
 		if (bytes != null) {
 			prepareInput();
-			session.write(Bytes.ofString(bytes));
+			writeInput(Bytes.ofString(bytes));
 			event.preventDefault();
 		}
 	}
