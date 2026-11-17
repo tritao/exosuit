@@ -130,7 +130,7 @@ class GraphicalMain {
 			else if (StringTools.startsWith(argument, "--record-path="))
 				recordPath = argument.substring(14);
 			else if (StringTools.startsWith(argument, "--smoke-frames="))
-				frameLimit = Std.parseInt(argument.substring(15));
+				frameLimit = Std.parseInt(argument.substring(15)) ?? 0;
 			else if (argument == "--open-workbench")
 				openWorkbench = true;
 			else if (argument == "--open-workspace-terminals")
@@ -261,7 +261,7 @@ class GraphicalMain {
 					var toolArguments = [projectRoot + "/scripts/devtools.py", "--endpoint=" + activeInspection.path];
 					var profilerPort = Sys.getEnv("EXOSUIT_DEVTOOLS_PROFILER_PORT");
 					if (profilerPort != null) toolArguments.push("--profiler-port=" + profilerPort);
-					devtoolsProcess = sys.io.Process.spawn(python == null ? "python3" : python,
+					devtoolsProcess = sys.io.ChildProcess.spawn(python == null ? "python3" : python,
 						toolArguments, projectRoot);
 				} catch (error:Dynamic) instance.application.reportError("devtools", Std.string(error));
 			}));

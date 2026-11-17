@@ -25,6 +25,6 @@ class StartupMemory {
 		if (Sys.getEnv("EXOSUIT_STARTUP_MEMORY_STOP_AT") == stage) Sys.exit(0);
 	}
 	public static function dump(directory:String):Void {
-		hl.Gc.dump(directory + "/startup.heap");
+		hl.Gc.dumpMemory(directory + "/startup.heap");
 	}
 }
