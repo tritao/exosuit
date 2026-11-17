@@ -426,10 +426,10 @@ class WorkbenchTreeTestMain {
 		tree.select("w:resume", false);
 		tree.focusItem("w:resume");
 		submit();
-		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Down, 0);
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Down);
 		submit();
 		require(tree.selectedKey == "g:resume|work", "Down from the workspace row selected " + tree.selectedKey);
-		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter, 0);
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter);
 		submit();
 		require(activated.join(",") == "g:resume|work", "Enter activated " + activated);
 		tree.select("w:resume", false);
