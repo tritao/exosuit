@@ -305,7 +305,7 @@ class GraphicalMain {
 			var appearance = new SystemAppearance();
 			appearance.set_struct_size(32);
 			NativeKit.nk_system_get_appearance(appearance);
-			return Std.int(appearance.get_color_scheme()) != 1;
+			return appearance.get_color_scheme() != ColorScheme.Light;
 		} catch (_:Dynamic) {
 			return true;
 		}
