@@ -28,8 +28,12 @@ import scm.ScmResource;
 import scm.ScmSnapshot;
 import scm.ScmSource;
 
-/** Snapshot-backed hierarchy shared by the local and RPC source-control view. */
-class ScmTreeModel implements TreeViewModel {
+/**
+	Snapshot-backed hierarchy shared by the local and RPC source-control view. It is Observable: refreshData replaces
+	the lists and maps the TreeViewModel methods read, so a tree and a panel built from them are invalidated by the
+	assignment.
+**/
+class ScmTreeModel implements TreeViewModel implements Observable {
 	static inline final ROW_HEIGHT = 28.0;
 	final source:ScmSource;
 	final theme:Theme;
@@ -39,14 +43,19 @@ class ScmTreeModel implements TreeViewModel {
 	final cancelSubscription:Void->Void;
 	var repositories:Array<ScmRepository> = [];
 	var roots:Array<ScmRepository> = [];
-	final repositoryByKey:Map<String, ScmRepository> = [];
-	final groupByKey:Map<String, ScmTreeGroup> = [];
-	final resourceByKey:Map<String, ScmTreeResource> = [];
-	final children:Map<String, Array<String>> = [];
-	var revisionValue:Int = 0;
+	var repositoryByKey:Map<String, ScmRepository> = [];
+	var groupByKey:Map<String, ScmTreeGroup> = [];
+	var resourceByKey:Map<String, ScmTreeResource> = [];
+	var children:Map<String, Array<String>> = [];
 	var rootErrorValue:Null<String>;
 	var loading:Bool = false;
-	var disposed:Bool = false;
+	/** Written by dispose, which a build may reach (the panel is replaced while the sidebar is built). */
+	@:unobservable var disposed:Bool = false;
+	/**
+		False while the constructor runs: the build that creates the model reads that data itself, and its owner syncs
+		what depends on it after creating it, so `changed` (which requests a frame) is not called from inside that build.
+	**/
+	@:unobservable var notifying:Bool = false;
 
 	public function new(source:ScmSource, theme:Theme, changed:Void->Void,
 		?mutationAction:(ScmRepository, Null<ScmGroup>, Null<ScmResource>)->Void, ?trustAction:ScmRepository->Void) {
@@ -59,6 +68,7 @@ class ScmTreeModel implements TreeViewModel {
 		cancelSubscription = source.subscribe(function(_, _) refreshData());
 		refreshData();
 		discover();
+		notifying = true;
 	}
 
 	public var rootError(get, never):Null<String>;
@@ -103,7 +113,6 @@ class ScmTreeModel implements TreeViewModel {
 		for (index in start...end) result.push(new TreeRootMetadata(repositoryKey(roots[index]), true));
 		return result;
 	}
-	public function rootKeyAt(index:Int):String return index >= 0 && index < roots.length ? repositoryKey(roots[index]) : "";
 	public function childCount(parentKey:String):Int {
 		var values = children.get(parentKey);
 		return values == null ? 0 : values.length;
@@ -116,7 +125,6 @@ class ScmTreeModel implements TreeViewModel {
 	public function estimatedExtent():Float return ROW_HEIGHT;
 	public function extentIsUniform():Bool return true;
 	public function extentAt(key:String):Float return ROW_HEIGHT;
-	public function revision():Int return revisionValue;
 
 	public function buildItem(key:String):View {
 		var style = new LayoutStyle();
@@ -162,9 +170,9 @@ class ScmTreeModel implements TreeViewModel {
 					var trustStyle = new LayoutStyle();
 					trustStyle.width = LayoutAxis.fixed(58.0);
 					trustStyle.height = LayoutAxis.fixed(22.0);
-					var trust = new Button("Trust", trustStyle, function() trustAction(repo), "scm-trust:" + repo.id);
-					trust.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
-					trust.accessibilityLabel = "Trust repository " + repo.root;
+					var trust = new Button("Trust", trustStyle, function() trustAction(repo), "scm-trust:" + repo.id, null,
+						haxeon.ui.widgets.controls.ButtonVariant.Secondary, null, null, null, null, null, null, null, null, null,
+						"Trust repository " + repo.root);
 					actionChildren.push(new KeyedView("trust-action", trust));
 				}
 			}
@@ -232,9 +240,8 @@ class ScmTreeModel implements TreeViewModel {
 		buttonStyle.width = LayoutAxis.fixed(64.0);
 		buttonStyle.height = LayoutAxis.fixed(22.0);
 		buttonStyle.padding = new Insets(4.0, 0.0, 4.0, 0.0);
-		var button = new Button(label, buttonStyle, action, "scm-row-action:" + key);
-		button.accessibilityLabel = description;
-		return new KeyedView(key, button);
+		return new KeyedView(key, new Button(label, buttonStyle, action, "scm-row-action:" + key, null, null, null, null, null, null,
+			null, null, null, null, null, description));
 	}
 
 	static function hasGroupResources(snapshot:ScmSnapshot, ids:Array<ScmGroupId>):Bool {
@@ -275,45 +282,53 @@ class ScmTreeModel implements TreeViewModel {
 
 	function refreshData():Void {
 		if (disposed) return;
-		repositories = source.repositories();
+		var nextRepositories = source.repositories();
 		var known:Map<String, Bool> = [];
-		for (repository in repositories) known.set(repository.id, true);
-		roots = [for (repository in repositories) if (repository.parentId == null || !known.exists(repository.parentId)) repository];
-		repositoryByKey.clear(); groupByKey.clear(); resourceByKey.clear(); children.clear();
-		for (repository in repositories) {
+		for (repository in nextRepositories) known.set(repository.id, true);
+		var nextRoots = [for (repository in nextRepositories) if (repository.parentId == null || !known.exists(repository.parentId)) repository];
+		var nextRepositoryByKey:Map<String, ScmRepository> = [];
+		var nextGroupByKey:Map<String, ScmTreeGroup> = [];
+		var nextResourceByKey:Map<String, ScmTreeResource> = [];
+		var nextChildren:Map<String, Array<String>> = [];
+		for (repository in nextRepositories) {
 			var key = repositoryKey(repository);
-			repositoryByKey.set(key, repository);
+			nextRepositoryByKey.set(key, repository);
 			var snapshot = source.snapshot(repository.id);
 			if (snapshot != null) for (group in snapshot.groups) {
 				var groupKey = groupKeyFor(repository, group);
-				groupByKey.set(groupKey, new ScmTreeGroup(repository, group));
+				nextGroupByKey.set(groupKey, new ScmTreeGroup(repository, group));
 				var groupChildren:Array<String> = [];
 				for (resource in group.resources) {
 					var resourceKey = resourceKeyFor(repository, group, resource);
-					resourceByKey.set(resourceKey, new ScmTreeResource(repository, group, resource));
+					nextResourceByKey.set(resourceKey, new ScmTreeResource(repository, group, resource));
 					groupChildren.push(resourceKey);
 				}
-				children.set(groupKey, groupChildren);
+				nextChildren.set(groupKey, groupChildren);
 			}
 		}
-		for (repository in repositories) {
-			var parent = repository.parentId == null ? null : findRepository(repository.parentId);
-			if (parent != null) appendChild(repositoryKey(parent), repositoryKey(repository));
+		for (repository in nextRepositories) {
+			var parent = repository.parentId == null ? null : findRepository(nextRepositories, repository.parentId);
+			if (parent != null) appendChild(nextChildren, repositoryKey(parent), repositoryKey(repository));
 		}
-		for (repository in repositories) {
+		for (repository in nextRepositories) {
 			var key = repositoryKey(repository), snapshot = source.snapshot(repository.id);
-			if (snapshot != null) for (group in snapshot.groups) appendChild(key, groupKeyFor(repository, group));
+			if (snapshot != null) for (group in snapshot.groups) appendChild(nextChildren, key, groupKeyFor(repository, group));
 		}
-		revisionValue++;
-		changed();
+		repositories = nextRepositories;
+		roots = nextRoots;
+		repositoryByKey = nextRepositoryByKey;
+		groupByKey = nextGroupByKey;
+		resourceByKey = nextResourceByKey;
+		children = nextChildren;
+		if (notifying) changed();
 	}
 
-	function appendChild(parent:String, child:String):Void {
+	static function appendChild(children:Map<String, Array<String>>, parent:String, child:String):Void {
 		var values = children.get(parent);
 		if (values == null) { values = []; children.set(parent, values); }
 		values.push(child);
 	}
-	function findRepository(id:String):Null<ScmRepository> {
+	static function findRepository(repositories:Array<ScmRepository>, id:String):Null<ScmRepository> {
 		for (repository in repositories) if (repository.id == id) return repository;
 		return null;
 	}

@@ -100,8 +100,7 @@ class SourceControlPanel implements View {
 		headerStyle.childAlignY = LayoutAlignmentY.Center;
 		headerStyle.childGap = 8.0;
 		var title = new Text("Source Control", null, tokens.textPrimary, TextStyleOverride.text(15.0));
-		var refresh = new Button("Refresh", null, function() { model.refresh(); }, "scm-refresh");
-		refresh.variant = ButtonVariant.Secondary;
+		var refresh = new Button("Refresh", null, function() { model.refresh(); }, "scm-refresh", null, ButtonVariant.Secondary);
 		rows.push(new KeyedView("header", new Row("scm-header", [
 			new KeyedView("title", title), new KeyedView("spacer", new haxeon.ui.widgets.layout.Spacer("scm-header-spacer")),
 			new KeyedView("refresh", refresh)
@@ -112,8 +111,7 @@ class SourceControlPanel implements View {
 			rows.push(message("loading", "Loading repositories…", tokens.textSecondary));
 		if (model.rootError != null) {
 			rows.push(message("error", model.rootError, tokens.danger));
-			var retry = new Button("Retry", null, function() { model.refresh(); retryAction(); }, "scm-retry");
-			retry.variant = ButtonVariant.Secondary;
+			var retry = new Button("Retry", null, function() { model.refresh(); retryAction(); }, "scm-retry", null, ButtonVariant.Secondary);
 			rows.push(new KeyedView("retry", retry));
 		} else if (!model.isLoading && model.repositoriesSnapshot().length == 0) {
 			rows.push(message("empty", "No Git repository found in this folder", tokens.textSecondary));
@@ -129,8 +127,8 @@ class SourceControlPanel implements View {
 			if (failure != null) {
 				rows.push(message("error:" + repository.id, failure.message, tokens.danger));
 				var repoId = repository.id;
-				var retryRepository = new Button("Retry", null, function() source.refreshNow(repoId), "scm-retry:" + repoId);
-				retryRepository.variant = ButtonVariant.Secondary;
+				var retryRepository = new Button("Retry", null, function() source.refreshNow(repoId), "scm-retry:" + repoId, null,
+					ButtonVariant.Secondary);
 				rows.push(new KeyedView("retry:" + repository.id, retryRepository));
 			}
 
@@ -150,10 +148,12 @@ class SourceControlPanel implements View {
 		tree.guidesOnInteraction = true;
 		tree.compactLeafIndent = true;
 		tree.expandOnSingleClick = true;
+		// Expanding or collapsing writes nothing the tree's build reads as tracked state: rebuild to show it.
+		tree.onExpandedChanged = function(_, _) changed();
 		tree.onItemActivatedWithEvent = function(key, event) {
 			var repository = model.repositoryForKey(key), group = model.groupForKey(key), resource = model.resourceForKey(key);
 			if (repository == null || group == null || resource == null) return;
-			if ((event.modifiers & haxeon.ui.core.UiModifier.Alt) != 0 && openFile != null)
+			if (event.modifiers.contains(haxeon.ui.core.UiModifier.Alt) && openFile != null)
 				openFile(repository, group, resource);
 			else openResource(repository, group, resource);
 		};
@@ -178,13 +178,12 @@ class SourceControlPanel implements View {
 			var subjectLabel = new Text("Subject: " + subject.length + "/72", null,
 				subject.length > 72 ? tokens.warning : tokens.textSecondary, TextStyleOverride.text(11.0));
 			var canSubmit = canCommit == null || canCommit(commitRepo);
-			var commit = new Button("Commit Staged", null, function() commitAction(commitRepo, false, false), "scm-commit-staged");
-			commit.variant = ButtonVariant.Primary;
-			commit.enabled = canSubmit && StringTools.trim(message).length > 0;
+			var commit = new Button("Commit Staged", null, function() commitAction(commitRepo, false, false), "scm-commit-staged",
+				canSubmit && StringTools.trim(message).length > 0, ButtonVariant.Primary);
 			var actionViews = [new KeyedView("staged", commit)];
 			if (commitMenu != null) {
-				var more = new Button("More…", null, null, "scm-commit-more");
-				more.onClickEvent = function(event) commitMenu(commitRepo, event);
+				var more = new Button("More…", null, null, "scm-commit-more", null, null, null, null, null, null, null, null, null, null,
+					null, null, function(event) commitMenu(commitRepo, event));
 				actionViews.push(new KeyedView("more", more));
 			}
 			var commitActions = new Row("scm-commit-actions", actionViews);
