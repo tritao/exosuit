@@ -36,8 +36,8 @@ typedef MachineState = {
 
 /**
 	The machine suit runs on and its workspaces (docs/architecture/0005-machines-and-workspaces.md), kept in
-	`machine.json` in suit's home. Only the daemon writes it. A workspace's work lives in its folders' own
-	services; this list only says which folders make up which workspace. Version 1 files (no scratch folders) are
+	`machine.json` in suit's home. Only the daemon writes it. A workspace's work lives in its own service, which
+	suit starts; this list names each workspace and its folders. Version 1 files (no scratch folders) are
 	read unchanged and written back as version 2.
 **/
 class MachineCatalog {
@@ -77,8 +77,7 @@ class MachineCatalog {
 
 	/**
 		The reply to a `machine` request, version 2: each workspace with its folders (possibly none), scratch folder,
-		revision and `service`. `service` is null when `services` does not know one (M19 Phase 0: suit does not report
-		services yet).
+		revision and `service`. `service` is null when `services` does not know one (suit has not started it).
 	**/
 	public function json(?services:MachineWorkspace->Null<MachineService>):Dynamic {
 		var lookup:Null<MachineWorkspace->Null<MachineService>> = services;
@@ -402,7 +401,7 @@ class MachineCatalog {
 		return folders;
 	}
 
-	/** Where workspace services keep their state: the agent's `AgentManager.stateBase`. */
+	/** Where workspace services keep their state (the agent's `AgentState.base`). */
 	public static function agentStateBase():String {
 		var configured = Sys.getEnv("EXOSUIT_AGENT_STATE_HOME");
 		if (configured != null && configured.length > 0)

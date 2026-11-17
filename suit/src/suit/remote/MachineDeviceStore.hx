@@ -14,8 +14,7 @@ import workspace.service.WorkspaceDeviceRecord;
 	The machine's paired devices and what each may reach, in `machine-devices.json` in suit's (private) home. A device
 	is pinned by its Noise key; `workspaces` maps a workspace id to the capabilities the owner granted the device in
 	it. Pairing grants no workspace: the map starts empty. Only the daemon writes the file; it keeps the parsed copy.
-	The pairing manager's persistence interface is implemented here, so the manager is the same one a workspace service
-	uses.
+	It is the persistence of suit's pairing manager (WorkspacePairingManager).
 **/
 class MachineDeviceStore implements WorkspaceDevicePersistence {
 	public static inline final VERSION = 1;

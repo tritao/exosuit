@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.Int64;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
@@ -8,13 +9,16 @@ import workspace.client.RpcWorkspaceWorkbenchClient;
 import haxeon.ui.widgets.overlays.MenuItem;
 
 @:access(ui.ExosuitApp)
+@:access(ui.TerminalTabs)
 @:access(ui.CommandMenu)
 class TerminalCloseTests {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
  public static function run(app:ui.ExosuitApp):Void {
   var pair=MemoryTransport.pair(),clock=function() return Sys.time()*1000;
   var connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
-  var endpoint=new CloseEndpoint(connection),client=new RpcWorkspaceWorkbenchClient(endpoint,clock);
+  var endpoint=new TestEndpoint(connection);endpoint.root="/tmp";endpoint.generation="owner";endpoint.events=false;
+  endpoint.grants=[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL,WorkspaceTerminalProtocol.CATALOG];
+  var client=new RpcWorkspaceWorkbenchClient(endpoint,clock);
   var record:TerminalRecord={id:"close-target",name:"Target",group:"work",cwd:"/tmp",workspaceRoot:"/tmp",instance:"owner",
    state:"running",exitCode:0,available:true,revision:Int64.ofInt(1)};
   var records=[record],calls=0,pending:Null<haxeon.rpc.RpcContext<TerminalTarget>>=null;
@@ -39,7 +43,7 @@ class TerminalCloseTests {
   var root=app.submit(new haxeon.ui.LayoutFrame(900,600));
   var event=new haxeon.ui.core.UiEvent(haxeon.ui.core.UiEventKind.PointerDown,root.id,100,100,0,0,1);
   function closeAction():MenuItem {
-   app.showTerminalContextMenu(target,event);
+   app.terminalTabs.showTerminalContextMenu(target,event);
    var menu:ui.CommandMenu=cast app.contextMenu,items:Array<MenuItem>=cast menu.customItems;
    var result:MenuItem=null;
    for(item in items) {
@@ -78,16 +82,4 @@ private class CloseView implements ui.TerminalPanel {
  public function columns():Int return 80;
  public function rows():Int return 24;
  public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode return new haxeon.ui.widgets.text.Text("remote fixture").build(context);
-}
-private class CloseEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final connection:RpcConnection;
- public function new(connection:RpcConnection) this.connection=connection;
- public function rootPath():Null<String> return "/tmp";
- public function serviceGeneration():String return "owner";
- public function rpcConnection():Null<RpcConnection> return connection;
- public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return null;
- public function failureReason():Null<String> return null;
- public function supportsWorkspaceGroups():Bool return true;
- public function workspaceEpoch():Null<String> return "epoch";
- public function hasCapability(value:String):Bool return [WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL,WorkspaceTerminalProtocol.CATALOG].indexOf(value)>=0;
 }

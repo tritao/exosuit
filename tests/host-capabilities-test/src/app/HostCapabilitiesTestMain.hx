@@ -4,8 +4,7 @@ import core.Application;
 import platform.HostCapability;
 import platform.HostCapabilities;
 import platform.Platform;
-import testing.model.ModelTextMetrics;
-import testing.model.ModelWorkbenchHost;
+import testing.HeadlessWorkbench;
 
 class HostCapabilitiesTestMain {
 	static function require(condition:Bool, message:String):Void {
@@ -24,9 +23,7 @@ class HostCapabilitiesTestMain {
 		require(!immutable.supports(Processes), "host policy changed through constructor alias");
 		require(!new HostCapabilities([LanguageServices, SourcePlugins]).supports(LanguageServices), "LSP lacks process prerequisite");
 		require(!new HostCapabilities([SourcePlugins]).supports(SourcePlugins), "source plugins lack thread prerequisite");
-		var metrics = new ModelTextMetrics("ignored.ttf", 15);
-		var application = new Application((theme, focus, workspace, settings) ->
-			new ModelWorkbenchHost(metrics, theme, focus, workspace, 320, 200, settings), null, null, capabilities);
+		var application = new Application(HeadlessWorkbench.create, null, null, capabilities);
 		application.newDocument();
 		for (command in application.commands.all()) {
 			require(!StringTools.startsWith(command.name, "build:"), "build command leaked into restricted host");

@@ -23,6 +23,7 @@ private class TerminalFixture implements ui.TerminalPanel {
 }
 
 @:access(ui.ExosuitApp)
+@:access(ui.TerminalTabs)
 @:access(ui.CommandMenu)
 class TerminalContextMenuTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
@@ -118,7 +119,7 @@ class TerminalContextMenuTestMain {
 		var second = new ui.UiTerminalTab("second", "Second", "/tmp", secondPanel);
 		app.host.panelTerminals.push(first); app.host.panelTerminals.push(second);
 		app.host.activePanelTerminalIndex = 1;
-		app.openTerminalPanel();
+		app.terminalTabs.openTerminalPanel();
 		var root = app.submit(new LayoutFrame(900,600));
 		var header:haxeon.ui.core.RenderNode = null;
 		root.walk(function(node) {
@@ -134,19 +135,19 @@ class TerminalContextMenuTestMain {
 		app.host.commandView.textInput("Renamed");
 		app.host.commandView.keyPressed(platform.Platform.KEY_ENTER,0);
 		require(first.title == "Renamed" && second.title == "Second", "rename targeted the active terminal instead of the clicked terminal");
-		app.showTerminalContextMenu(first,event);
+		app.terminalTabs.showTerminalContextMenu(first,event);
 		action(app,"editor").onSelect();
 		require(app.host.terminalPaneFor(first) != null && app.host.panelTerminals.indexOf(first) < 0 && firstPanel.closes == 0,
 			"move to editor duplicated or closed the terminal");
-		app.showTerminalContextMenu(first,event);
+		app.terminalTabs.showTerminalContextMenu(first,event);
 		action(app,"panel").onSelect();
 		require(app.host.terminalPaneFor(first) == null && app.host.panelTerminals.indexOf(first) >= 0 && firstPanel.closes == 0,
 			"move to panel duplicated or closed the terminal");
-		app.showTerminalContextMenu(first,event);
+		app.terminalTabs.showTerminalContextMenu(first,event);
 		action(app,"stop").onSelect();
 		require(firstPanel.stops == 1 && secondPanel.stops == 0, "stop targeted a different terminal");
 		app.host.activePanelTerminalIndex = app.host.panelTerminals.indexOf(second);
-		app.showTerminalContextMenu(first,event);
+		app.terminalTabs.showTerminalContextMenu(first,event);
 		action(app,"close").onSelect();
 		require(firstPanel.closes == 1 && firstPanel.stops == 2 && secondPanel.closes == 0 && app.host.panelTerminals.indexOf(first) < 0 && app.host.activePanelTerminal() == second,
 			"closing a view affected a different terminal");

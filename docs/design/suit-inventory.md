@@ -2,7 +2,7 @@
 
 The user's rule (2026-11-12): suit is the final arbiter. It lists everything an Exosuit instance starts, on the PC or
 from a phone, and can end all of it; `suit quit --keep-terminals` is the polite quit that leaves terminals running.
-This is the audit of every place the code starts a process or holds a long-lived connection (branch `suit-arbiter`).
+Below is every place the code starts a process or holds a long-lived connection, and how suit treats it.
 
 How suit learns of a process:
 
@@ -13,7 +13,7 @@ How suit learns of a process:
   (`SuitLineage`), or, for a terminal host, when its folder's `host.json` names its pid. This is also how processes
   started before suit was running, or by a build that predates registration, are found.
 - **found by checkout** (also `source: "adopted"`): the source-tree chain (`SuitInventory.adoptCheckoutChains`). A
-  checkout is an Exosuit one when a registered editor runs from it (`<ROOT>/graphical/build/host/main.hl` or `live.hl`)
+  checkout is an Exosuit one when a linked editor runs from it (`<ROOT>/graphical/build/host/main.hl` or `live.hl`)
   or when `python scripts/run.py` started a run session of its `graphical/haxeon.json`. Then, among processes whose
   environment registers with this suit, its run session (`hl haxeon-cli.hl run --project <ROOT>/graphical/haxeon.json`,
   live or not), the `scripts/run.py` that started it (kind `launcher`) and a live host of `<ROOT>/graphical/build/` are
@@ -35,32 +35,30 @@ their parent is stopped (`SuitKinds.spawnedByExosuit`).
 
 | Kind | Who starts it | How suit learns of it | Ended by full quit | Gap |
 | --- | --- | --- | --- | --- |
-| Editor (`graphical/build/host/main.hl`, `tools/exosuit.hl`, `exosuit.exe`) | user, `scripts/run.py`, haxeon-cli | registers; classifier `editor` | asked to close; one kept open over unsaved work stays, listed, and the daemon waits for it | never force-killed (by design) |
-| Extra editor window (`--context=KEY`; live form runs `live-host.hl`) | editor (`src/workspace/NewWindow.hx:58`), detached | registers; classifier (live form is classed `live-host`) | yes | the live form is labelled live-host, not editor |
-| Workspace manager (`--manager`) | editor helpers, suit (relay/remote hosting), `--detach` | registers; classifier `workspace-manager` | yes (stop request, then kill) | none known |
-| Workspace daemon (agent main.hl positional args) | manager | registers; classifier `workspace-host` | yes, through its manager / sweep | none known |
-| Terminal host (`--terminal-host DIR`) | workspace daemon, detached | registers; else found by `host.json` pid | yes (end request, then kill after 3 s); kept by the polite quit | none known |
-| PTY shell and what the user runs in it | terminal host (or daemon/editor without hosts) | not listed (the user's programs): a process below a terminal host (`SuitLineage.belowTerminalHost`) is never classified or adopted by its kind, even an SDK-mode claude or a codex app-server the terminal runs, and a host owns nothing it runs | yes, through its terminal host's end | a shell inside a service (hosts off) survives a quit, by design |
+| Editor (`graphical/build/host/main.hl`, `tools/exosuit.hl`, `exosuit.exe`) | user, `scripts/run.py`, haxeon-cli | its suit link (`EditorDirectory`); classifier `editor` | asked to close; one kept open over unsaved work stays, listed, and the daemon waits for it | never force-killed (by design) |
+| Extra editor window (`--context=KEY`; live form runs `live-host.hl`) | editor (`src/workspace/NewWindow.hx`), detached | its suit link; classifier (live form is classed `live-host`) | yes | the live form is labelled live-host, not editor |
+| Workspace service (agent main.hl `--workspace ID --folder F...`) | suit, on `workspace.open` or for a paired device | reports itself over its link; registers; classifier `workspace-host` | yes (`stop` over its link, then kill) | none known |
+| Terminal host (`--terminal-host DIR`) | workspace daemon, detached | registers; else found by `host.json` pid | yes (killed, then its program's tree swept); kept by the polite quit | none known |
+| PTY shell and what the user runs in it | terminal host | not listed (the user's programs): a process below a terminal host (`SuitLineage.belowTerminalHost`) is never classified or adopted by its kind, even an SDK-mode claude or a codex app-server the terminal runs, and a host owns nothing it runs | yes, through its terminal host's end | none known |
 | Source-tree launcher (`python scripts/run.py [--live]`) | the user | found by checkout: the parent of its checkout's run session; kind `launcher` | yes, after every editor has exited (see below); polite quit too | listed only once its run session runs (not while run.py still builds the agent) |
 | Run / live session (`haxeon-cli.hl run --project <ROOT>/graphical/haxeon.json [--watch --live]`) | `scripts/run.py` | found by checkout (or by its chain); kind `live-session` | yes, after every editor has exited; polite quit too | a session of another project is scanned only |
-| Compiler worker (`/haxeon/compiler/*.hl`) | haxeon-cli, haxeon-lsp, agent update build (`cmd /c start /b`) | scan; found when the chain ties it, or by checkout when its hl.exe is `<ROOT>/haxeon/...` and it started after a running run session of that checkout (not persisted) | yes when found, unless shared: while a Haxeon client exosuit did not start runs on the same hl.exe the worker is "shared with your builds" and no bulk stop or orphan sweep ends it | a worker started after the session by a build of another project that has already finished is taken for the session's (haxeon's worker state file names no project), so the full quit ends it; it is idle and restarts on demand. A worker of another toolchain started through `cmd /c start` stays not started by exosuit |
-| Live host (`live-host.hl`; under `run.py --live` it runs the editor itself, which registers as `editor`) | live session through `cmd /C` | registers as the editor; else found by checkout (`<ROOT>/graphical/build/`) or by chain | the editor is asked to close, never swept | `cmd` wrapper not scanned (it is a pass-through; it ends with the host) |
-| Agent provider: claude (`--permission-prompt-tool stdio` + `stream-json`) | workspace daemon (`ClaudeProvider.hx:146`) | **new**: scan (`claude`, `node`); found under its daemon | **yes (new)**, also swept with its daemon | none known |
-| Agent provider: codex proxy bridge (`run-codex-proxy.py`) and `codex ... app-server proxy` | workspace daemon (`CodexProvider.hx:399`) | **new**: scan (`python`, `codex`); found | **yes (new)** | none known |
+| Compiler worker (`/haxeon/compiler/*.hl`) | haxeon-cli, haxeon-lsp (`cmd /c start /b`) | scan; found when the chain ties it, or by checkout when its hl.exe is `<ROOT>/haxeon/...` and it started after a running run session of that checkout (not persisted) | yes when found, unless shared: while a Haxeon client exosuit did not start runs on the same hl.exe the worker is "shared with your builds" and no bulk stop or orphan sweep ends it | a worker started after the session by a build of another project that has already finished is taken for the session's (haxeon's worker state file names no project), so the full quit ends it; it is idle and restarts on demand. A worker of another toolchain started through `cmd /c start` stays not started by exosuit |
+| Live host (`live-host.hl`; under `run.py --live` it runs the editor itself, which registers as `editor`) | live session through `cmd /C` | links as the editor; else found by checkout (`<ROOT>/graphical/build/`) or by chain | the editor is asked to close, never swept | `cmd` wrapper not scanned (it is a pass-through; it ends with the host) |
+| Agent provider: claude (`--permission-prompt-tool stdio` + `stream-json`) | workspace daemon (`ClaudeProvider.hx`) | scan (`claude`, `node`); found under its daemon | **yes**, also swept with its daemon | none known |
+| Agent provider: codex proxy bridge (`run-codex-proxy.py`) and `codex ... app-server proxy` | workspace daemon (`CodexProvider.hx`) | scan (`python`, `codex`); found | **yes** | none known |
 | codex shared app-server daemon (`codex app-server daemon start`) | codex itself, detached from the starter | scan recognises it, but its starter has exited, so it is "not started by exosuit" | **no** | codex owns it and it outlives exosuit; ending it would also end other codex users. Left listed, end it by pid |
-| Agent provider: pi (`--mode rpc` + `pi-permissions-`) | workspace daemon (`PiProvider.hx:173`) | **new**: scan; found | **yes (new)** | none known |
-| Claude name bridge (`node <helper> ROOT --exosuit-helper=claude-name-bridge`) | workspace daemon (`ClaudeNameBridge.hx:53`) | scan: the `--exosuit-helper=` marker (`SuitKinds.HELPER_MARKER`), classed `helper`; found under its daemon | **yes** | none known |
-| Haxeon language server (`haxeon-lsp.hl`, bundled `tools/haxeon-lsp`) | editor (`LanguageServiceClient.hx:83`) | **new**: scan; found under its editor | **yes (new)** | none known |
-| DevTools panel (`scripts/devtools.py`) | editor (`GraphicalMain.hx:252`) | **new**: scan (`python`); found | **yes (new)** | none known |
-| Profiler bridge (`$HAXEON_DEVTOOLS_RUNTIME $HAXEON_DEVTOOLS_BRIDGE --exosuit-helper=profiler-bridge`) | editor (`ProfilerProcess.hx:23`) | scan: the `--exosuit-helper=` marker, classed `helper`; found under its editor | **yes** | none known (dev-only) |
-| Build tasks, plugin `startProcess` | editor (`BuildController.hx:96`, `EditorApi.hx:104`) | not listed (the user's own commands) | no | by design; they end with their editor's process group |
-| suit daemon | editor / manager (`SuitClient.hx:302`), detached | daemon.json; `suit list --all` shows it | exits when nothing is left | none |
+| Agent provider: pi (`--mode rpc` + `pi-permissions-`) | workspace daemon (`PiProvider.hx`) | scan; found | **yes** | none known |
+| Claude name bridge (`node <helper> ROOT --exosuit-helper=claude-name-bridge`) | workspace daemon (`ClaudeNameBridge.hx`) | scan: the `--exosuit-helper=` marker (`SuitKinds.HELPER_MARKER`), classed `helper`; found under its daemon | **yes** | none known |
+| Haxeon language server (`haxeon-lsp.hl`, bundled `tools/haxeon-lsp`) | editor (`LanguageServiceClient.hx`) | scan; found under its editor | **yes** | none known |
+| DevTools panel (`scripts/devtools.py`) | editor (`GraphicalMain.hx`) | scan (`python`); found | **yes** | none known |
+| Profiler bridge (`$HAXEON_DEVTOOLS_RUNTIME $HAXEON_DEVTOOLS_BRIDGE --exosuit-helper=profiler-bridge`) | editor (`ProfilerProcess.hx`) | scan: the `--exosuit-helper=` marker, classed `helper`; found under its editor | **yes** | none known (dev-only) |
+| Build tasks, plugin `startProcess` | editor (`BuildController.hx`, `EditorApi.hx`) | not listed (the user's own commands) | no | by design; they end with their editor's process group |
+| suit daemon | editor (`SuitClient.hx`), detached | daemon.json; `suit list --all` shows it | exits when nothing is left | none |
 | suit viewer console (`cmd /c start ... suit watch`) | suit tray | not listed (read-only console) | no | harmless; it only reads |
 | suit at logon (`conhost --headless cmd /c ...suit-login\*.cmd`) | Windows Run key (opt-in) | not listed (it starts the daemon and exits) | n/a | none |
-| Short helpers (`--manager ... --discover/--detach/--wire`, `--machine`, git, reg.exe, update build) | editor, agent, suit | `--manager` helpers classed as managers; `--machine` now ignored (was misread as a daemon) | waited on by their caller | none |
+| Short helpers (git, reg.exe) | editor, agent, suit | not listed | waited on by their caller | none |
 | File and workspace watchers | in-process (`dir_watch.c`) | n/a: no process | end with their process | none |
 | Remote device sessions, the machine's relay connection | suit daemon (`suit/src/suit/remote`) | in-process; `suit remote`, `suit list --all`, tray "Paired devices" | **yes**: cut off at once by the full quit; remote access stays configured | none |
-| Workspace relay links (per-workspace hosting) | workspace daemon to suit (`SuitRelayHosting`) | `suit relay list` | yes (links closed; their daemons end) | none |
 | A phone's app | the user | its pairing and session in `suit remote` | cannot be quit; it is cut off (session and relay connection end, or the pairing is revoked) | inherent |
 
 Editors before what hosts them: under `run.py --live` the editor is the live host, a child (through `cmd /C`) of the
@@ -70,9 +68,9 @@ live session, which ends when the editor exits. So a stop never kills a launcher
 first, then the session gets the 3 s service grace to end by itself and is killed after it. An editor kept open over
 unsaved work (or one the stop did not choose, as with `kill --all`) keeps its session and launcher running too ("left
 running: an editor it hosts is still open"); this also holds for `suit kill <pid>` of one of them. A sweep never kills
-a registered editor, even one classed live host under a session being stopped. A terminal host is such a kind too
-(`run.py` typed into an Exosuit terminal runs the editor below the host): its end request is written only once the
-editors below it have exited, and the daemon ends a host the full Quit left running for an editor once no editor runs
+a linked editor, even one classed live host under a session being stopped. A terminal host is such a kind too
+(`run.py` typed into an Exosuit terminal runs the editor below the host): it is killed only once the editors below it
+have exited, and the daemon ends a host the full Quit left running for an editor once no editor runs
 in it, also after the quit's rounds.
 
 The quit's edges: a terminal host still starting (not registered, no `host.json` yet) whose parent is an owned

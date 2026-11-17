@@ -1,31 +1,14 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
-import workspace.client.WorkspaceRpcEndpoint;
 import workspace.client.RpcTerminalBackend;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
-
-private class ThemeEndpoint implements WorkspaceRpcEndpoint {
-  public final connection:RpcConnection;
-  final root:String;
-  final router:workspace.client.WorkspaceTerminalEvents;
-  public function new(root:String,connection:RpcConnection) {
-    this.root=root; this.connection=connection; router=new workspace.client.WorkspaceTerminalEvents(connection);
-  }
-  public function rootPath():Null<String> return root;
-  public function serviceGeneration():String return "theme-test";
-  public function workspaceEpoch():Null<String> return "theme-test";
-  public function rpcConnection():Null<RpcConnection> return connection;
-  public function failureReason():Null<String> return null;
-  public function supportsWorkspaceGroups():Bool return true;
-  public function hasCapability(value:String):Bool return true;
-  public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return router;
-}
 
 class TerminalThemeTests {
   static function require(value:Bool,message:String):Void { if (!value) throw message; }
@@ -62,9 +45,10 @@ class TerminalThemeTests {
       +"print('NOTIFIED:'+result.hex(),flush=True)\n");
     var clock=function() return Sys.time()*1000;
     var pair=MemoryTransport.pair(), client=new RpcConnection(pair.client,clock), server=new RpcConnection(pair.server,clock);
-    var manager=new WorkspaceTerminalManager("workspace","theme-test",root);
+    var manager=TestTerminals.manager("workspace","theme-test",root);
     manager.bind(server,[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL]);
-    var endpoint=new ThemeEndpoint(root,client);
+    var endpoint=new TestEndpoint(client);
+    endpoint.root=root;endpoint.generation="theme-test";endpoint.epoch="theme-test";
     var backend=new RpcTerminalBackend(function() return endpoint,"theme-shell",root,true);
     backend.setDefaultColors(0x202a36,0xffffff);
     var session=new TerminalSession(backend,Emulator.open(80,24,1000,"xterm-256color",false),false);

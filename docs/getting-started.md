@@ -9,9 +9,9 @@ package manifests use the pinned submodule sources.
 
 Linux x86-64 requires the NativeKit development dependencies, including
 Fontconfig/FreeType, OpenGL, GTK 3, WebKitGTK 4.1 and OpenSSL 3, plus CMake and
-Haxeon's provisioned compiler/runtime tools. Building the workspace daemon also
-requires `libsecret-1-dev` for its NativeKit credential-store module. Relay hosting
-uses the current user's Secret Service at runtime when enabled. `release.lock`
+Haxeon's provisioned compiler/runtime tools. Building also
+requires `libsecret-1-dev` for NativeKit's credential-store module. suit's remote
+access keeps the machine's keys in the current user's Secret Service. `release.lock`
 records the inputs qualified by the standalone release gate.
 
 ## Build and run

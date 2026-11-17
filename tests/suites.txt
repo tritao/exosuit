@@ -1,0 +1,94 @@
+# The test suites, in the order they run. scripts/test.sh (Linux, macOS) and scripts/test-windows.ps1 both read this
+# list; nothing else names the suites.
+#
+# Columns, separated by spaces:
+#   name      the step's name (-Only in test-windows.ps1)
+#   on        all, posix or windows
+#   kind      haxeon: `haxeon run --project <target> -- <fixture arguments>`
+#             python: a driver, `python3 <target> <arguments>` (`python` on Windows)
+#             bash:   `bash <target> <arguments>`
+#             check:  a check of test.sh's own, named after the step
+#   timeout   seconds before the runner (test.sh, test-windows.ps1) stops the suite
+#   fixture   - or the name of a setup each runner implements: it makes the suite's files and gives its arguments
+#   target    the project, script or -
+#   arguments the rest of the line, up to " # "
+# After " # ", a posix-only row says why Windows leaves it out.
+#
+# name                    on       kind     timeout  fixture            target                                       arguments
+plugin-host-bindings      posix    bash     600      -                  scripts/update-plugin-host-bindings.sh       --check  # Bash scripts that build with cc
+sqlite-native             posix    bash     600      -                  native-packages/sqlite/tests/run.sh                   # Bash scripts that build with cc
+terminal-native           posix    bash     600      -                  native-packages/terminal/tests/run.sh                 # Bash scripts that build with cc
+terminal-session-native   posix    bash     600      -                  native-packages/terminal/session/tests/run.sh         # Bash scripts that build with cc
+noise-native              posix    bash     600      -                  native-packages/noise/tests/run.sh                    # Bash scripts that build with cc
+processes-native          posix    bash     600      -                  native-packages/processes/tests/run.sh                # Bash scripts that build with cc
+# The core entry checks shared document editing without a simulated native host.
+core                      all      haxeon   300      -                  haxeon.json
+plugin-host               all      haxeon   300      -                  tests/plugin-host/haxeon.json
+command-clipboard         all      haxeon   300      -                  tests/command-clipboard/haxeon.json
+haxeon-rpc                all      haxeon   300      -                  tests/haxeon-rpc/haxeon.json
+workspace-catalog         all      haxeon   300      -                  tests/workspace-catalog/haxeon.json
+scm-git                   all      haxeon   300      -                  tests/scm-git/haxeon.json
+scm-watch                 all      haxeon   300      -                  tests/scm-watch/haxeon.json
+workspace-transport       posix    bash     600      -                  scripts/test-workspace-transport.sh                   # Bash scripts that build with cc
+workspace-scm             all      python   600      -                  scripts/test-workspace-scm.py
+relay                     posix    bash     600      -                  scripts/test-relay.sh                                 # Bash scripts that build with cc
+workspace-persistence     posix    bash     600      -                  scripts/test-workspace-persistence.sh                 # Bash scripts that build with cc
+workspace-attachment      all      python   600      -                  scripts/test-workspace-attachment.py
+agent-idle                all      python   400      -                  scripts/test-agent-idle.py
+workspace-terminals       all      python   600      -                  scripts/test-workspace-terminals.py
+terminal-hosts            windows  python   600      -                  scripts/test-terminal-hosts.py
+workspace-agents          all      python   400      -                  scripts/test-workspace-agents.py
+# Fake Claude, Codex and Pi peers only: never a real CLI, never a model.
+claude-agents             all      python   600      -                  scripts/test-claude-agents.py
+claude-session-names      all      python   120      -                  scripts/test-claude-session-names.py
+native-session-names      all      python   600      -                  scripts/test-native-session-names.py
+pi-agents                 all      python   600      -                  scripts/test-pi-agents.py
+pi-inputs                 all      python   600      -                  scripts/test-pi-agents.py                    --inputs
+workspace-rpc-wasm        posix    bash     600      -                  scripts/test-workspace-rpc-wasm.sh                    # Bash scripts that build with cc
+application-test          all      haxeon   300      -                  tests/application-test/haxeon.json
+problems                  all      haxeon   300      -                  tests/problems/haxeon.json
+live-build-feed           all      haxeon   300      -                  tests/live-build-feed/haxeon.json
+host-capabilities-test    all      haxeon   300      portable           tests/host-capabilities-test/haxeon.json
+command-test              all      haxeon   300      -                  tests/command-test/haxeon.json
+editor-view-test          all      haxeon   300      -                  tests/editor-view-test/haxeon.json
+tab-tooltip               all      haxeon   300      -                  tests/tab-tooltip/haxeon.json
+quick-picker              all      haxeon   300      -                  tests/quick-picker/haxeon.json
+narrow-tabs               all      haxeon   300      -                  tests/narrow-tabs/haxeon.json
+status-bar                all      haxeon   300      -                  tests/status-bar/haxeon.json
+terminal-context-menu     all      haxeon   300      portable           tests/terminal-context-menu/haxeon.json
+phone-last-view           all      haxeon   300      portable           tests/phone-last-view/haxeon.json
+sidebar-layout            all      haxeon   300      -                  tests/sidebar-layout/haxeon.json
+terminal-keys             all      haxeon   300      -                  tests/terminal-keys/haxeon.json
+workbench-drag            all      haxeon   300      -                  tests/workbench-drag/haxeon.json
+workbench-tree            all      haxeon   300      -                  tests/workbench-tree/haxeon.json
+context-snapshots         all      haxeon   300      -                  tests/context-snapshots/haxeon.json
+remote-access-panel       all      haxeon   300      -                  tests/remote-access-panel/haxeon.json
+directory-scan            posix    haxeon   300      unreadable-folder  tests/directory-scan/haxeon.json                      # needs a folder made unreadable with chmod 000
+process-test              posix    haxeon   300      process-cwd        tests/process-test/haxeon.json                        # needs build/process-fixture (tests/process_fixture.c built with cc)
+json-rpc-transport-test   all      haxeon   300      fake-lsp           tests/json-rpc-transport-test/haxeon.json
+language-service-test     all      haxeon   300      fake-lsp-project   tests/language-service-test/haxeon.json
+language-controller-test  all      haxeon   300      fake-lsp-project   tests/language-controller-test/haxeon.json
+configuration-test        all      haxeon   300      configuration      tests/configuration-test/haxeon.json
+document-test             all      haxeon   300      document           tests/document-test/haxeon.json
+document-save-mode        posix    check    60       -                  -                                                     # checks the file mode document-test kept (chmod)
+plugin-test               posix    haxeon   300      process-fixture    tests/plugin-test/haxeon.json                         # needs build/process-fixture (tests/process_fixture.c built with cc)
+workspace-test            posix    haxeon   300      workspace          tests/workspace-test/haxeon.json                      # needs build/process-fixture and an unreadable file (chmod 000)
+file-deletion             all      haxeon   300      file-deletion      tests/file-deletion/haxeon.json
+active-context            all      haxeon   300      state-and-roots    tests/active-context/haxeon.json
+layout-controls           all      haxeon   300      -                  tests/layout-controls/haxeon.json
+layout-modes              all      haxeon   300      -                  tests/layout-modes/haxeon.json
+agent-scope               all      haxeon   300      -                  tests/agent-scope/haxeon.json
+session-links             all      haxeon   300      -                  tests/session-links/haxeon.json
+session-chat-ui           all      haxeon   300      -                  tests/session-chat-ui/haxeon.json
+session-diff-regression   all      haxeon   300      -                  tests/session-diff-regression/haxeon.json
+agent-content-store       all      haxeon   300      content-store      tests/agent-content-store/haxeon.json
+# The native Codex adapter and proxy bridge against the deterministic fake peer; never a real inference turn.
+codex-history             all      haxeon   300      codex-history      tests/codex-history/haxeon.json
+path-key                  all      haxeon   300      -                  tests/path-key/haxeon.json
+workspace-target          all      haxeon   300      -                  tests/workspace-target/haxeon.json
+workspace-catalog-pool    all      haxeon   300      -                  tests/workspace-catalog-pool/haxeon.json
+project-scan-yield        all      haxeon   300      -                  tests/project-scan-yield/haxeon.json
+# Source compilation, compatible patches, structural reloads and failure rollback.
+dynamic-plugin-test       all      haxeon   300      dynamic-plugin     tests/dynamic-plugin-test/haxeon.json
+# suit itself, with its own isolated home and a real workspace service; not the editor window (--editor).
+suit                      windows  python   600      -                  scripts/test-suit.py                         --real-service

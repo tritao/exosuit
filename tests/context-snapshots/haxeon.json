@@ -4,7 +4,7 @@
   "entry": "app.ContextSnapshotsTestMain",
   "sourceRoots": ["src"],
   "scopeSourceRoots": false,
-  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "dependencies": { "exosuit-ui-tests": { "path": "../ui-support" } },
   "target": "host",
   "outputDir": "build"
 }

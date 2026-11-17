@@ -26,7 +26,7 @@ WATCH = [
     ("glyph append", "nkui::`anonymous namespace'::append_render_glyph"),
     ("render compile", "nkui::LayoutRenderCompiler::compile"),
     ("gpu timing readback", "nkui_renderer_get_gpu_frame_time"),
-    ("scm markers", "ui.ExosuitApp.syncScmDocumentMarkers"),
+    ("scm markers", "ui.ScmPanelController.syncScmDocumentMarkers"),
     ("pollBackground", "ui.ExosuitApp.pollBackground"),
     ("pumpApplication", "ui.ExosuitApp.pumpApplication"),
     ("anim requestFrame", "haxeon.ui.animation.AnimationScheduler.requestFrame"),

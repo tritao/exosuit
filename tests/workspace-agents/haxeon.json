@@ -4,6 +4,6 @@
  "entry":"app.AgentProviderTestMain",
  "sourceRoots":["src"],
  "scopeSourceRoots":false,
- "dependencies":{"exosuit-agent":{"path":"../../agent"}},
+ "dependencies":{"exosuit-agent":{"path":"../../agent"},"exosuit-model-tests":{"path":"../support"}},
  "target":"host","outputDir":"build"
 }

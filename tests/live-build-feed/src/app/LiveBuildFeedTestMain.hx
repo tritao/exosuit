@@ -4,8 +4,7 @@ import controller.LiveBuildFeed;
 import core.Application;
 import sys.FileSystem;
 import sys.io.File;
-import testing.model.ModelTextMetrics;
-import testing.model.ModelWorkbenchHost;
+import testing.HeadlessWorkbench;
 
 /**
 	The live watcher's events file (haxeon `run --watch --live`, HAXEON_WATCH_EVENTS) reaches Build Output's "Live build",
@@ -31,9 +30,7 @@ class LiveBuildFeedTestMain {
 		File.saveContent(project + "/src/ui/EditorPane.hx", "package ui;\n\nclass EditorPane {\n\tpublic function build(context:Int):Int {\n\t\treturn 0;\n\t}\n}\n");
 		var events = project + "/live.hl.watch-events.jsonl";
 
-		var metrics = new ModelTextMetrics("ignored-headlessly.ttf", 15),
-			application = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings)),
-			root:ModelWorkbenchHost = cast application.root;
+		var application = new Application(HeadlessWorkbench.create);
 		var feed = new LiveBuildFeed(application.root, events, project, 1000);
 		application.build.watchLive(feed);
 		var notifications = application.root.getNotifications();

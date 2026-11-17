@@ -7,9 +7,10 @@
   "sourceRoots": [
     "src"
   ],
+  "scopeSourceRoots": false,
   "dependencies": {
-    "pragtical_hx": {
-      "path": "../.."
+    "exosuit-ui-tests": {
+      "path": "../ui-support"
     },
     "exosuit-model-tests": {
       "path": "../support"

@@ -8,7 +8,7 @@ import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 /**
 	One workspace service's catalog as a window holds it: the workspace's own fields, its groups, and the sessions and
 	terminals in them. Pages from CATALOG are applied in order: a reset replaces everything, a delta upserts and removes.
-	It holds no content (docs/roadmap/RPC-VECTORS.md, "Workspace refs and the catalog watch").
+	It holds no content (docs/RPC-VECTORS.md, "Workspace refs and the catalog watch").
 **/
 class WorkspaceCatalogMirror {
 	public var name(default, null):String = "";

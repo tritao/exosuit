@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
@@ -9,18 +10,18 @@ import workspace.client.RpcTerminalBackend;
 
 /** The "Read only" strip must appear and disappear in the built tree as another client takes and gives back control. */
 @:access(ui.ExosuitApp)
+@:access(ui.TerminalTabs)
 class TerminalControlNoticeTests {
  static function require(ok:Bool,message:String):Void {if(!ok) throw message;}
  public static function run(fonts:haxeon.ui.FontCollection):Void {
   var clock=function() return Sys.time()*1000;
   var pair=MemoryTransport.pair(),connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
-  var endpoint=new NoticeEndpoint(connection);
+  var endpoint=new TestEndpoint(connection);endpoint.root="/tmp";endpoint.generation="owner";
   var controller=true;
   function info():TerminalInfo return {id:"shared",name:"Shared",cwd:"/tmp",state:"running",exitCode:0,columns:80,rows:24,
    start:Int64.ofInt(0),end:Int64.ofInt(0),restartable:true,historyAvailable:true,controller:controller,controlled:true,notifications:true};
   server.register(WorkspaceTerminalProtocol.OPEN,function(q,ctx) ctx.respond(info()));
   server.register(WorkspaceTerminalProtocol.REPLAY,function(q,ctx) ctx.respond({terminal:info(),events:[],next:Int64.ofInt(0),end:Int64.ofInt(0)}));
-  server.register(WorkspaceTerminalProtocol.OUTPUT,function(q,ctx) ctx.respond({terminal:info(),offset:q.offset,data:Bytes.alloc(0)}));
   server.register(WorkspaceTerminalProtocol.SET_CONTROL,function(q,ctx) {controller=q.claim;ctx.respond(info());});
   server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) ctx.respond(info()));
   function changed():Void server.notify(WorkspaceTerminalProtocol.CHANGED,{workspace:"workspace",instance:"owner",id:"shared"},WorkspaceTerminalProtocol.encodeChange);
@@ -62,13 +63,12 @@ class TerminalControlNoticeTests {
   for(inEditor in [false,true]) for(size in [[900.0,600.0],[390.0,800.0]]) {
    var clock=function() return Sys.time()*1000;
    var pair=MemoryTransport.pair(),connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
-   var endpoint=new NoticeEndpoint(connection);
+   var endpoint=new TestEndpoint(connection);endpoint.root="/tmp";endpoint.generation="owner";
    var controller=true;
    function info():TerminalInfo return {id:"shared",name:"Shared",cwd:"/tmp",state:"running",exitCode:0,columns:80,rows:24,
     start:Int64.ofInt(0),end:Int64.ofInt(0),restartable:true,historyAvailable:true,controller:controller,controlled:true,notifications:true};
    server.register(WorkspaceTerminalProtocol.OPEN,function(q,ctx) ctx.respond(info()));
    server.register(WorkspaceTerminalProtocol.REPLAY,function(q,ctx) ctx.respond({terminal:info(),events:[],next:Int64.ofInt(0),end:Int64.ofInt(0)}));
-   server.register(WorkspaceTerminalProtocol.OUTPUT,function(q,ctx) ctx.respond({terminal:info(),offset:q.offset,data:Bytes.alloc(0)}));
    server.register(WorkspaceTerminalProtocol.SET_CONTROL,function(q,ctx) {controller=q.claim;ctx.respond(info());});
    server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) ctx.respond(info()));
    function changed():Void server.notify(WorkspaceTerminalProtocol.CHANGED,{workspace:"workspace",instance:"owner",id:"shared"},WorkspaceTerminalProtocol.encodeChange);
@@ -80,10 +80,10 @@ class TerminalControlNoticeTests {
    var session=new terminalsession.TerminalSession(backend,terminalkit.Emulator.open(80,24),false);
    var pane=new ui.TerminalPane(session,app.requestFrame,new ui.TerminalPalette(false),fonts,backend);
    var tab=new ui.UiTerminalTab("shared","Shared","/tmp",pane,true,"shared","/tmp");
-   if(inEditor) app.host.attachTerminal(tab); else {app.host.panelTerminals.push(tab);app.host.activePanelTerminalIndex=0;app.openTerminalPanel();app.host.activePanelTerminalIndex=app.host.panelTerminals.indexOf(tab);}
+   if(inEditor) app.host.attachTerminal(tab); else {app.host.panelTerminals.push(tab);app.host.activePanelTerminalIndex=0;app.terminalTabs.openTerminalPanel();app.host.activePanelTerminalIndex=app.host.panelTerminals.indexOf(tab);}
    var root:haxeon.ui.core.RenderNode=null;
    function step():Void {
-    for(_ in 0...3) {server.poll();connection.poll();try pane.poll() catch(e:Dynamic) throw "pane.poll: "+Std.string(e)+haxe.CallStack.toString(haxe.CallStack.exceptionStack());app.pollTerminals();root=app.submit(new haxeon.ui.LayoutFrame(size[0],size[1]));}
+    for(_ in 0...3) {server.poll();connection.poll();try pane.poll() catch(e:Dynamic) throw "pane.poll: "+Std.string(e)+haxe.CallStack.toString(haxe.CallStack.exceptionStack());app.terminalTabs.pollTerminals();root=app.submit(new haxeon.ui.LayoutFrame(size[0],size[1]));}
    }
    function settle(want:Bool):Void {
     for(_ in 0...30) {step();if(backend.canControl()==want) break;}
@@ -110,23 +110,6 @@ class TerminalControlNoticeTests {
   root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Take control") found=true;});
   return found;
  }
-}
-
-private class NoticeEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final connection:RpcConnection;
- public function new(connection:RpcConnection) this.connection=connection;
- public function rootPath():Null<String> return "/tmp";
- public function serviceGeneration():String return "owner";
- public function rpcConnection():Null<RpcConnection> return connection;
- var router:Null<workspace.client.WorkspaceTerminalEvents>;
- public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
-  if(router==null) router=new workspace.client.WorkspaceTerminalEvents(connection);
-  return router;
- }
- public function failureReason():Null<String> return null;
- public function supportsWorkspaceGroups():Bool return true;
- public function workspaceEpoch():Null<String> return "epoch";
- public function hasCapability(capability:String):Bool return true;
 }
 
 private class StubTerminal implements ui.TerminalPanel {

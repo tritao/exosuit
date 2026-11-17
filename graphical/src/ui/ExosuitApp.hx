@@ -91,6 +91,7 @@ import scm.ScmSource;
  * via `overlayView()`), and `CommandBridge` for how `application.commands`
  * reaches this shell's command picker through `ui.commands`.
  */
+@:allow(ui.WorkbenchActions, ui.SuitWorkbenchMachine, ui.ScmPanelController, ui.AgentTabs, ui.TerminalTabs, ui.RemoteFileTabs, ui.ExosuitDiagnostics, ui.ExplorerPanelController, ui.ServedFolders, ui.SettingsTab, ui.ResponsiveLayout, ui.ContextSwitching, ui.DeviceWorkbenchMachine)
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 
@@ -105,45 +106,60 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 	public final theme:Theme;
 	var darkPalette:Bool;
-	final githubOrigins:Map<String, String> = [];
-	final githubOriginsPending:Map<String, Bool> = [];
-	final githubOriginsCheckedAt:Map<String, Float> = [];
 	final editorPalette:style.Theme;
 	final terminalPalette:TerminalPalette;
 	public final application:Application;
 	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
 	final desktop:Null<HostFileDialogs>;
-	var workbenchClient:Null<workspace.client.WorkspaceWorkbenchClient>;
-	var pairingClient:Null<workspace.client.WorkspacePairingClient>;
+	/** The client the Workbench shows the window's workspace through. */
+	public var workbenchClient(default, null):Null<workspace.client.WorkspaceWorkbenchClient>;
 	var remoteAccessPanel:Null<RemoteAccessPanel>;
-	var pairingRevision:Int = -1;
-	var machineWorkspaces:Null<workspace.client.MachineWorkspaces>;
 	var machineClient:Null<workspace.client.MachineClient>;
-	var sessionFolderChooser:Null<SessionFolderChooser>;
-	var machineActions:Null<WorkbenchMachineActions>;
-	final automationCommands:Bool = devtools.AutomationProbe.directoryFromEnvironment() != null;
-	/** Tells suit which context this window shows, so other windows can mark it (M19 Phase 8). */
-	var presence:workspace.WindowPresence = new workspace.WindowPresence(function() return Sys.time(), function(key) suit.SuitClient.editorFocus(key));
-	/** The context a window opened by Open in New Window was asked for (`--context=`), until it is applied. */
-	var startContext:Null<workspace.ContextInfo>;
+	/** The desktop's Workbench machine: suit's list of this machine's workspaces and the window's links to them. */
+	var suitWorkbench:Null<SuitWorkbenchMachine>;
+	/** What the Workbench's rows do to workspaces, on the machine the window is given (suit's, or a device's paired one). */
+	final workbenchActions:WorkbenchActions;
+	/** The Source Control view, the Changes tab and the editor's and sessions' source control. */
+	final sourceControl:ScmPanelController;
+	/** Agent session tabs and creating sessions. */
+	public final agentTabs:AgentTabs;
+	/** Terminal tabs, in the editor and the bottom panel. */
+	public final terminalTabs:TerminalTabs;
+	/** Tabs of files read through a workspace's service. */
+	final remoteFileTabs:RemoteFileTabs;
+	/** The automation state and diagnostic snapshot programs read. */
+	public final diagnostics:ExosuitDiagnostics;
+	/** The Files view. */
+	final explorer:ExplorerPanelController;
+	/** The folders the workspace service serves. */
+	final servedFolders:ServedFolders;
+	/** The Settings tab. */
+	public final settingsTab:SettingsTab;
+	/** How the dock follows the window's width. */
+	final responsive:ResponsiveLayout;
+	/** Moving the window between workspaces and groups. */
+	public final contexts:ContextSwitching;
+	/** The context last told to suit over the window's link, so other windows can mark it (M19 Phase 8). */
 	var presenceRevision = -1;
 	var presenceWorkspace:Null<String>;
 	var presenceMachine:Null<String>;
 	var machineClientRevision = -1;
-	var machineRefreshAt:Float = 0;
-	/** Catalog connections to every running workspace but the attached one, and the starter for idle ones (M19 Phase 6). */
-	var catalogConnections:Null<workspace.client.WorkspaceConnections>;
-	var workspaceStarter:Null<workspace.client.WorkspaceStarter>;
-	var catalogSyncKey = "";
-	var catalogRevision = -1;
-	var startingWorkspaces:Map<String, Bool> = [];
-	var startingRevision = 0;
-	var watchedKey = "";
-	var watchedStates:Map<String, WorkbenchWorkspaceState> = [];
-	var machinePanel:Null<MachinePanel>;
-	var machineRevision:Int = -1;
-	var lastTerminalCatalogRevision:Int = -1;
+	/** The folder this window last asked suit to open as a workspace (`openFolderWorkspace`); it is asked once. */
+	var folderOpening:Null<String>;
+	/** A quit suit asked for over the link: its answer, and whether it keeps unsaved work for the next start. */
+	var quitAnswer:Null<(Null<Dynamic>, Null<suit.control.ControlError>) -> Void>;
+	var quitRecovering = false;
+	/**
+		The window's links, one per workspace in use (desktop): the one it shows (`focus`), the running workspaces whose
+		rows are expanded, the workspaces with terminals here. A switch moves the focus between links that stay connected.
+	**/
+	var links:Null<workspace.client.WorkspaceLinks>;
+	var focus:Null<workspace.client.WorkspaceLink>;
+	/** The catalogs idle workspaces had when their services last ran: their rows, with nothing started. */
+	var snapshots:Null<workspace.client.CatalogSnapshots>;
+	/** The terminal list revision last applied to the tabs, by the workspace root of the link that read it. */
+	final terminalNameRevisions:Map<String, Int> = [];
 	var workbenchPanel:Null<WorkbenchPanel>;
 	/** The catalog instance that last had a group (the Agents layout stays while that workspace is open). */
 	var agentsLayoutInstance:String = "";
@@ -151,9 +167,6 @@ class ExosuitApp implements DesktopUiApplication {
 	var knownGroupsInstance:String = "";
 	final knownGroups:Map<String, Bool> = [];
 
- var codexPoll:Float=0;
- var nextActiveCodexRead:Float=0;
- var codexReadIndex:Int=0;
  var agentRevision=-1;
 	var agentAttach:Null<AgentAttachPanel>;
 	var workspaceAttachment:Null<workspace.client.WorkspaceAttachment>;
@@ -186,7 +199,6 @@ class ExosuitApp implements DesktopUiApplication {
 	var contextLayoutsReady:Bool = false;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
-	var nextTerminalId:Int = 1;
 	var pendingTerminalFocus:Bool = false;
 	final createWorkspaceTerminal:Null<(String, String, Bool, Void->Void, TerminalPalette, Null<String>, Null<String>)->TerminalPanel>;
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
@@ -200,28 +212,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerTree:Null<TreeView>;
 	var explorerRename:Null<ExplorerRename>;
 	var renamedExplorerPath:Null<String>;
-	/** The Source Control view's and Changes tab's source; in the Agents layout it narrows to the group's folder. */
-	final panelScm = new LocalScmSourceCache();
-	/** The editor's source while the panel's narrows (see editorSourceControlSource). */
-	final editorScm = new LocalScmSourceCache();
-	/** The sources behind Agent session controls, per session folder (see sessionSourceControlSource). */
-	final sessionScm = new SessionScmSources();
-	var sourceControlPanelValue:Null<SourceControlPanel>;
-	var sourceControlPanelIdentity:Null<String>;
-	final scmDecorationOwners:Map<String, Bool> = [];
-	final scmDecorationRevisions:Map<String, String> = [];
-	final scmDocumentMarkers:Map<Int, scm.ScmOpenDocumentMarkers> = [];
-	final scmDocumentMarkerKeys:Map<Int, String> = [];
-	final scmMarkerTargets:Map<Int, ScmMarkerTarget> = [];
-	/** The explorer root whose identity is cached, because normalizing it costs a file-system call on every poll. */
-	var scmBranchStatus:Null<plugin.PluginStatusItem>;
-	var scmPresentationSourceIdentity:Null<String>;
 	final scmBranches:ScmBranchController;
-	var pendingScmSource:Null<ScmSource>;
-	var pendingScmRepository:Null<scm.ScmRepository>;
-	var pendingScmGroup:Null<scm.ScmGroup>;
-	var pendingScmResource:Null<scm.ScmResource>;
-	var nextScmOperationId:Int = 1;
 	public var gutterMarkerClickHandler:Null<plugin.PluginGutterMarker->Void>;
 	final workspaceFileLoader = new WorkspaceFileLoader();
 	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
@@ -232,12 +223,6 @@ class ExosuitApp implements DesktopUiApplication {
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var settingsClosePending:Bool = false;
 	var closingSettingsTab:Null<UiSettingsTab>;
-	var settingsModels:Array<workspace.service.WorkspaceAgentProtocol.AgentModel> = [];
-	var settingsModelsNext:Null<String>;
-	var settingsModelsRetryCursor:Null<String>;
-	var settingsModelsPending:Bool = false;
-	var settingsModelsError:Null<String>;
-	var settingsModelsToken:Int = 0;
 	var contextMenu:Null<CommandMenu> = null;
 	var manageMenu:Null<CommandMenu> = null;
 	var layoutMenu:Null<CommandMenu> = null;
@@ -251,19 +236,12 @@ class ExosuitApp implements DesktopUiApplication {
 	**/
 	var eagerPollUntil:Float = 0.0;
 	var nextExplorerPoll:Float = 0.0;
-	var nextScmPoll:Float = 0.0;
-	final scmAutoFetchPending:Map<String, Bool> = [];
-	final scmAutoFetchLast:Map<String, Float> = [];
 	var visibleNotification:Null<feedback.Notification>;
 	var notificationPanel:Null<NotificationPanel>;
 	var notificationsVisible:Bool = false;
 	var notificationRevision:Int = -1;
-	final terminalErrors:Map<String, String> = [];
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
-	static inline var MINIMUM_COMPACT_WIDTH:Float = 480.0;
-	static inline var RESPONSIVE_RESTORE_MARGIN:Float = 48.0;
-	static inline var MINIMUM_CONTENT_WIDTH:Float = 320.0;
 	var responsiveRightHidden:Bool = false;
 	var desktopSidebarVisible:Bool = true;
 	var phoneLayoutActive:Bool = false;
@@ -284,6 +262,17 @@ class ExosuitApp implements DesktopUiApplication {
 			?createWorkspaceTerminal:(String, String, Bool, Void->Void, TerminalPalette, Null<String>, Null<String>)->TerminalPanel) {
 		this.createTerminal = createTerminal;
 		this.createWorkspaceTerminal = createWorkspaceTerminal;
+		workbenchActions = new WorkbenchActions(this);
+		sourceControl = new ScmPanelController(this);
+		agentTabs = new AgentTabs(this);
+		terminalTabs = new TerminalTabs(this);
+		remoteFileTabs = new RemoteFileTabs(this);
+		diagnostics = new ExosuitDiagnostics(this);
+		explorer = new ExplorerPanelController(this);
+		servedFolders = new ServedFolders(this);
+		settingsTab = new SettingsTab(this);
+		responsive = new ResponsiveLayout(this);
+		contexts = new ContextSwitching(this);
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
 		if (hostContext != null) hostContext.onBack = phoneBack;
@@ -319,11 +308,11 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
-		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
+		registerSidebarDestination("files", IconName.FolderOpen, explorer.explorerPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
 		registerSidebarDestination("search", IconName.Search, function() return searchPanel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true));
 		if (this.capabilities.supports(HostCapability.SourceControl))
-			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
+			registerSidebarDestination("scm", IconName.Hierarchy, sourceControl.sourceControlPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
 		dock = makeDock();
 		layoutControls = new WorkbenchLayoutControls(dock);
 		layoutModes = new WorkbenchLayoutModes(dock, sidebar, layoutControls, requestFrame, contextPanelProvidesDestinations);
@@ -353,10 +342,10 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
-		scmBranches = new ScmBranchController(host, sourceControlSource,
-			function(repository, through) return canCheckoutScmRepository(repository, through),
+		scmBranches = new ScmBranchController(host, sourceControl.sourceControlSource,
+			function(repository, through) return sourceControl.canCheckoutScmRepository(repository, through),
 			activateSidebarDestination, requestFrame, function(message) application.reportError("source-control", message),
-			function() return "ui-" + Std.string(nextScmOperationId++));
+			function() return "ui-" + Std.string(sourceControl.nextScmOperationId++));
 		if (hostContext != null) {
 			scmDirectoryWatch = new ScmDirectoryWatch(application.scm, hostContext.events);
 			application.onScmWatchPathsChanged = function(root, paths, excluded) {
@@ -387,12 +376,26 @@ class ExosuitApp implements DesktopUiApplication {
 		application.opensDirectly = UiImageTab.supports;
 		application.onBackgroundOpen = requestFrame;
 		host.configureKeybinding = function(command) {
-			openSettings();
+			settingsTab.openSettings();
 			settingsPanel.setShowAdvanced(true);
 			settingsPanel.select("editor/keyboard");
 		};
 		if (hostContext != null) hostContext.onCloseRequested = function(close) {
-			application.files.requestQuit(close);
+			// A quit suit asked for with `recover` closes at once: unsaved work stays in the recovery store for the next start.
+			if (quitRecovering) {
+				answerQuit();
+				close();
+				return;
+			}
+			application.files.requestQuit(function() {
+				answerQuit();
+				close();
+			}, function() {
+				// The user chose Cancel in a save prompt: the window stays, and suit is told so.
+				var answer = quitAnswer;
+				quitAnswer = null;
+				if (answer != null) answer(null, new suit.control.ControlError("permission_denied", "the user cancelled the quit"));
+			});
 			requestFrame();
 		};
 		application.language.onPresentationChanged = requestFrame;
@@ -428,7 +431,7 @@ class ExosuitApp implements DesktopUiApplication {
 			skipTrashConfirmation = false;
 			requestFrame();
 		};
-		application.files.renameInPlace = beginExplorerRename;
+		application.files.renameInPlace = explorer.beginExplorerRename;
 		application.files.chooseSaveDestination = function(document, handler) {
 			var initial = document.hasBackingPath() ? haxe.io.Path.directory(document.requirePath()) :
 				application.workspace.projects.length == 0 ? "" : application.workspace.projects[0].root;
@@ -457,7 +460,7 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		remoteFileSearch = new WorkspaceFileSearchController(function() return workspaceAttachment, requestFrame);
 		searchPanel = new WorkspaceSearchPanel(application, host, requestFrame,
-			remoteFileSearch, openWorkspaceSearchResult);
+			remoteFileSearch, remoteFileTabs.openWorkspaceSearchResult);
 		host.captureSidebar = function() {
 			if (phoneLayoutActive) {
 				var saved = sidebar.encode().split("|");
@@ -468,7 +471,7 @@ class ExosuitApp implements DesktopUiApplication {
 			sidebar.setVisible(dock.isOpen("explorer"));
 			return "B\tsidebar\t1\t" + sidebar.encode();
 		};
-		host.captureDockLayout = captureDockLayout;
+		host.captureDockLayout = responsive.captureDockLayout;
 		host.captureExtraLayout = function() return [layoutControls.capture(), layoutModes.captureContext()];
 		host.restoreExtraLayout = function(lines) { layoutControls.restore(lines); layoutModes.restoreContext(lines); };
 		host.captureWindowLayout = function() return [layoutModes.captureWindow()];
@@ -476,7 +479,7 @@ class ExosuitApp implements DesktopUiApplication {
 		host.beforeContextDetach = layoutModes.suspend;
 		layoutModes.beforeApply = function() {
 			if (!phoneLayoutActive) return;
-			var saved = haxeon.ui.docking.DockWorkspaceSnapshotCodec.decode(captureDockLayout());
+			var saved = haxeon.ui.docking.DockWorkspaceSnapshotCodec.decode(responsive.captureDockLayout());
 			if (saved == null) return;
 			phoneModeApplying = true; phoneLayoutActive = false;
 			sidebar.rememberWidth(desktopSidebarWidth);
@@ -487,7 +490,7 @@ class ExosuitApp implements DesktopUiApplication {
 			desktopDockRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 			desktopDockActivePanel = dock.activePanelId;
 			phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer"), "context-panel");
-			phoneLayoutActive = true; phoneModeApplying = false; syncPhoneDockRoot();
+			phoneLayoutActive = true; phoneModeApplying = false; responsive.syncPhoneDockRoot();
 		};
 		host.afterContextRestore = function() { layoutModes.resume(); layoutModes.refreshContext(); };
 		// A context shown for the first time keeps the side bar the window has now: its destination, width and whether
@@ -512,8 +515,8 @@ class ExosuitApp implements DesktopUiApplication {
 			activityRail.restore(application.settings.current.activityBar, layoutSaved);
 		};
 		host.activateSearch = function() showSidebarMode("search");
-		host.restoreAgent=makeAgentTab;
-  if (this.createTerminal != null || this.createWorkspaceTerminal != null) host.restoreTerminal = restoreTerminalTab;
+		host.restoreAgent=agentTabs.makeAgentTab;
+  if (this.createTerminal != null || this.createWorkspaceTerminal != null) host.restoreTerminal = terminalTabs.restoreTerminalTab;
 		host.caretRectProvider = function() {
 			var active = host.activeView();
 			if (active == null) return null;
@@ -524,10 +527,7 @@ class ExosuitApp implements DesktopUiApplication {
 		updateEditorPalette();
 		for (error in fontErrors) application.reportError("fonts", error);
 		installCommands();
-		// Once per session: a real window whose suit is off only because its state folder is temporary.
-		if (suit.SuitClient.takeTemporaryStateNotice())
-			host.getNotifications().publish(suit.SuitClient.TEMPORARY_STATE_MESSAGE, feedback.NotificationKind.Warning, "suit");
-		syncScmSidebar();
+		sourceControl.syncScmSidebar();
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
 		sidebar.rememberWidth(previousSidebarWidth);
 		application.settings.subscribe(function(value) {
@@ -546,7 +546,6 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		});
 		host.initializeContext(application.activeContext.key());
-		host.migrateContextKey = function(key) return workspace.ContextKey.migrate(key, application.activeContext.machineId, application.activeContext.contextWorkspaceId);
 		host.beforeContextRestore = function() {
 			phoneLayoutActive = false; responsiveRightHidden = false; desktopDockRoot = null; desktopDockActivePanel = null; phoneContentRoot = null;
 			contextMenu = null;
@@ -561,16 +560,11 @@ class ExosuitApp implements DesktopUiApplication {
 			else host.initializeContext(key);
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
-			clearExplorerModel(); clearLocalScmSource();
+			clearExplorerModel(); sourceControl.clearLocalScmSource();
 			for (root in roots) if (controller.SavedWorkspaceController.available(root)) application.scm.discover(root, _ -> requestFrame());
 			requestFrame();
-			applyPendingContextTarget(true);
-			for (id in pendingForgetWorkspaces.copy()) forgetDeletedWorkspace(id);
+			for (id in pendingForgetWorkspaces.copy()) contexts.forgetDeletedWorkspace(id);
 		});
-		application.savedWorkspaces.onIdentityAssigned = function(previous, next) {
-			application.activeContext.renameWorkspace(previous, next);
-			host.renameWorkspace(application.activeContext.machineId, previous, next);
-		};
 		application.activeContext.onMachineAssigned = function(id) host.renameMachine(id);
 		application.savedWorkspaces.onChanged = function() {
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
@@ -582,18 +576,6 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		if (desktop != null) {
-			application.savedWorkspaces.chooseOpen = function() desktop.openFile(function(accepted, paths) {
-				if (accepted && paths.length > 0) application.savedWorkspaces.open(paths[0]);
-				requestFrame();
-			}, "Open Workspace");
-			application.savedWorkspaces.chooseSaveAs = function() desktop.saveFile(function(accepted, paths) {
-				if (accepted && paths.length > 0) {
-					var file = paths[0];
-					if (!StringTools.endsWith(file, ".exosuit-workspace")) file += ".exosuit-workspace";
-					application.savedWorkspaces.saveAs(file);
-				}
-				requestFrame();
-			}, "Save Workspace As", null, "Workspace.exosuit-workspace");
 			application.savedWorkspaces.chooseFolder = function() desktop.selectDirectory(function(accepted, paths) {
 				if (accepted && paths.length > 0) application.savedWorkspaces.addFolder(paths[0]);
 				requestFrame();
@@ -601,8 +583,8 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		application.session.start();
 		contextLayoutsReady = true;
-		if (openPath != null) openArgument(openPath, true);
-		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
+		if (openPath != null) openArgument(openPath);
+		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) terminalTabs.openTerminal();
 		layoutModes.start(application.settings.current.layoutMode);
 	}
 
@@ -622,7 +604,7 @@ class ExosuitApp implements DesktopUiApplication {
 			new DockPanelContent("explorer", function(_) {
 				var view = new haxeon.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar,
 					function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id), true);
-				view.headerActions = function(id) return id == "files" ? explorerHeaderActions()
+				view.headerActions = function(id) return id == "files" ? explorer.explorerHeaderActions()
 					: id == "workbench" && workbenchPanel != null ? workbenchPanel.headerActions(sidebar.width) : null;
 				view.headerActionsVisible = function(node) {
 					if (sidebar.activeId == "workbench") return true;
@@ -640,7 +622,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (capabilities.supports(Processes))
 			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host, application.activeContext.kind == workspace.ContextKind.Group ? application.activeContext.roots : null)));
 		if (terminalUiAvailable)
-			dockPanelContents.push(new DockPanelContent("terminal", function(_) return terminalPanel()));
+			dockPanelContents.push(new DockPanelContent("terminal", function(_) return terminalTabs.terminalPanel()));
 		var bottom = capabilities.supports(Processes) ? DockNode.Tabs(["problems", "build"], "problems") : DockNode.Panel("problems");
 		var main = DockNode.Split(DockSplitAxis.Horizontal, 0.22,
 			DockNode.Panel("explorer"),
@@ -692,7 +674,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.invalidateRail();
 		if (phoneModeApplying) { requestFrame(); return; }
 		if (phoneLayoutActive) {
-			syncPhoneDockRoot();
+			responsive.syncPhoneDockRoot();
 		} else if (!sidebar.visible) {
 			if (dock.isOpen("explorer")) dock.close("explorer");
 		} else {
@@ -702,501 +684,6 @@ class ExosuitApp implements DesktopUiApplication {
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		requestFrame();
-	}
-
-	/** Evaluate the saved splits, even while secondary panels are suppressed. */
-	function preferredContentWidth(node:DockNode, width:Float):Float {
-		return switch node {
-			case Split(axis, ratio, first, second):
-				var firstWidth = width;
-				var secondWidth = width;
-				if (axis == DockSplitAxis.Horizontal) {
-					var extent = switch first { case Panel("explorer"): sidebar.width; case _: ratio * width; };
-					firstWidth = Math.max(DockWorkspace.MinimumHorizontalExtent,
-						Math.min(extent,Math.max(DockWorkspace.MinimumHorizontalExtent,width-DockWorkspace.MinimumHorizontalExtent)));
-					secondWidth = Math.max(0,width-firstWidth-DockWorkspace.DividerExtent);
-				}
-				haxeon.ui.docking.DockNodeTools.contains(first,host.activePane.id)
-					? preferredContentWidth(first,firstWidth) : preferredContentWidth(second,secondWidth);
-			case _: width;
-		};
-	}
-
-	function syncResponsiveRightLayout():Void {
-		if (phoneLayoutActive) { responsiveRightHidden = true; return; }
-		var margin = responsiveRightHidden ? RESPONSIVE_RESTORE_MARGIN : 0;
-		var open = dock.isOpen("context-panel");
-		var workspaceWidth = Math.max(0,viewportWidth-ActivityBar.WIDTH);
-		var available = preferredContentWidth(dock.root,workspaceWidth);
-		// The panel's split cannot give either side less than DockWorkspace.MinimumHorizontalExtent, so the panel
-		// needs room for its own minimum beside a usable content area; otherwise it would overflow the window.
-		var region = contextRegionWidth(dock.root,workspaceWidth,workspaceWidth);
-		responsiveRightHidden = open && (available < MINIMUM_CONTENT_WIDTH + margin
-			|| region < MINIMUM_CONTENT_WIDTH + DockWorkspace.DividerExtent + DockWorkspace.MinimumHorizontalExtent + margin);
-	}
-
-	/** The width of the split that holds the right panel, after the splits above it (the sidebar) took their share. */
-	function contextRegionWidth(node:DockNode, width:Float, parentWidth:Float):Float {
-		return switch node {
-			case Split(axis, ratio, first, second):
-				var inFirst = haxeon.ui.docking.DockNodeTools.contains(first,"context-panel");
-				if (!inFirst && !haxeon.ui.docking.DockNodeTools.contains(second,"context-panel")) return width;
-				var firstWidth = width;
-				var secondWidth = width;
-				if (axis == DockSplitAxis.Horizontal) {
-					var extent = switch first { case Panel("explorer"): sidebar.width; case _: ratio * width; };
-					firstWidth = Math.max(DockWorkspace.MinimumHorizontalExtent,
-						Math.min(extent,Math.max(DockWorkspace.MinimumHorizontalExtent,width-DockWorkspace.MinimumHorizontalExtent)));
-					secondWidth = Math.max(0,width-firstWidth-DockWorkspace.DividerExtent);
-				}
-				var child = inFirst ? first : second;
-				switch child {
-					case Split(_, _, _, _): contextRegionWidth(child,inFirst ? firstWidth : secondWidth,width);
-					case _: width;
-				}
-			case _: parentWidth;
-		};
-	}
-
-	/** At phone width, show the sidebar or editor as one full-width workspace. */
-	function syncResponsiveDockLayout():Void {
-		var preferredSidebarWidth = phoneLayoutActive ? desktopSidebarWidth : sidebar.width;
-		var prefersSidebar = phoneLayoutActive ? desktopSidebarVisible : sidebar.visible;
-		var compactWidth = Math.max(MINIMUM_COMPACT_WIDTH, ActivityBar.WIDTH + MINIMUM_CONTENT_WIDTH
-			+ (prefersSidebar ? preferredSidebarWidth + DockWorkspace.DividerExtent : 0));
-		var phone = viewportWidth > 0 && viewportWidth <= compactWidth
-			+ (phoneLayoutActive ? RESPONSIVE_RESTORE_MARGIN : 0);
-
-		if (phone) {
-			if (!phoneLayoutActive) {
-				desktopSidebarWidth = sidebar.width;
-				desktopSidebarVisible = sidebar.visible;
-				desktopDockRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
-				desktopDockActivePanel = dock.activePanelId;
-				phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer"), "context-panel");
-				phoneLayoutActive = true;
-				// An open editor/agent/terminal remains the task when the window narrows.
-				if ((host.activeTab() != null && desktopDockActivePanel != "explorer") || desktopDockActivePanel == "terminal") sidebar.setVisible(false);
-			} else if (!sidebar.visible) {
-				phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
-			}
-			syncPhoneDockRoot();
-			return;
-		}
-		if (!phoneLayoutActive) return;
-
-		if (!sidebar.visible) phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
-		phoneLayoutActive = false;
-		phoneModeApplying = true;
-		sidebar.setVisible(desktopSidebarVisible);
-		sidebar.rememberWidth(desktopSidebarWidth);
-		phoneModeApplying = false;
-		var restored = sidebar.visible ?
-			(desktopDockRoot == null ? haxeon.ui.docking.DockNodeTools.clone(dock.root) :
-				haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot)) :
-			(phoneContentRoot == null ? haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer") :
-				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot));
-		if (!sidebar.visible) restored = haxeon.ui.docking.DockNodeTools.remove(restored, "explorer");
-		if (desktopDockRoot != null && haxeon.ui.docking.DockNodeTools.contains(desktopDockRoot, "context-panel") && !haxeon.ui.docking.DockNodeTools.contains(restored, "context-panel"))
-			restored = layoutControls.withRight(restored);
-		if (!haxeon.ui.docking.DockNodeTools.same(dock.root, restored)) dock.setRoot(restored);
-		if (sidebar.visible && !dock.isOpen("explorer")) {
-			var target = dock.isOpen(host.activePane.id) ? host.activePane.id :
-				haxeon.ui.docking.DockNodeTools.firstPanel(dock.root);
-			if (target == null) dock.open("explorer");
-			else dock.dock("explorer", target, DockDropZone.Left);
-		} else if (!sidebar.visible && desktopDockActivePanel != null && dock.isOpen(desktopDockActivePanel)) {
-			dock.activate(desktopDockActivePanel);
-		}
-		desktopDockRoot = null;
-		desktopDockActivePanel = null;
-		phoneContentRoot = null;
-	}
-
-	function syncPhoneDockRoot():Void {
-		if (!phoneLayoutActive) return;
-		var target = sidebar.visible ? DockNode.Panel("explorer") :
-			(phoneContentRoot == null ? haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer") :
-				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot));
-		if (!haxeon.ui.docking.DockNodeTools.same(dock.root, target)) dock.setRoot(target);
-	}
-
-	function captureDockLayout():String {
-		if (!phoneLayoutActive || desktopDockRoot == null) return dock.snapshotJson();
-		var layout:DockNode;
-		var active:Null<String>;
-		if (desktopSidebarVisible) {
-			layout = haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot);
-			if (!haxeon.ui.docking.DockNodeTools.contains(layout, "explorer")) {
-				var content = phoneContentRoot == null ?
-					haxeon.ui.docking.DockNodeTools.remove(layout, "explorer") :
-					haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot);
-				var width = Math.max(1.0, 1280.0 - ActivityBar.WIDTH - DockWorkspace.DividerExtent);
-				layout = DockNode.Split(DockSplitAxis.Horizontal, Math.min(0.9, desktopSidebarWidth / width),
-					DockNode.Panel("explorer"), content);
-			}
-			active = "explorer";
-		} else {
-			layout = phoneContentRoot == null ?
-				haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer") :
-				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot);
-			active = desktopDockActivePanel;
-		}
-		if (haxeon.ui.docking.DockNodeTools.contains(desktopDockRoot, "context-panel") && !haxeon.ui.docking.DockNodeTools.contains(layout, "context-panel"))
-			layout = layoutControls.withRight(layout);
-		if (active != null && !haxeon.ui.docking.DockNodeTools.contains(layout, active))
-			active = haxeon.ui.docking.DockNodeTools.firstPanel(layout);
-		return haxeon.ui.docking.DockWorkspaceSnapshotCodec.encode(
-			new haxeon.ui.docking.DockWorkspaceSnapshot(layout, active));
-	}
-
-	function terminalUiAvailable():Bool return createTerminal != null || createWorkspaceTerminal != null;
-
-	/** A remote attachment must never fall back to a browser/local shell. */
-	public function terminalCreationFailure():Null<String> {
-		var client = workbenchClient;
-		if (client != null) {
-			if (createWorkspaceTerminal == null) return "This host cannot display workspace terminals";
-			if (!client.canReadTerminals()) return "Workspace disconnected or terminal read permission was not granted";
-			if (!client.canControlTerminals()) return "Terminal creation requires terminal control permission";
-			if (!client.canCreateTerminals()) return "Terminal creation is unavailable for this workspace";
-			return null;
-		}
-		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess())
-			return "Connect to a workspace with terminal control permission";
-		return capabilities.supports(Processes) && terminalUiAvailable() ? null : "Connect to a workspace to create a terminal";
-	}
-
-	function canCreateTerminal():Bool return terminalCreationFailure() == null;
-	function canShowTerminal():Bool return host.activePanelTerminal() != null || canCreateTerminal();
-	function activeTerminal():Null<UiTerminalTab> {
-		var active = host.activeTab(), terminal = active == null ? null : UiEditorTabs.terminal(active);
-		return terminal == null ? host.activePanelTerminal() : terminal;
-	}
-	function terminalPaneOf(terminal:Null<UiTerminalTab>):Null<TerminalPane>
-		return terminal == null || terminal.disposed ? null : Std.downcast(terminal.panel, TerminalPane);
-	function canCopyTerminalSelection():Bool {
-		var pane = terminalPaneOf(activeTerminal());
-		return pane != null && pane.selectedText() != null;
-	}
-	function copyTerminalSelection():Void {
-		var pane = terminalPaneOf(activeTerminal());
-		if (pane != null) pane.copySelection(ui.buildContext.clipboard);
-	}
-	function canTerminateTerminal():Bool {
-		var terminal = activeTerminal();
-		return terminal != null && (!terminal.remote || (workbenchClient != null && workbenchClient.canControlTerminals()));
-	}
-
-	public function newTerminal():Void {
-		var terminal = newTerminalTab();
-		if (terminal == null) return;
-		if (sidebar.activeId == "workbench") showTerminalInEditor(terminal);
-		else {
-			host.panelTerminals.push(terminal);
-			host.activePanelTerminalIndex = host.panelTerminals.length - 1;
-			openTerminalPanel();
-		}
-	}
-
-	public function openTerminal():Void {
-        if (sidebar.activeId == "workbench") {
-            var terminal = newTerminalTab();
-            if (terminal != null) showTerminalInEditor(terminal);
-            return;
-        }
-        openTerminalPanel();
-    }
-
-    function openTerminalPanel():Void {
-		if (!terminalUiAvailable()) return;
-		if (host.panelTerminals.length == 0) {
-			var terminal = newTerminalTab();
-			if (terminal == null) return;
-			host.panelTerminals.push(terminal);
-			host.activePanelTerminalIndex = 0;
-		}
-		if (!layoutControls.bottomOpen()) layoutControls.toggleBottom();
-		if (!dock.isOpen("terminal")) {
-			if (dock.isOpen("build")) dock.open("terminal", "build");
-			else if (dock.isOpen("problems")) dock.open("terminal", "problems");
-			else dock.dock("terminal", host.activePane.id, DockDropZone.Bottom);
-		}
-		dock.activate("terminal");
-		pendingTerminalFocus = true;
-		requestFrame();
-	}
-
-    function showTerminalInEditor(terminal:UiTerminalTab):Void {
-        terminal.retainOnClose = true;
-        host.attachTerminal(terminal);
-        if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
-        if (workbenchPanel != null && sidebar.activeId == "workbench") workbenchPanel.revealNode(WorkbenchRowKey.terminal(terminal.resourceId));
-        dock.close("terminal");
-        pendingTerminalFocus = false;
-        requestFrame();
-    }
-
-	function newTerminalTab(?group:String, ?agentProvider:String, ?directory:String):Null<UiTerminalTab> {
-		var failure = terminalCreationFailure();
-		if (failure != null) { application.reportError("terminal", failure); return null; }
-		var client = workbenchClient;
-		if (client != null) {
-			var catalog = client.terminalCatalog();
-			var root = workspaceAttachment == null ? null : workspaceAttachment.fileScope();
-			if (root == null && catalog != null) root = catalog.workspaceRoot;
-			if (root == null) { application.reportError("terminal", "Workspace is not connected"); return null; }
-			if (group == null && application.activeContext.kind == workspace.ContextKind.Group) group = application.activeContext.id;
-			// The service puts a terminal with no group at the workspace root,
-			// and resolves the group's inherited directory against the workspace root.
-			if (!client.canCreateGroupedTerminals()) group = null;
-			var cwd = application.activeContext.kind == workspace.ContextKind.Group ? application.activeContext.cwd : root;
-			if (group != null && workbenchPanel != null) {
-				var selected = workbenchPanel.model.groups.get(group);
-				if (selected != null) {
-					var groupFolder = workbenchPanel.model.directory(selected);
-					if (groupFolder != null) cwd = groupFolder;
-				}
-			}
-			if (directory != null) cwd = directory;
-			var resource = workspace.client.WorkspaceIds.create("workspace-terminal");
-			return createTerminalTab(ResourceViewIdentity.view(root, resource), agentProvider == null ? "Terminal" : agentProvider,
-				cwd, false, true, resource, root, group, directory, agentProvider);
-		}
-		var number = allocateTerminalNumber(), title = "Terminal " + number;
-		var id = createWorkspaceTerminal != null && application.workspace.activeProject != null
-			? workspace.client.WorkspaceIds.create("workspace-terminal") : "terminal-" + number;
-		return createTerminalTab(id, title, application.activeContext.cwd, false);
-	}
-
-	function allocateTerminalNumber():Int {
-		var used:Map<String, Bool> = [];
-		for (terminal in host.allTerminalTabs()) if (!terminal.disposed) used.set(terminal.title, true);
-		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
-		if (catalog != null) for (record in catalog.terminals) used.set(record.name, true);
-		while (used.exists("Terminal " + nextTerminalId) || host.terminalNumberInUse(nextTerminalId)) nextTerminalId++;
-		return nextTerminalId++;
-	}
-
-	function restoreTerminalTab(id:String, title:String, cwd:String, remote:Bool,resource:String, workspaceRoot:String):Null<UiTerminalTab>
-		{
-            var terminal = createTerminalTab(id,title,cwd,true,remote,resource,workspaceRoot);
-            if (terminal != null && remote) terminal.retainOnClose = true;
-            return terminal;
-        }
-
-	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String, ?agentProvider:String):Null<UiTerminalTab> {
-		var isRemote = remoteOwner == null ? StringTools.startsWith(id, "workspace-terminal-") : remoteOwner;
-		if (restored && !isRemote && ~/^Terminal [1-9][0-9]*$/.match(title)) {
-			for (existing in host.allTerminalTabs()) if (!existing.disposed && existing.title == title) {
-				title = "Terminal " + allocateTerminalNumber();
-				break;
-			}
-		}
-		var create = createTerminal;
-		var remote = createWorkspaceTerminal;
-		if (isRemote ? remote == null : create == null) return null;
-		// A terminal of a workspace with a service of its own belongs to that service, whichever of the workspace's
-		// folders it was made under: the service names its own root. That is the folder the running service started in
-		// (a scratch folder, say, before a folder was attached), once this window is attached to it.
-		if (isRemote && workspaceRoot != null) {
-			var service = terminalServiceTarget(workspaceRoot), serviceRoot = service == null ? null : service.root();
-			if (service != null && Std.isOfType(workspaceAttachment, workspace.client.LocalWorkspaceClient)) {
-				var local:workspace.client.LocalWorkspaceClient = cast workspaceAttachment;
-				if (local.servedWorkspace() == service.workspace && local.rootPath() != null) serviceRoot = local.rootPath();
-			}
-			if (serviceRoot != null) workspaceRoot = serviceRoot;
-		}
-		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
-		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
-		var localDirectory = isRemote ? cwd : FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
-		try {
-			var panel:TerminalPanel;
-			if (remote != null && isRemote)
-				panel = remote(resource == null ? id : resource, workspaceRoot == null ? cwd : workspaceRoot,
-					restored, requestFrame, terminalPalette, group, directory);
-			else if (create != null)
-				panel = create(localDirectory, requestFrame, terminalPalette);
-			else
-				return null;
-			if (agentProvider != null) {
-				if (!Std.isOfType(panel, AgentTerminalPanel)) { panel.close(); throw "This terminal host cannot launch agent CLIs"; }
-				var agentPanel:AgentTerminalPanel = cast panel;
-				try agentPanel.configureAgent(agentProvider) catch (failure:Dynamic) { panel.close(); throw failure; }
-			}
-			return new UiTerminalTab(id, title, cwd, panel,isRemote,resource,workspaceRoot);
-		} catch (error:Dynamic) {
-			statusMessage = "Terminal: " + Std.string(error);
-			application.reportError("terminal", Std.string(error));
-			return null;
-		}
-	}
-
-	public function moveTerminalToEditor():Bool {
-        if (sidebar.activeId == "workbench") {
-            var existing = host.activePanelTerminal();
-            if (existing != null) showTerminalInEditor(existing);
-            else if (host.activeTab() == null || UiEditorTabs.terminal(host.activeTab()) == null) openTerminal();
-            return host.activeTab() != null && UiEditorTabs.terminal(host.activeTab()) != null;
-        }
-		openTerminalPanel();
-		var terminal = host.activePanelTerminal();
-		if (terminal == null) return false;
-		host.panelTerminals.splice(host.activePanelTerminalIndex, 1);
-		host.activePanelTerminalIndex = Std.int(Math.min(host.activePanelTerminalIndex, host.panelTerminals.length - 1));
-		if (host.panelTerminals.length == 0) dock.close("terminal");
-		host.attachTerminal(terminal);
-		pendingTerminalFocus = false;
-		requestFrame();
-		return true;
-	}
-
-	public function moveTerminalToPanel():Bool {
-		var item = host.activeTab();
-		var terminal = item == null ? null : UiEditorTabs.terminal(item);
-		if (terminal == null || !host.detachTerminal(terminal)) return false;
-		host.panelTerminals.push(terminal);
-		host.activePanelTerminalIndex = host.panelTerminals.length - 1;
-		openTerminalPanel();
-		return true;
-	}
-
-	function toggleTerminal():Void {
-		if (dock.isOpen("terminal")) {
-			dock.close("terminal");
-			requestFrame();
-		} else openTerminal();
-	}
-
-	function terminalCommandSkipsShell(id:String):Bool
-		return TerminalShortcutPolicy.allows(id, application.settings.current.terminalCommandsToSkipShell);
-
-	function terminalPanel():View {
-		if (host.panelTerminals.length == 0) return placeholderPanel("Terminal is closed.");
-		var items:Array<TabItem> = [];
-		for (terminal in host.panelTerminals) {
-			var view = new TerminalTabView(terminal, function() {
-				host.deactivateDocumentFocus();
-			}, function(_, id) {
-				if (pendingTerminalFocus && host.activePanelTerminal() == terminal) {
-					ui.buildContext.requestFocusAfterLayout(id);
-					pendingTerminalFocus = false;
-				}
-			}, function(event) {
-				host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
-				showTerminalContextMenu(terminal, event);
-			}, terminalCommandSkipsShell);
-			if (host.panelTerminals.length == 1) return view;
-			items.push(new TabItem("terminal:" + terminal.id, terminal.title, view));
-		}
-		var options = terminalTabsOptions();
-		options.onTabContextMenu = function(key, event) {
-			for (terminal in host.panelTerminals) if (key == "terminal:" + terminal.id) {
-				host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
-				showTerminalContextMenu(terminal, event);
-				return;
-			}
-		};
-		var active = host.activePanelTerminal();
-		return Tabs.withOptions("terminal-sessions", items, active == null ? "" : "terminal:" + active.id, function(key) {
-			for (index in 0...host.panelTerminals.length) if (key == "terminal:" + host.panelTerminals[index].id) {
-				host.activePanelTerminalIndex = index;
-				pendingTerminalFocus = true;
-				requestFrame();
-			}
-		}, options);
-	}
-
-	function terminalTabsOptions():TabsOptions {
-		var options = new TabsOptions();
-		options.selectionMode = TabsSelectionMode.Controlled;
-		var style = new LayoutStyle();
-		style.width = LayoutAxis.grow();
-		style.height = LayoutAxis.grow();
-		options.style = style;
-		return options;
-	}
-
-	public function openSettings():Void {
-		host.closeCommandView();
-		for (pane in host.panes) for (item in pane.items) {
-			var existing = UiEditorTabs.settings(item);
-			if (existing != null) {
-				settingsPanel = existing.panel;
-				existing.panel.requestSearchFocus();
-				host.activateEditorTab(UiSettingsTab.KEY, pane.id); requestFrame(); return;
-			}
-		}
-		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
-		var tab = new UiSettingsTab(settingsPanel);
-		tab.content = function(paneId) {
-			if (tab.panel.catalog.store != application.settings.store) {
-				var previous = tab.panel;
-				tab.panel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
-				tab.panel.setShowAdvanced(previous.showAdvanced);
-				tab.panel.setModifiedOnly(previous.modifiedOnly);
-				if (previous.restartOnly) tab.panel.showRestartChanges();
-				tab.panel.setFilter(previous.filter);
-				if (previous.selectedCategory != null) tab.panel.select(previous.selectedCategory);
-			}
-			settingsPanel = tab.panel;
-			return new SettingsTabView(tab, requestFrame, function(bounds, id) host.editorResolved(paneId, bounds, id));
-		};
-		tab.requestClose = function() {
-			if (!tab.panel.hasUnsavedChanges()) return true;
-			closingSettingsTab = tab; settingsClosePending = true; requestFrame(); return false;
-		};
-		tab.onClosed = function() {
-			tab.panel.discardUnsavedChanges();
-			if (settingsPanel == tab.panel) {
-				settingsPanel = null; settingsModelsToken++; settingsModelsPending = false;
-			}
-			if (closingSettingsTab == tab) { closingSettingsTab = null; settingsClosePending = false; }
-			requestFrame();
-		};
-		tab.panel.requestSearchFocus();
-		host.attachSettings(tab);
-		settingsModels = [];
-		settingsModelsNext = null;
-		settingsModelsPending = false;
-		settingsModelsError = null;
-		loadSettingsModels(null);
-		requestFrame();
-	}
-
-	function settingsModelPickerState():SettingsModelPickerState {
-		return new SettingsModelPickerState(settingsModelsPending, settingsModelsError, settingsModelsNext != null,
-			function() loadSettingsModels(null), function() loadSettingsModels(settingsModelsNext),
-			function() loadSettingsModels(settingsModelsRetryCursor));
-	}
-
-	function loadSettingsModels(cursor:Null<String>):Void {
-		if (settingsModelsPending) return;
-		settingsModelsRetryCursor = cursor;
-		var client = workbenchClient == null ? null : workbenchClient.agentService();
-		if (client == null) {
-			settingsModelsError = "Connect a workspace to load Codex models";
-			requestFrame();
-			return;
-		}
-		settingsModelsPending = true;
-		settingsModelsError = null;
-		var token = ++settingsModelsToken;
-		client.listModels(cursor, function(page, error) {
-			if (token != settingsModelsToken || settingsPanel == null) return;
-			settingsModelsPending = false;
-			if (error != null || page == null) settingsModelsError = error == null ? "Could not load Codex models" : error;
-			else {
-				if (cursor == null) settingsModels = [];
-				for (model in page.models) {
-					var found = false;
-					for (existing in settingsModels) if (existing.model == model.model) found = true;
-					if (!found) settingsModels.push(model);
-				}
-				settingsModelsNext = page.next;
-			}
-			requestFrame();
-		});
 	}
 
 	public function setApplicationZoom(percent:Int):Void {
@@ -1278,88 +765,88 @@ class ExosuitApp implements DesktopUiApplication {
 			new Shortcut(76 /* L */, UiModifier.Control | UiModifier.Alt), function() return !phoneLayoutActive));
 		ui.commands.register(new Command("view.toggle-palette", "Toggle Command Palette",
 			togglePalette, new Shortcut(80 /* P */, UiModifier.Control | UiModifier.Shift)));
-		if (terminalUiAvailable())
-			ui.commands.register(new Command("view.terminal", "Toggle Terminal", toggleTerminal,
-				new Shortcut(96 /* ` */, UiModifier.Control), canShowTerminal));
-		if (terminalUiAvailable()) {
-			ui.commands.register(new Command("terminal:new", "New Terminal", newTerminal,
-				new Shortcut(96 /* ` */, UiModifier.Control | UiModifier.Shift), canCreateTerminal));
-			ui.commands.register(new Command("terminal:browse", "Show Workspace Terminals", openWorkspaceTerminals, null, function() return workbenchClient != null && workbenchClient.canReadTerminals()));
+		if (terminalTabs.terminalUiAvailable())
+			ui.commands.register(new Command("view.terminal", "Toggle Terminal", terminalTabs.toggleTerminal,
+				new Shortcut(96 /* ` */, UiModifier.Control), terminalTabs.canShowTerminal));
+		if (terminalTabs.terminalUiAvailable()) {
+			ui.commands.register(new Command("terminal:new", "New Terminal", terminalTabs.newTerminal,
+				new Shortcut(96 /* ` */, UiModifier.Control | UiModifier.Shift), terminalTabs.canCreateTerminal));
+			ui.commands.register(new Command("terminal:browse", "Show Workspace Terminals", terminalTabs.openWorkspaceTerminals, null, function() return workbenchClient != null && workbenchClient.canReadTerminals()));
 			ui.commands.register(new Command("terminal:terminate", "Terminate Active Terminal", function() {
-				var terminal = activeTerminal();
+				var terminal = terminalTabs.activeTerminal();
 				if (terminal != null) {
 					try terminal.panel.terminate(true) catch (failure:Dynamic) application.reportError("terminal", Std.string(failure));
 					requestFrame();
 				}
-			}, null, canTerminateTerminal));
-			ui.commands.register(new Command("terminal:copy-selection", "Copy Selection", copyTerminalSelection, null, canCopyTerminalSelection));
-			application.commands.add("terminal:move-to-editor", function(_) moveTerminalToEditor(),
+			}, null, terminalTabs.canTerminateTerminal));
+			ui.commands.register(new Command("terminal:copy-selection", "Copy Selection", terminalTabs.copyTerminalSelection, null, terminalTabs.canCopyTerminalSelection));
+			application.commands.add("terminal:move-to-editor", function(_) terminalTabs.moveTerminalToEditor(),
 				function(_) return host.activePanelTerminal() != null);
-			application.commands.add("terminal:move-to-panel", function(_) moveTerminalToPanel(),
+			application.commands.add("terminal:move-to-panel", function(_) terminalTabs.moveTerminalToPanel(),
 				function(_) { var tab = host.activeTab(); return tab != null && UiEditorTabs.terminal(tab) != null; });
 		}
 		application.commands.add("workspace:search", function(_) showSidebarMode("search"));
 		application.commands.add("sidebar:files", function(_) showSidebarMode("files"));
 		application.commands.add("sidebar:search", function(_) showSidebarMode("search"));
-		application.commands.add("scm:next-hunk", function(_) host.moveActiveDiffHunk(1), function(_) return activeDiffView() != null);
-		application.commands.add("scm:previous-hunk", function(_) host.moveActiveDiffHunk(-1), function(_) return activeDiffView() != null);
-		application.commands.add("scm:stage-hunk", function(_) applyActiveScmHunk("stage"), function(_) return canApplyActiveScmHunk("stage"));
-		application.commands.add("scm:unstage-hunk", function(_) applyActiveScmHunk("unstage"), function(_) return canApplyActiveScmHunk("unstage"));
-		application.commands.add("scm:revert-hunk", function(_) applyActiveScmHunk("revert"), function(_) return canApplyActiveScmHunk("revert"));
+		application.commands.add("scm:next-hunk", function(_) host.moveActiveDiffHunk(1), function(_) return sourceControl.activeDiffView() != null);
+		application.commands.add("scm:previous-hunk", function(_) host.moveActiveDiffHunk(-1), function(_) return sourceControl.activeDiffView() != null);
+		application.commands.add("scm:stage-hunk", function(_) sourceControl.applyActiveScmHunk("stage"), function(_) return sourceControl.canApplyActiveScmHunk("stage"));
+		application.commands.add("scm:unstage-hunk", function(_) sourceControl.applyActiveScmHunk("unstage"), function(_) return sourceControl.canApplyActiveScmHunk("unstage"));
+		application.commands.add("scm:revert-hunk", function(_) sourceControl.applyActiveScmHunk("revert"), function(_) return sourceControl.canApplyActiveScmHunk("revert"));
 		application.commands.add("scm:next-change", function(_) host.moveActiveGutterMarker(1), function(_) return host.canMoveActiveGutterMarker());
 		application.commands.add("scm:previous-change", function(_) host.moveActiveGutterMarker(-1), function(_) return host.canMoveActiveGutterMarker());
-		application.commands.add("scm:open-file-at-line", function(_) openActiveDiffSourceAtLine(), function(_) return activeDiffView() != null);
-		application.commands.add("scm:refresh", function(_) refreshSourceControl(), function(_) return sourceControlSource() != null);
-		application.commands.add("scm:fetch", function(_) applyPendingScmRemote(scm.ScmOperation.Fetch(null)), function(_) return canUsePendingScmRemotes());
-		application.commands.add("scm:pull", function(_) applyPendingScmRemote(scm.ScmOperation.Pull), function(_) return canUsePendingScmRemotes());
-		application.commands.add("scm:push", function(_) applyPendingScmRemote(scm.ScmOperation.Push), function(_) return canUsePendingScmRemotes());
+		application.commands.add("scm:open-file-at-line", function(_) sourceControl.openActiveDiffSourceAtLine(), function(_) return sourceControl.activeDiffView() != null);
+		application.commands.add("scm:refresh", function(_) sourceControl.refreshSourceControl(), function(_) return sourceControl.sourceControlSource() != null);
+		application.commands.add("scm:fetch", function(_) sourceControl.applyPendingScmRemote(scm.ScmOperation.Fetch(null)), function(_) return sourceControl.canUsePendingScmRemotes());
+		application.commands.add("scm:pull", function(_) sourceControl.applyPendingScmRemote(scm.ScmOperation.Pull), function(_) return sourceControl.canUsePendingScmRemotes());
+		application.commands.add("scm:push", function(_) sourceControl.applyPendingScmRemote(scm.ScmOperation.Push), function(_) return sourceControl.canUsePendingScmRemotes());
 		application.commands.add("scm:branches", function(_) scmBranches.open(null), function(_) return true, "Switch Git Branch…");
-		application.commands.add("scm:checkout", function(_) scmBranches.open(null), function(_) return canCheckoutScmRepository(null));
-		application.commands.add("scm:checkout-selected", function(_) scmBranches.open(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
-		application.commands.add("scm:create-branch", function(_) scmBranches.createPrompt(null), function(_) return canCheckoutScmRepository(null));
-		application.commands.add("scm:create-branch-selected", function(_) scmBranches.createPrompt(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
+		application.commands.add("scm:checkout", function(_) scmBranches.open(null), function(_) return sourceControl.canCheckoutScmRepository(null));
+		application.commands.add("scm:checkout-selected", function(_) scmBranches.open(sourceControl.pendingScmRepository), function(_) return sourceControl.canCheckoutScmRepository(sourceControl.pendingScmRepository));
+		application.commands.add("scm:create-branch", function(_) scmBranches.createPrompt(null), function(_) return sourceControl.canCheckoutScmRepository(null));
+		application.commands.add("scm:create-branch-selected", function(_) scmBranches.createPrompt(sourceControl.pendingScmRepository), function(_) return sourceControl.canCheckoutScmRepository(sourceControl.pendingScmRepository));
 		application.commands.add("scm:trust-repository", function(_) {
-			var source = pendingScmSource, repository = pendingScmRepository;
-			if (source != null && repository != null && !source.isRemote()) trustScmRepository(repository);
-		}, function(_) return canTrustPendingScmRepository());
+			var source = sourceControl.pendingScmSource, repository = sourceControl.pendingScmRepository;
+			if (source != null && repository != null && !source.isRemote()) sourceControl.trustScmRepository(repository);
+		}, function(_) return sourceControl.canTrustPendingScmRepository());
 		application.commands.add("scm:open-changes", function(_) {
-			if (pendingScmSource != null && pendingScmRepository != null && pendingScmGroup != null && pendingScmResource != null)
-				openScmResource(pendingScmSource, pendingScmRepository, pendingScmGroup, pendingScmResource);
-		}, function(_) return pendingScmResource != null);
+			if (sourceControl.pendingScmSource != null && sourceControl.pendingScmRepository != null && sourceControl.pendingScmGroup != null && sourceControl.pendingScmResource != null)
+				sourceControl.openScmResource(sourceControl.pendingScmSource, sourceControl.pendingScmRepository, sourceControl.pendingScmGroup, sourceControl.pendingScmResource);
+		}, function(_) return sourceControl.pendingScmResource != null);
 		application.commands.add("scm:open-side-by-side", function(_) {
-			if (pendingScmSource != null && pendingScmRepository != null && pendingScmGroup != null && pendingScmResource != null)
-				openScmResource(pendingScmSource, pendingScmRepository, pendingScmGroup, pendingScmResource, true);
-		}, function(_) return pendingScmResource != null && pendingScmGroup != null && pendingScmGroup.id != ScmGroupId.Merge);
-		application.commands.add("scm:open-file", function(_) openPendingScmFile(), function(_) return pendingScmResource != null);
-		application.commands.add("scm:stage", function(_) applyPendingScmFile(true), function(_) return canStagePendingScmFile());
-		application.commands.add("scm:unstage", function(_) applyPendingScmFile(false), function(_) return canUnstagePendingScmFile());
-		application.commands.add("scm:resolve-ours", function(_) applyPendingScmConflict("ours"), function(_) return canResolvePendingScmConflict());
-		application.commands.add("scm:resolve-theirs", function(_) applyPendingScmConflict("theirs"), function(_) return canResolvePendingScmConflict());
-		application.commands.add("scm:resolve-both", function(_) applyPendingScmConflict("both"), function(_) return canResolvePendingScmConflict());
-		application.commands.add("scm:stage-all", function(_) applyPendingScmGroup(true), function(_) return canStagePendingScmGroup());
-		application.commands.add("scm:unstage-all", function(_) applyPendingScmGroup(false), function(_) return canUnstagePendingScmGroup());
-		application.commands.add("scm:discard", function(_) discardPendingScmFile(), function(_) return canDiscardPendingScmFile());
+			if (sourceControl.pendingScmSource != null && sourceControl.pendingScmRepository != null && sourceControl.pendingScmGroup != null && sourceControl.pendingScmResource != null)
+				sourceControl.openScmResource(sourceControl.pendingScmSource, sourceControl.pendingScmRepository, sourceControl.pendingScmGroup, sourceControl.pendingScmResource, true);
+		}, function(_) return sourceControl.pendingScmResource != null && sourceControl.pendingScmGroup != null && sourceControl.pendingScmGroup.id != ScmGroupId.Merge);
+		application.commands.add("scm:open-file", function(_) sourceControl.openPendingScmFile(), function(_) return sourceControl.pendingScmResource != null);
+		application.commands.add("scm:stage", function(_) sourceControl.applyPendingScmFile(true), function(_) return sourceControl.canStagePendingScmFile());
+		application.commands.add("scm:unstage", function(_) sourceControl.applyPendingScmFile(false), function(_) return sourceControl.canUnstagePendingScmFile());
+		application.commands.add("scm:resolve-ours", function(_) sourceControl.applyPendingScmConflict("ours"), function(_) return sourceControl.canResolvePendingScmConflict());
+		application.commands.add("scm:resolve-theirs", function(_) sourceControl.applyPendingScmConflict("theirs"), function(_) return sourceControl.canResolvePendingScmConflict());
+		application.commands.add("scm:resolve-both", function(_) sourceControl.applyPendingScmConflict("both"), function(_) return sourceControl.canResolvePendingScmConflict());
+		application.commands.add("scm:stage-all", function(_) sourceControl.applyPendingScmGroup(true), function(_) return sourceControl.canStagePendingScmGroup());
+		application.commands.add("scm:unstage-all", function(_) sourceControl.applyPendingScmGroup(false), function(_) return sourceControl.canUnstagePendingScmGroup());
+		application.commands.add("scm:discard", function(_) sourceControl.discardPendingScmFile(), function(_) return sourceControl.canDiscardPendingScmFile());
 		application.commands.add("scm:commit", function(_) {
-			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, false);
-		}, function(_) return canCommitStagedCurrentScmRepository());
+			var source = sourceControl.sourceControlSource(), repository = source == null ? null : sourceControl.scmCommitRepository(source);
+			if (source != null && repository != null) sourceControl.commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, false);
+		}, function(_) return sourceControl.canCommitStagedCurrentScmRepository());
 		application.commands.add("scm:commit-amend", function(_) {
-			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), true, false);
-		}, function(_) return canAmendCurrentScmRepository());
+			var source = sourceControl.sourceControlSource(), repository = source == null ? null : sourceControl.scmCommitRepository(source);
+			if (source != null && repository != null) sourceControl.commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), true, false);
+		}, function(_) return sourceControl.canAmendCurrentScmRepository());
 		application.commands.add("scm:commit-all", function(_) {
-			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, true);
-		}, function(_) return canCommitAllCurrentScmRepository());
+			var source = sourceControl.sourceControlSource(), repository = source == null ? null : sourceControl.scmCommitRepository(source);
+			if (source != null && repository != null) sourceControl.commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, true);
+		}, function(_) return sourceControl.canCommitAllCurrentScmRepository());
 		application.keymap.add(platform.Platform.KEY_ENTER, platform.Platform.MOD_CTRL, ["scm:commit"]);
-		application.commands.add("context:previous", function(_) switchToPreviousContext(), function(_) return previousContext() != null, "Goto Previous Workspace");
-		application.commands.add("context:switch", function(_) openContextSwitcher(), null, "Switch Workspace or Group…");
-		application.commands.add("context:new-window", function(_) openActiveContextInNewWindow(), function(_) return machineClient != null && machineClient.enabled, "Open Current Workspace or Group in New Window");
+		application.commands.add("context:previous", function(_) contexts.switchToPreviousContext(), function(_) return contexts.previousContext() != null, "Goto Previous Workspace");
+		application.commands.add("context:switch", function(_) contexts.openContextSwitcher(), null, "Switch Workspace or Group…");
+		application.commands.add("context:new-window", function(_) contexts.openActiveContextInNewWindow(), function(_) return machineClient != null, "Open Current Workspace or Group in New Window");
 		// The keymap takes platform key codes; UiKey.A (65) matches nothing, so these chords did nothing until now.
 		application.keymap.add(platform.Platform.KEY_D, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:previous"]);
 		application.keymap.add(platform.Platform.KEY_A, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:switch"]);
-		application.commands.add("settings:open", function(_) openSettings());
-		ui.commands.register(new Command("preferences.open", "Settings", openSettings,
+		application.commands.add("settings:open", function(_) settingsTab.openSettings());
+		ui.commands.register(new Command("preferences.open", "Settings", settingsTab.openSettings,
 			new Shortcut(UiKey.Comma, UiModifier.Control)));
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 		application.workbench.commandPaletteSource = new commandview.CommandPaletteSource(paletteEntries,
@@ -1477,8 +964,6 @@ class ExosuitApp implements DesktopUiApplication {
 			layers.push(new StackChild("notifications", popup, 0, 0, 45, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 
-
-
 		if (agentAttach != null) {
 			if (!agentAttach.isCurrent()) agentAttach = null;
 			else {
@@ -1513,7 +998,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var path = trashConfirmation;
 			var displayPath = path;
 			for (project in application.workspace.projects) {
-				var relative = pathUnderScope(project.root, path);
+				var relative = ScmPanelController.pathUnderScope(project.root, path);
 				if (relative != null && relative.length > 0) { displayPath = relative; break; }
 			}
 			var contentStyle = new LayoutStyle();
@@ -1612,14 +1097,14 @@ class ExosuitApp implements DesktopUiApplication {
 		viewportWidth = safeWidth;
 		viewportHeight = safeHeight;
 		layoutModes.suspend();
-		syncResponsiveDockLayout();
+		responsive.syncResponsiveDockLayout();
 		keepSidebarFullHeight();
 		if (widthChanged && !phoneLayoutActive && dock.isOpen("explorer")) {
 			var mode = sidebar.selected();
 			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, workbenchAvailableWidth(),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
-		syncResponsiveRightLayout();
+		responsive.syncResponsiveRightLayout();
 		layoutModes.resume();
 		dock.setPanelBadge("problems", host.getProblems().values().length);
 		var key = (hostContext == null ? 0 : hostContext.safeAreaRevision) + "/" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
@@ -1664,17 +1149,17 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
 		layoutModes.suspend();
 		workbenchClient = client;
-		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			focusGroupFolder, catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
-			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
-			createProviderAgent, canCreateAgentSession, function() return application.settings.current.tabTooltipDelay);
+		workbenchPanel = new WorkbenchPanel(function() return workbenchClient, terminalTabs.openCatalogTerminal, terminalTabs.newGroupedTerminal, workbenchActions.editWorkspaceGroup,
+			workbenchActions.catalogTerminalActions, requestFrame, agentTabs.openCodexAgent, workbenchActions.showWorkbenchMenu,
+			workbenchActions.attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
+			agentTabs.createProviderAgent, agentTabs.canCreateAgentSession, function() return application.settings.current.tabTooltipDelay);
+		workbenchPanel.defaultProvider = function() return application.settings.current.defaultAgentProvider;
+		workbenchPanel.chooseSessionFolder = agentTabs.chooseSessionFolder;
 		workbenchPanel.onError = function(message) {
-			var actions = StringTools.startsWith(message, "Update the workspace service")
-				? [new feedback.NotificationAction("Remote Access", function() showSidebarMode("remote-access"))] : null;
-			host.getNotifications().publish(message, feedback.NotificationKind.Error, "workbench", actions);
+			host.getNotifications().publish(message, feedback.NotificationKind.Error, "workbench");
 			requestFrame();
 		};
-		workbenchPanel.closeTerminal = closeCatalogTerminal;
+		workbenchPanel.closeTerminal = terminalTabs.closeCatalogTerminal;
 		// A switch made from a tree row leaves the keyboard on the row, whatever the context's saved focus was.
 		workbenchPanel.focusRoot = function() { host.keepFocusOnSwitch = true; application.activeContext.useWorkspace(); host.keepFocusOnSwitch = false; requestFrame(); };
 		workbenchPanel.focusGroup = function(id) {
@@ -1682,13 +1167,11 @@ class ExosuitApp implements DesktopUiApplication {
 			focusGroupById(id);
 			host.keepFocusOnSwitch = false;
 		};
-		workbenchPanel.moveAgent = moveAgentGroup;
-		workbenchPanel.machine = machineActions;
-		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
-		workbenchPanel.hasFolder = function() return application.savedWorkspaces.isOpen();
+		workbenchPanel.moveAgent = workbenchActions.moveAgentGroup;
+		workbenchPanel.actions = workbenchActions;
 		workbenchPanel.connectionFailure = function() return workspaceError;
-		host.onActiveTabChanged = syncWorkbenchSessionSelection;
-		syncWorkbenchSessionSelection(host.activeTab());
+		host.onActiveTabChanged = agentTabs.syncWorkbenchSessionSelection;
+		agentTabs.syncWorkbenchSessionSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
 			registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
 				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
@@ -1707,9 +1190,10 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	public function attachRemoteAccess(client:workspace.client.WorkspacePairingClient):Void {
-		pairingClient = client;
-		remoteAccessPanel = new RemoteAccessPanel(client, requestFrame, function(value) {
+	/** The Remote Access panel: this machine's relay, pairing and devices, from suit (ADR 0005 section 4). */
+	function attachRemoteAccess(machine:workspace.client.MachineClient):Void {
+		if (remoteAccessPanel != null) return;
+		remoteAccessPanel = new RemoteAccessPanel(new workspace.client.MachineRemoteAccess(machine, requestFrame), requestFrame, function(value) {
 			try {
 				ui.clipboard.writeText(value);
 				return true;
@@ -1724,753 +1208,209 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		registerSidebarDestination("remote-access", IconName.Radar, function() return remoteAccessPanel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
-		useMachineRemoteAccess();
-	}
-
-	/** With suit on, remote access belongs to the machine: devices pair with it and are granted workspaces (ADR 0005 section 4). */
-	function useMachineRemoteAccess():Void {
-		var panel = remoteAccessPanel, machine = machineClient;
-		if (panel == null || machine == null || !machine.enabled || panel.machine != null) return;
-		panel.machine = new workspace.client.MachineRemoteAccess(machine, requestFrame);
-	}
-
-	var reconciledClient:Null<workspace.client.WorkspaceFileClient>;
-	var reconciledWorkspace:Null<String>;
-	var reconcilePending = false;
-	var reconcileRetryAt = 0.0;
-	var reconcileBackoff = 5.0;
-	var reconcileReported:Null<String>;
-	var servedRefreshAt = 0.0;
-	var servedRefreshDelay = 1.5;
-	var servedRefreshUntil = 0.0;
-	var servedRefreshPending = false;
-	var reconcileKey:Null<String>;
-	/** The folders the open workspace's service serves, as last listed, and the client that listed them. */
-	var servedRoots:Array<{id:String, path:String}> = [];
-	var servedRootsClient:Null<workspace.client.WorkspaceFileClient>;
-
-	/** The folder behind the root id `root`: the first attached folder that is still there, which can change on detach. */
-	function primaryScope(attachment:Null<workspace.client.WorkspaceAttachment>):Null<String> {
-		if (attachment == null) return null;
-		if (servedRootsClient != null && servedRootsClient == attachment.fileClient())
-			for (root in servedRoots) if (root.id == "root") return root.path;
-		return attachment.fileScope();
 	}
 
 	/**
-		Finds the root the service serves `file`'s folder under, by path rather than by the id the tab was opened with,
-		and re-keys the tab if that id changed. False when the folder is known not to be attached. Without a listing
-		the tab keeps its id, as long as `root` still means the scope it was opened with.
-	**/
-	function resolveFileRoot(attachment:Null<workspace.client.WorkspaceAttachment>, file:UiWorkspaceFileTab):Bool {
-		if (attachment == null) return false;
-		var client = attachment.fileClient();
-		if (client != null && servedRootsClient == client && servedRoots.length > 0) {
-			for (root in servedRoots) if (PathKey.same(root.path, file.scope)) {
-				if (root.id != file.root) file.rekey(root.id);
-				return true;
-			}
-			return false;
-		}
-		var scope = attachment.fileScope();
-		return scope == null || file.root != "root" || scope == file.scope;
-	}
-
-	/** Shows a failure or a skipped-folders note once per distinct text, so a retry cannot repeat the toast. */
-	function reportOnce(text:Null<String>):Void {
-		if (text == null || text == reconcileReported) return;
-		reconcileReported = text;
-		application.reportError("workspace", text);
-	}
-
-	/**
-		Records the folders `listed` as served. Editor tabs follow their folder by path: one whose folder is now served
-		under another id (it became `root`) takes that id, and one whose folder was detached closes.
-	**/
-	function noteServedRoots(fileClient:workspace.client.WorkspaceFileClient, workspaceId:String,
-			listed:Array<workspace.service.WorkspaceFileProtocol.FileRootDescriptor>):Void {
-		var before = servedRootsClient == fileClient ? servedRoots : [];
-		var now:Array<{id:String, path:String}> = [];
-		for (root in listed) if (root.path != null) now.push({id: root.id, path: root.path});
-		servedRoots = now;
-		servedRootsClient = fileClient;
-		host.reconcileWorkspaceFiles(workspaceId, function(scope) {
-			for (root in now) if (PathKey.same(root.path, scope)) return root.id;
-			for (root in before) if (PathKey.same(root.path, scope)) return null;
-			return "";
-		});
-	}
-
-	/** The machine catalog's entry for the open workspace, when there is one. */
-	function catalogEntry():Null<suit.MachineCatalog.MachineWorkspace> {
-		var machine = machineClient, current = application.savedWorkspaces.current;
-		var state = machine == null ? null : machine.machine;
-		if (current == null || state == null) return null;
-		for (candidate in state.workspaces) if (candidate.id == current.id) return candidate;
-		return null;
-	}
-
-	/** Asks the service which folders it serves now; `done` is told whether they are the catalog's usable folders. */
-	function refreshServedRoots(attached:workspace.client.WorkspaceAttachment, ?done:Bool->Void):Void {
-		var fileClient = attached.fileClient();
-		if (fileClient == null) { if (done != null) done(false); return; }
-		var workspaceId = attached.fileWorkspace();
-		fileClient.roots(workspaceId, function(listed) {
-			var ok = listed != null && listed.roots != null && attached.fileClient() == fileClient;
-			if (ok) noteServedRoots(fileClient, workspaceId, listed.roots);
-			var entry = catalogEntry();
-			var matches = ok && (entry == null || servedMatchesCatalog(entry));
-			if (done != null) done(matches);
-		}, function(_) { if (done != null) done(false); });
-	}
-
-	/** Whether the folders last listed are the usable ones of the catalog entry. */
-	function servedMatchesCatalog(entry:suit.MachineCatalog.MachineWorkspace):Bool {
-		var served = [for (root in servedRoots) root.path];
-		return !workspace.client.FolderReconcile.differs(served, workspace.WorkspaceFolders.select(entry.folders).folders, entry.scratch);
-	}
-
-	/**
-		After the catalog changes (here or in another window) the service follows a moment later, from whichever window
-		made the change. Lists the served folders again, with a growing delay, until they are the catalog's or two
-		minutes have passed, so the cached `root` cannot stay stale.
-	**/
-	function pollServedRoots(attached:workspace.client.WorkspaceAttachment):Void {
-		if (servedRefreshAt <= 0 || servedRefreshPending || Sys.time() < servedRefreshAt) return;
-		servedRefreshPending = true;
-		refreshServedRoots(attached, function(matches) {
-			servedRefreshPending = false;
-			var now = Sys.time();
-			if (matches || now > servedRefreshUntil) { servedRefreshAt = 0; return; }
-			servedRefreshAt = now + servedRefreshDelay;
-			servedRefreshDelay = Math.min(30.0, servedRefreshDelay * 2);
-		});
-	}
-
-	function startServedRefresh():Void {
-		servedRefreshDelay = 1.5;
-		servedRefreshAt = Sys.time() + servedRefreshDelay;
-		servedRefreshUntil = Sys.time() + 120;
-	}
-
-	/**
-		A service that was already running when this window attached may serve other folders than the machine catalog
-		gives its workspace (a folder attached or detached while no window was open, or a failed earlier change). Once per
-		service, and again after a failure, the app asks it to serve the catalog's folders. Folders that cannot be served
-		(nested, missing) are left out of the comparison and reported once, so one bad entry cannot keep this retrying;
-		failures retry with a doubling delay, up to a minute.
-	**/
-	function reconcileServedFolders(attached:workspace.client.WorkspaceAttachment, fileClient:Null<workspace.client.WorkspaceFileClient>):Void {
-		var machine = machineClient;
-		if (reconcilePending || fileClient == null || machine == null || Sys.time() < reconcileRetryAt) return;
-		if (!Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) return;
-		var current = application.savedWorkspaces.current;
-		var entry = catalogEntry();
-		if (current == null || entry == null) return;
-		// Another workspace, or other folders in the catalog, start over: nothing from the last try carries across.
-		var key = current.id + "|" + entry.folders.join("|") + "|" + entry.scratch;
-		if (key != reconcileKey) {
-			reconcileKey = key;
-			reconciledClient = null;
-			reconcileReported = null;
-			reconcileBackoff = 5.0;
-			reconcileRetryAt = 0.0;
-		}
-		if (Sys.time() < reconcileRetryAt) return;
-		if (reconciledClient == fileClient && reconciledWorkspace == current.id) return;
-		var wanted = entry;
-		var local:workspace.client.LocalWorkspaceClient = cast attached;
-		var workspaceId = attached.fileWorkspace();
-		reconcilePending = true;
-		var settled = function(note:Null<String>):Void {
-			reconcilePending = false;
-			reconciledClient = fileClient;
-			reconciledWorkspace = wanted.id;
-			reconcileBackoff = 5.0;
-			reportOnce(note);
-		};
-		var retry = function(failure:String):Void {
-			reconcilePending = false;
-			reconcileRetryAt = Sys.time() + reconcileBackoff;
-			reconcileBackoff = workspace.client.FolderReconcile.nextDelay(reconcileBackoff);
-			reportOnce(failure);
-		};
-		fileClient.roots(workspaceId, function(listed) {
-			var served:Array<String> = [];
-			var known = listed != null && listed.roots != null;
-			if (known) for (root in listed.roots) if (root.path == null) known = false; else served.push(root.path);
-			if (known) noteServedRoots(fileClient, workspaceId, listed.roots);
-			var selection = workspace.WorkspaceFolders.select(wanted.folders);
-			var skipped = selection.skipped.length == 0 ? null : "Folders not served: " + selection.skipped.join("; ");
-			if (!known || !workspace.client.FolderReconcile.differs(served, selection.folders, wanted.scratch)) {
-				settled(skipped);
-				return;
-			}
-			local.setServedFolders(wanted.folders, function(failure) {
-				if (failure == null) {
-					settled(skipped);
-					refreshServedRoots(attached);
-				} else if (failure == workspace.client.LocalWorkspaceClient.CANNOT_SET_FOLDERS) settled(failure);
-				else retry(failure);
-			});
-		}, function(_) { retry("The workspace service did not list its folders."); });
-	}
-
-	/** The Machine view: this machine's workspace services, and which one `client` uses for each folder. */
-	public function attachMachine(machine:workspace.client.MachineWorkspaces, client:workspace.client.LocalWorkspaceClient):Void {
-		machineWorkspaces = machine;
-		var choices = workspace.client.WorkspaceManagerChoices.instance();
-		machinePanel = new MachinePanel(machine, {
-			attachedGeneration: function() return client.workspaceConnected() ? client.serviceGeneration() : "",
-			attach: function(root, workspaceId, stateDir, defaultState) {
-				choices.choose(workspace.client.WorkspaceServiceTarget.choiceKeyOf(workspaceId, root), defaultState ? null : stateDir);
-				if (workspaceId.length > 0) openMachineWorkspace(workspaceId) else openMachineRoot(root);
-			},
-			startOwn: function(root, workspaceId, fromState) {
-				var listing = machine.listing;
-				if (listing == null) return;
-				try choices.chooseCopy(workspace.client.WorkspaceServiceTarget.choiceKeyOf(workspaceId, root),
-					workspace.client.MachineWorkspaces.ownState(listing, root, listing.launcher, workspaceId), fromState)
-				catch (failure:Dynamic) { application.reportError("workspace", Std.string(failure)); return; }
-				if (workspaceId.length > 0) openMachineWorkspace(workspaceId) else openMachineRoot(root);
-			},
-			workspaceName: function(id) {
-				var known = machineClient == null ? null : machineClient.workspaceById(id);
-				return known == null ? "" : known.name;
-			}
-		}, requestFrame);
-		registerSidebarDestination("machine", IconName.Cube, function() return machinePanel,
-			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Machine", 35, true));
-	}
-
-	/**
-		This machine's workspaces as the Workbench tree's top level, from suit (docs/architecture/0006-workspaces-without-folders.md).
-		With suit off there is no machine, and the Workbench works on the open folders as before.
+		This machine's workspaces as the Workbench tree's top level, from suit (docs/architecture/0006-workspaces-without-folders.md),
+		and the window's link to suit, over which suit pushes them and asks the window to quit. Needs the window's links
+		(`attachLinks`) first.
 	**/
 	public function attachMachineWorkspaces(machine:workspace.client.MachineClient):Void {
+		var all = links;
+		if (all == null) throw "The window's workspace links are needed before suit's machine";
 		machineClient = machine;
-		if (!machine.enabled) return;
-		useMachineRemoteAccess();
-		machine.refresh();
-		var report = function(failure:Null<String>, ?workspaceId:String):Bool {
-			if (failure == null) return false;
-			application.reportError("workspace", failure);
-			// Only a failure to open the workspace being waited for ends the wait.
-			var waiting = pendingContextTarget;
-			if (waiting != null && workspaceId != null && waiting.workspace == workspaceId) pendingContextTarget = null;
-			requestFrame();
-			return true;
-		};
-		// A workspace opens its attached folders. With a service of its own, keyed by id, a workspace with none runs in
-		// its scratch folder, which is asked for first so the service can be started there. Otherwise a workspace with
-		// no folders opens its scratch folder as a folder.
-		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
-			workspace.client.ConnectTimeline.mark("open-workspace", entry.id, entry.name);
-			pollEagerly(8.0, true);
-			if (workspace.client.WorkspaceServiceTarget.enabled() && entry.folders.length == 0) {
-				machine.scratch(entry.id, function(path, failure) {
-					if (report(failure, entry.id) || path == null) return;
-					application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, []), "");
-					requestFrame();
-				});
-				return;
-			}
-			if (entry.folders.length > 0) {
-				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, entry.folders), "");
-				requestFrame();
-				return;
-			}
-			machine.scratch(entry.id, function(path, failure) {
-				if (report(failure, entry.id) || path == null) return;
-				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, [path]), "");
-				requestFrame();
-			});
-		};
-		var openWorkspace = function():Null<String> { return currentWorkspaceId(machine); };
-		// The open workspace's service follows its folders at once, with no restart: file roots, watchers and repositories.
-		var serveFolders = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
-			var attached = workspaceAttachment;
-			if (attached == null || !Std.isOfType(attached, workspace.client.LocalWorkspaceClient) || openWorkspace() != entry.id) return;
-			var local:workspace.client.LocalWorkspaceClient = cast attached;
-			var skipped = workspace.WorkspaceFolders.select(entry.folders).skipped;
-			local.setServedFolders(entry.folders, function(failure) {
-				if (!report(failure)) {
-					if (skipped.length > 0) application.reportError("workspace", "Folders not served: " + skipped.join("; "));
-					refreshServedRoots(attached);
-				}
-			});
-		};
-		var chooseFolder = function(title:String, chosen:String->Void):Void {
-			var automated = devtools.AutomationProbe.takeFolderAnswer();
-			if (automated != null) chosen(automated);
-			else if (desktop != null) desktop.selectDirectory(function(accepted, paths) { if (accepted && paths.length > 0) chosen(paths[0]); }, title);
-			else host.openCommandView(new commandview.CommandViewProvider(title + ": ", [], function(_) {}, function(_, value, _) {
-				host.closeCommandView();
-				if (value != null && StringTools.trim(value).length > 0) chosen(StringTools.trim(value));
-			}));
-		};
-		var askName = function(label:String, named:String->Void):Void {
-			host.openCommandView(new commandview.CommandViewProvider(label + ": ", [], function(_) {}, function(_, value, _) {
-				host.closeCommandView();
-				if (value != null && StringTools.trim(value).length > 0) named(StringTools.trim(value));
-			}));
-		};
-		machineActions = {
-			view: function() return machineView(machine, openWorkspace()),
-			busy: machine.busy,
-			open: open,
-			// An idle workspace's service starts without opening it here; suit then reports it and its catalog appears.
-			start: function(entry) {
-				var starter = workspaceStarter;
-				if (starter == null || starter.starting(entry.id)) return;
-				workspace.client.ConnectTimeline.mark("start-requested", entry.id, entry.name);
-				var begin = function():Void {
-					var known = machine.workspaceById(entry.id);
-					var target = machine.serviceTarget(known == null ? entry : known);
-					startingWorkspaces.set(entry.id, true);
-					startingRevision++;
-					starter.start(target, function(failure) {
-						startingWorkspaces.remove(entry.id);
-						startingRevision++;
-						report(failure);
-						machine.refresh();
-						machineRefreshAt = 0;
-						requestFrame();
-					});
-					requestFrame();
-				};
-				if (entry.folders.length == 0 && machine.scratchOf(entry) == null)
-					machine.scratch(entry.id, function(path, failure) {
-						if (report(failure) || path == null) return;
-						begin();
-					});
-				else
-					begin();
-			},
-			cancelStart: function(entry) {
-				var starter = workspaceStarter;
-				if (starter != null) starter.cancel(entry.id);
-			},
-			create: function() askName("New workspace name", function(name) machine.create(name, [], function(created, failure) {
-				if (!report(failure) && created != null) open(created);
-			})),
-			rename: function(entry) askName("Rename workspace " + entry.name, function(name) {
-				machine.rename(entry.id, name, function(_, failure) { report(failure); });
-			}),
-			// The scratch folder stays apart from the attached folders (ADR 0006). With a service per folder
-			// (EXOSUIT_WORKSPACE_IDENTITY=folder), the groups made in it show only while the workspace has no folders.
-			attachFolder: function(entry) chooseFolder("Attach Folder to " + entry.name, function(folder) {
-				machine.addFolder(entry.id, folder, function(updated, failure) {
-					if (report(failure) || updated == null) return;
-					serveFolders(updated);
-					if (openWorkspace() == entry.id) open(updated);
-				});
-			}),
-			detachFolder: function(entry) {
-				var entries = [for (folder in entry.folders) new commandview.CommandViewEntry(haxe.io.Path.withoutDirectory(folder), folder, folder)];
-				if (entries.length == 0) return;
-				host.openCommandView(new commandview.CommandViewProvider("Detach folder from " + entry.name + ": ", entries, function(_) {},
-					function(chosen, _, _) {
-						host.closeCommandView();
-						if (chosen == null) return;
-						machine.removeFolder(entry.id, chosen.value, function(updated, failure) {
-							if (report(failure) || updated == null) return;
-							serveFolders(updated);
-							if (openWorkspace() == entry.id) open(updated);
-						});
-					}));
-			},
-			remove: function(entry) machine.delete(entry.id, function(_, failure) {
-				if (!report(failure)) removeWorkspaceContexts(entry.id);
-			}),
-			openInNewWindow: function(entry, group) openContextInNewWindow(entry.id, group)
-		};
-		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
+		attachRemoteAccess(machine);
+		var shown = new SuitWorkbenchMachine(this, machine, all);
+		suitWorkbench = shown;
+		workbenchActions.attach(shown);
 		requestFrame();
 	}
 
-	/** The tree's view of the machine: its workspaces, and for the ones this window is not attached to, what the pool knows. */
-	function machineView(machine:workspace.client.MachineClient, open:Null<String>):WorkbenchMachineView {
-		var pool = catalogConnections, state = machine.machine;
-		var key = machine.revision + ":" + (pool == null ? 0 : pool.revision()) + ":" + startingRevision + ":" + open;
-		if (key != watchedKey) {
-			watchedKey = key;
-			watchedStates = [];
-			if (pool != null && state != null)
-				for (entry in state.workspaces) {
-					var service = machine.serviceOf(entry.id), watch = pool.watchOf(entry.id);
-					var mirror = pool.mirrorOf(entry.id);
-					if (mirror != null) workspace.client.ConnectTimeline.markOnce("rows-other:" + entry.id, "rows-visible", entry.id, "other");
-					watchedStates.set(entry.id, {running: service != null && service.running, live: watch != null && watch.live,
-						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
-				}
-		}
-		var attachment = workspaceAttachment, servedRoot:Null<String> = null;
-		if (open != null && Std.isOfType(attachment, workspace.client.LocalWorkspaceClient)) {
-			var local:workspace.client.LocalWorkspaceClient = cast attachment;
-			if (local.servedWorkspace() == open) servedRoot = local.rootPath();
-		}
-		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(), servedRoot: servedRoot,
-			windows: otherWindows(),
-			revision: machine.revision, watched: pool == null ? null : watchedStates,
-			watchRevision: (pool == null ? 0 : pool.revision()) + startingRevision};
+	/** A device's Workbench machine (the phone, the browser: DeviceWorkbenchMachine), made by the device's factory. */
+	public function attachWorkbenchMachine(machine:WorkbenchMachine):Void {
+		workbenchActions.attach(machine);
+		requestFrame();
 	}
 
-	/** Follows suit's list of running services: connect to new ones, drop the ones that stopped, skip the attached workspace. */
-	function syncCatalogConnections(machine:workspace.client.MachineClient, pool:workspace.client.WorkspaceConnections):Void {
-		var state = machine.machine;
-		if (state == null) return;
-		var attached = currentWorkspaceId(machine);
-		// A window opened on a folder takes the id of the machine workspace that holds it, once the catalog names it. Two
-		// workspaces with the same single folder are ambiguous: none is adopted (the window still attaches to the first,
-		// as before), and the context stays under the placeholder id.
-		if (application.savedWorkspaces.current == null) {
-			var roots = application.savedWorkspaces.roots();
-			var matches = roots.length != 1 ? [] : [for (entry in state.workspaces) if (entry.folders.length == 1 && PathKey.same(entry.folders[0], roots[0])) entry];
-			if (matches.length == 1) application.savedWorkspaces.adoptMachineWorkspace(matches[0].id, matches[0].name, matches[0].folders);
-			else application.savedWorkspaces.releaseMachineWorkspace();
+	/**
+		suit asks the window to quit (`exosuit.quit`, docs/design/suitctl/TDD-exosuit-ctl.md Q4): `prompt` asks about
+		unsaved work as closing the window does, `recover` keeps it for the next start and closes at once, `save` saves
+		every document first. `answer` gets `{closing: true}` once the window has committed to closing, or why not.
+	**/
+	public function quitWindow(mode:String, answer:(Null<Dynamic>, Null<suit.control.ControlError>) -> Void):Void {
+		var context = hostContext;
+		if (context == null) {
+			answer(null, new suit.control.ControlError("unsupported", "this window cannot be closed"));
+			return;
 		}
-		var key = machine.revision + ":" + attached;
-		if (key == catalogSyncKey) return;
-		catalogSyncKey = key;
-		var services:Array<workspace.client.WorkspaceConnections.WatchedService> = [];
-		for (entry in state.workspaces) {
-			var service = machine.serviceOf(entry.id);
-			if (service != null)
-				services.push({workspace: entry.id, endpoint: service.endpoint, pid: service.pid, running: service.running});
+		if (mode != "prompt" && mode != "recover" && mode != "save") {
+			answer(null, new suit.control.ControlError("invalid_argument", 'unknown quit mode "$mode"'));
+			return;
 		}
-		pool.sync(state.id, services, attached, [for (entry in state.workspaces) entry.id]);
+		if (mode == "save") {
+			application.files.saveAll(function(saved) {
+				if (!saved) answer(null, new suit.control.ControlError("permission_denied", "a document was not saved; the window stays open"));
+				else quitWindow("recover", answer);
+			});
+			requestFrame();
+			return;
+		}
+		quitAnswer = answer;
+		quitRecovering = mode == "recover";
+		context.requestClose();
+		requestFrame();
+	}
+
+	/** The window has committed to closing: suit's quit request, if one asked, is answered. */
+	function answerQuit():Void {
+		var answer = quitAnswer;
+		quitAnswer = null;
+		if (answer != null) answer({closing: true}, null);
+	}
+
+	/**
+		Opens a folder as a workspace (INTENT 3; Workbench design Q10): the workspace that holds it, or a new one named after
+		it when none does. Every folder a window shows belongs to a workspace, so this is the one rule for opening a folder;
+		a window that ends up on loose folders (Open Folder, a folder on the command line, an older session) comes here
+		from its poll. The "open a folder and just edit" use (`exosuit <folder>`) is this with the Workbench out of the way.
+		`always` opens the new workspace even when the window is on one (a program asked for the folder).
+	**/
+	function openFolderWorkspace(folder:String, always = false):Void {
+		var machine = machineClient;
+		if (machine == null || machine.machine == null || folderOpening == folder) return;
+		folderOpening = folder;
+		var found = machine.workspaceHolding(folder);
+		if (found != null) {
+			workbenchActions.open(found);
+			return;
+		}
+		machine.create(null, [folder], function(created, failure) {
+			if (failure != null) application.reportError("workspace", "Could not make a workspace of " + folder + ": " + failure);
+			else if (created != null && (always || application.savedWorkspaces.current == null)) workbenchActions.open(created);
+			requestFrame();
+		});
+	}
+
+	/**
+		A workspace's service follows its folders at once, with no restart, when the window holds a link to it: file roots,
+		watchers and repositories; the window's own file roots follow for the workspace it shows.
+	**/
+	function serveFolders(entry:suit.MachineCatalog.MachineWorkspace):Void {
+		var link = linkOf(entry.id);
+		if (link == null) return;
+		var skipped = workspace.WorkspaceFolders.select(entry.folders).skipped;
+		link.setServedFolders(entry.folders, function(failure) {
+			if (failure != null) { application.reportError("workspace", failure); requestFrame(); return; }
+			if (skipped.length > 0) application.reportError("workspace", "Folders not served: " + skipped.join("; "));
+			if (link == focus) servedFolders.refreshServedRoots(link);
+		});
+	}
+
+	/** The link the window holds to workspace `id`, or null; asking makes none. */
+	public function linkOf(id:String):Null<workspace.client.WorkspaceLink> {
+		var all = links;
+		return all == null ? null : all.get(id);
 	}
 
 	/** The name the ConnectTimeline files the attached workspace under: its id once the attachment knows it. */
 	function currentWorkspaceName():String {
-		var attached = workspaceAttachment;
-		if (attached != null && Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) {
-			var local:workspace.client.LocalWorkspaceClient = cast attached;
-			return local.timelineName();
+		var local = focus;
+		return local == null ? "" : local.timelineName();
+	}
+
+	/**
+		Gives the window its links to workspace services (desktop). The window starts on the link of no workspace; the
+		workspace it opens then takes the focus.
+	**/
+	public function attachLinks(all:workspace.client.WorkspaceLinks):Void {
+		links = all;
+		snapshots = new workspace.client.CatalogSnapshots(suit.MachineCatalog.agentStateBase(), function() return Sys.time() * 1000);
+		focus = all.none;
+		attachWorkspace(all.none);
+		attachWorkbench(all.none);
+	}
+
+	/**
+		Shows `link`'s workspace in the window: the attachment and the Workbench follow it at once, and
+		the link the window leaves stays connected (WorkspaceLinks closes it once unused).
+	**/
+	function focusLink(link:workspace.client.WorkspaceLink):Void {
+		if (link == focus) return;
+		focus = link;
+		// A link that stayed connected shows its rows, files and changes again without "Connecting"; time them anew.
+		for (key in ["rows-own:", "files:", "scm:"]) workspace.client.ConnectTimeline.rearm(key + link.timelineName());
+		sourceControl.clearSourceControlPanel();
+		sourceControl.clearScmPresentation();
+		clearExplorerModel();
+		sourceControl.clearLocalScmSource();
+		workspaceAttachment = link;
+		workbenchClient = link;
+		if (workbenchPanel != null) workbenchPanel.focusChanged();
+		sourceControl.syncScmSidebar();
+		workspaceFileLoader.clearCache();
+		searchFileClient = null;
+		pendingWorkspaceFolderReveal = null;
+		searchPanel.workspaceAttachmentChanged();
+		workspaceStatus = "";
+		workspaceError = null;
+		requestFrame();
+	}
+
+	/**
+		The connection a terminal under `root` uses: the link of the workspace that root belongs to (made when the window
+		has none), or null while the machine's workspaces are not known or no workspace holds the root.
+	**/
+	public function terminalEndpoint(root:String):Null<workspace.client.WorkspaceRpcEndpoint> {
+		var all = links;
+		if (all == null || machineWorkspacesPending()) return null;
+		var target = terminalServiceTarget(root);
+		return target == null ? null : all.use(target, true);
+	}
+
+	/** Terminals open under `roots` keep their workspaces' links (and services) this turn. */
+	public function useTerminalRoots(roots:Array<String>):Void {
+		var all = links;
+		if (all == null || machineWorkspacesPending()) return;
+		for (root in roots) {
+			var target = terminalServiceTarget(root);
+			if (target != null) all.use(target, true);
 		}
-		return "";
 	}
-
-	/** The machine workspace attached in this window: the open saved workspace, else the one whose only folder is open. */
-	function currentWorkspaceId(machine:workspace.client.MachineClient):Null<String> {
-		var current = application.savedWorkspaces.current;
-		if (current != null) return current.id;
-		var roots = application.savedWorkspaces.roots();
-		var found = roots.length == 1 ? machine.workspaceFor(roots[0]) : null;
-		return found == null ? null : found.id;
-	}
-
-	/** Gives the window its catalog connections and the starter for idle workspaces (M19 Phase 6). */
-	public function attachWorkspaceConnections(pool:workspace.client.WorkspaceConnections, starter:workspace.client.WorkspaceStarter):Void {
-		catalogConnections = pool;
-		workspaceStarter = starter;
-		starter.started = function(target, endpoint) {
-			var machine = machineClient;
-			if (machine != null) machine.noteService(target.workspace, endpoint.socket, endpoint.managerPid);
-		};
-	}
-
-	var pendingContextTarget:Null<workspace.ContextInfo>;
-	var pendingContextTargetUntil:Float = 0;
-	static inline final CONTEXT_TARGET_SECONDS = 15.0;
 
 	/** Deleted workspaces still on screen; their contexts close once the window has left them. */
 	final pendingForgetWorkspaces:Array<String> = [];
 
-	/**
-		A switch to a group of another workspace waits for that workspace to be open and its groups to be loaded, then
-		focuses the group if it still exists. The wait ends when another workspace opened instead (`published`), when the
-		open failed (`report`), or after CONTEXT_TARGET_SECONDS.
-	**/
-	function applyPendingContextTarget(published:Bool):Void {
-		var target = pendingContextTarget;
-		if (target == null) return;
-		if (Sys.time() > pendingContextTargetUntil) { pendingContextTarget = null; return; }
-		if (application.activeContext.contextWorkspaceId != target.workspace) {
-			if (published) pendingContextTarget = null;
-			return;
-		}
-		if (target.isRoot()) { pendingContextTarget = null; return; }
-		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-		if (catalog == null) return;
-		var exists = false;
-		for (group in catalog.groups) if (group.id == target.group) exists = true;
-		if (!exists) return;
-		pendingContextTarget = null;
-		application.activeContext.openSessionGroup(target.group, catalog.groups, catalog.workspaceRoot);
-	}
-
-	/**
-		A group context whose group the workspace no longer has goes back to the workspace. The group was removed, or
-		an earlier run saved it and it is gone now; otherwise the window keeps the group's name as its title and offers
-		"Back to Workspace" from a group that does not exist. Only a fully loaded catalog can tell, and a switch to a
-		group of another workspace (`pendingContextTarget`) is left to finish.
-	**/
-	function leaveMissingGroup():Void {
-		var active = application.activeContext;
-		if (active.kind != workspace.ContextKind.Group || pendingContextTarget != null) return;
-		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-		if (catalog == null || catalog.next != null) return;
-		for (group in catalog.groups) if (group.id == active.id) return;
-		active.useWorkspace();
-		requestFrame();
-	}
-
-	/** A deleted workspace: leave it first if it is on screen, then close its contexts, keeping every unsaved tab. */
-	function removeWorkspaceContexts(id:String):Void {
-		var active = application.activeContext;
-		if (active.contextWorkspaceId == id) {
-			if (pendingForgetWorkspaces.indexOf(id) < 0) pendingForgetWorkspaces.push(id);
-			var other = previousContext(id);
-			if (other != null) switchToContext(other); else application.savedWorkspaces.close();
-		}
-		forgetDeletedWorkspace(id);
-	}
-
-	function forgetDeletedWorkspace(id:String):Void {
-		if (application.activeContext.contextWorkspaceId == id) return;
-		pendingForgetWorkspaces.remove(id);
-		var moved = host.forgetWorkspaceContexts(id);
-		application.activeContext.forgetWorkspace(id);
-		if (moved > 0) host.getNotifications().publish(moved + (moved == 1 ? " unsaved tab" : " unsaved tabs") + " from the deleted workspace moved to this one.", feedback.NotificationKind.Warning, "workspace");
-		requestFrame();
-	}
-
-	/** Switching across workspaces is the same operation as within one: the key changes and the tabs follow. */
-	public function switchToContext(info:workspace.ContextInfo):Void {
-		var active = application.activeContext;
-		pendingContextTarget = null;
-		if (info.workspace == active.contextWorkspaceId) {
-			if (info.isRoot()) active.useWorkspace();
-			else if (info.directory.length > 0) active.focusGroup(info.group, info.label, info.directory);
-		} else {
-			var known = machineClient == null ? null : machineClient.workspaceById(info.workspace);
-			var actions = machineActions;
-			if (known == null || actions == null) return;
-			pendingContextTarget = info; pendingContextTargetUntil = Sys.time() + CONTEXT_TARGET_SECONDS;
-			actions.open(known);
-		}
-		requestFrame();
-	}
-
-	/** The editor window `--context=` asked for: once suit lists the machine's workspaces, opens that workspace and group. */
-	public function startInContext(key:Null<String>):Void {
-		var parsed = key == null ? null : workspace.ContextKey.parse(key);
-		if (parsed != null) startContext = new workspace.ContextInfo(parsed.machine, parsed.workspace, parsed.group, "", "", "");
-	}
-
-	function applyStartContext():Void {
-		var target = startContext, machine = machineClient;
-		if (target == null || machine == null) return;
-		if (machine.machine == null) { if (machine.error != null) startContext = null; return; }
-		startContext = null;
-		if (machine.workspaceById(target.workspace) == null) { application.reportError("workspace", "This workspace is not on this machine."); return; }
-		var active = application.activeContext;
-		if (active.contextWorkspaceId != target.workspace) switchToContext(target);
-		else if (target.isRoot()) active.useWorkspace();
-		else { pendingContextTarget = target; pendingContextTargetUntil = Sys.time() + CONTEXT_TARGET_SECONDS; applyPendingContextTarget(false); }
+	/** Each workspace's state as the Workbench's rows last showed it. */
+	function watchedWorkspaces():Map<String, WorkbenchWorkspaceState> {
+		var watched = workbenchActions.view().watched;
+		return watched == null ? [] : watched;
 	}
 
 	/** The focus of every editor window but this one. */
 	function otherWindows():Array<suit.WindowFocus>
-		return machineClient == null ? [] : suit.WindowFocus.WindowFocuses.others(machineClient.windows, suit.SuitClient.windowIdentity());
+		return machineClient == null ? [] : suit.WindowFocus.WindowFocuses.others(machineClient.windows, windowId());
 
-	/** Starts another editor window on a workspace, or on one of its groups (Open in New Window). */
-	function openContextInNewWindow(workspaceId:String, group:Null<String>):Void {
-		var failure = workspace.NewWindow.open(workspace.ContextKey.make(application.activeContext.machineId, workspaceId, group == null ? "" : group));
-		if (failure != null) application.reportError("workspace", failure);
-		requestFrame();
-	}
-
-	function openActiveContextInNewWindow():Void {
-		var active = application.activeContext;
-		openContextInNewWindow(active.contextWorkspaceId, active.kind == workspace.ContextKind.Group ? active.id : null);
-	}
-
-	/** Ctrl+Tab: back to the context used before this one. */
-	public function switchToPreviousContext():Void {
-		var target = previousContext();
-		if (target != null) switchToContext(target);
-	}
-
-	/** The most recent context before this one that can still be entered; stale entries are skipped. */
-	function previousContext(?excludingWorkspace:String):Null<workspace.ContextInfo> {
-		var active = application.activeContext, activeKey = active.key();
-		for (info in active.recent) {
-			if (info.key() == activeKey || excludingWorkspace != null && info.workspace == excludingWorkspace) continue;
-			if (contextStillExists(info) && (info.workspace == active.contextWorkspaceId || machineClient != null && machineClient.workspaceById(info.workspace) != null)) return info;
-		}
-		return null;
+	/** This window's id in suit (`w<pid>-<seconds>`); null on a host without suit (the phone). */
+	function windowId():Null<String> {
+		var link = suit.SuitLink.instance;
+		return link == null ? null : link.windowId;
 	}
 
 	/**
-		Whether a remembered context can still be entered: its workspace was not deleted (listed by the catalog before, not
-		now) and a group's folder exists. A workspace the catalog never listed stays.
-	**/
-	function contextStillExists(info:workspace.ContextInfo):Bool {
-		return application.activeContext.stillExists(info, function(path) return sys.FileSystem.exists(path));
-	}
-
-	/** Forgets recents of deleted workspaces and vanished group folders; runs whenever the catalog changes. */
-	function pruneRecentContexts():Void {
-		var machine = machineClient == null ? null : machineClient.machine;
-		if (machine == null) return;
-		application.activeContext.catalogChanged([for (entry in machine.workspaces) entry.id], function(path) return sys.FileSystem.exists(path));
-	}
-
-	/**
-		The app's state for a test driver (EXOSUIT_AUTOMATION_DIR, see devtools.AutomationProbe): what is open, per
-		context, and what the tree and the right panel show. Plain data; nothing here changes the app.
-	**/
-	public function automationState():Dynamic {
-		var active = application.activeContext, current = application.savedWorkspaces.current;
-		var machine = machineClient == null ? null : machineClient.machine;
-		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-		var agents = client == null ? null : client.agentService().agents();
-		var panes:Array<Dynamic> = [];
-		for (pane in host.panes) {
-			var tabs:Array<Dynamic> = [];
-			for (item in pane.items) {
-				var title = "", kind = "", lines:Null<Array<String>> = null, agentState:Null<String> = null, agentError:Null<String> = null;
-				switch item {
-					case Document(view): kind = "document"; title = view.document.hasBackingPath() ? view.document.requirePath() : "(untitled)";
-					case Terminal(terminal):
-						kind = "terminal"; title = terminal.title;
-						// What the terminal shows, so a test can see input from another window arrive.
-						if (Std.isOfType(terminal.panel, TerminalPane)) lines = cast(terminal.panel, TerminalPane).diagnosticState().lines;
-					case Agent(agent):
-						kind = "agent"; title = agent.title;
-						// The conversation as items, so a test can see a reply arrive.
-						var transcript = agent.panel.automationTranscript();
-						lines = transcript.lines; agentState = transcript.state; agentError = transcript.error;
-					case WorkspaceFile(file): kind = "workspace-file"; title = file.root + "|" + file.path;
-					case Settings(_): kind = "settings";
-					case Image(_): kind = "image";
-					case UnsupportedFile(_): kind = "unsupported";
-				}
-				var tab:Dynamic = {kind: kind, title: title};
-				if (lines != null) tab.lines = lines;
-				if (kind == "agent") { tab.agentState = agentState; tab.agentError = agentError; }
-				tabs.push(tab);
-			}
-			panes.push({id: pane.id, active: pane.activeIndex, tabs: tabs});
-		}
-		return {
-			context: active.key(), hostContext: host.layoutContextKey, contextWorkspace: active.contextWorkspaceId,
-			openWorkspace: machineClient == null ? null : currentWorkspaceId(machineClient), savedWorkspace: current == null ? null : {id: current.id, name: current.name},
-			machineWorkspaces: machine == null ? [] : [for (entry in machine.workspaces) {id: entry.id, name: entry.name, folders: entry.folders}],
-			groups: catalog == null ? [] : [for (group in catalog.groups) {id: group.id, name: group.name, parent: group.parent, order: group.order, cwd: group.cwd}],
-			terminals: catalog == null ? [] : [for (terminal in catalog.terminals) {id: terminal.id, name: terminal.name, group: terminal.group, order: terminal.order, state: terminal.state}],
-			agents: agents == null ? [] : [for (record in agents.records) {id: record.id, name: record.name, group: record.group, state: record.state}],
-			recent: [for (info in active.recent) info.key()],
-			filesRoots: try contextRoots() catch (_:Dynamic) [],
-			title: workspaceTitleText(), contextRoots: active.roots.copy(), projectRoots: [for (project in application.workspace.projects) project.root],
-			panes: panes,
-			sessionLines: host.sessionLines(),
-			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
-			sidebar: sidebar.activeId, contextTab: Std.string(contextTab), workspaceStatus: workspaceStatus, workspaceError: workspaceError, timeline: workspace.client.ConnectTimeline.snapshot(), watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
-			commandViewActive: host.isCommandViewActive(),
-			windowId: suit.SuitClient.windowIdentity(), otherWindows: otherWindows(), newWindowMs: Std.int(workspace.NewWindow.slowestOpen * 1000 * 10) / 10,
-			contextKind: Std.string(active.kind), layoutMode: layoutModes.current.id, railHidden: layoutModes.hiddenOnRail().copy(),
-			workbenchEmptyState: workbenchPanel != null && workbenchPanel.showsEmptyState(),
-			workbench: workbenchAutomationState(),
-			remoteAccess: remoteAccessPanel == null ? null : remoteAccessPanel.automationState()
-		};
-	}
-
-	/** What the Workbench can create now and which workspace its rows belong to, for a test driver. */
-	function workbenchAutomationState():Dynamic {
-		var client = workbenchClient, panel = workbenchPanel;
-		if (client == null || panel == null) return null;
-		var catalog = client.terminalCatalog(), attached = workspaceAttachment;
-		var served:Null<String> = null, servedRoot:Null<String> = null;
-		if (attached != null && Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) {
-			var local:workspace.client.LocalWorkspaceClient = cast attached;
-			served = local.servedWorkspace(); servedRoot = local.rootPath();
-		}
-		return {catalog: catalog != null, catalogRoot: catalog == null ? null : catalog.workspaceRoot,
-			agentsLoaded: client.agentService().agents() != null,
-			canCreateTerminal: client.canCreateGroupedTerminals() && !client.terminalCatalogBusy(), canCreateAgent: canCreateAgentSession(),
-			canEditGroups: client.canEditGroups(), openRow: panel.model.openRow, groupParent: panel.model.groupParent,
-			selected: panel.tree.selectedKey, connectingTo: panel.connectingTo(), servedWorkspace: served, servedRoot: servedRoot,
-			catalogError: client.terminalCatalogError(), agentError: client.agentService().agentError()};
-	}
-
-	/** The quick switch: recent contexts first, then the machine's workspaces and the current workspace's groups. */
-	public function openContextSwitcher():Void {
-		var entries:Array<commandview.CommandViewEntry> = [];
-		var active = application.activeContext, activeKey = active.key();
-		var recent = active.recent;
-		for (index in 0...recent.length) {
-			var info = recent[index];
-			if (info.key() == activeKey || !contextStillExists(info)) continue;
-			var name = info.isRoot() ? info.workspaceLabel : info.workspaceLabel + " / " + info.label;
-			entries.push(new commandview.CommandViewEntry(name, host.contextIsWarm(info.key()) ? "open" : "", "ctx:" + info.key(), null, null, "Recent"));
-		}
-		var machine = machineClient == null ? null : machineClient.machine;
-		if (machine != null) for (entry in machine.workspaces)
-			entries.push(new commandview.CommandViewEntry(entry.name, "workspace", "ws:" + entry.id, null, null, "Workspaces"));
-		for (key in host.recoveredContextKeys())
-			entries.push(new commandview.CommandViewEntry("Recovered: " + key.split("#")[0], host.recoveredSummary(key), "rec:" + key, null, null, "Recovered"));
-		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-		if (catalog != null) for (group in catalog.groups)
-			entries.push(new commandview.CommandViewEntry(group.name, "group", "grp:" + group.id, null, null, "Groups"));
-		host.openCommandView(new commandview.CommandViewProvider("Switch to: ", entries, function(_) {}, function(entry, _, _) {
-			if (entry == null) return;
-			host.closeCommandView();
-			var value = entry.value;
-			if (StringTools.startsWith(value, "rec:")) {
-				// Opening a recovered layout merges its tabs into the context on screen.
-				var moved = host.mergeContext(value.substr(4), false);
-				host.getNotifications().publish(moved + (moved == 1 ? " recovered tab" : " recovered tabs") + " opened here.", feedback.NotificationKind.Information, "workspace");
-			} else if (StringTools.startsWith(value, "ctx:")) {
-				for (info in application.activeContext.recent) if ("ctx:" + info.key() == value) { switchToContext(info); break; }
-			} else if (StringTools.startsWith(value, "ws:")) {
-				var id = value.substr(3);
-				var root:Null<workspace.ContextInfo> = null;
-				for (info in application.activeContext.recent) if (info.workspace == id && info.isRoot()) root = info;
-				var known = machineClient == null ? null : machineClient.workspaceById(id);
-				if (root != null) switchToContext(root);
-				else if (known != null) switchToContext(new workspace.ContextInfo(active.machineId, id, "", known.name, known.name, ""));
-			} else if (StringTools.startsWith(value, "grp:") && catalog != null) {
-				application.activeContext.openSessionGroup(value.substr(4), catalog.groups, catalog.workspaceRoot);
-			}
-			requestFrame();
-		}));
-	}
-
-	/** A test run's command (devtools.AutomationProbe.takeCommand): `open-workspace <id>` does what a double click on its row does. */
-	function runAutomationCommand(command:String):Void {
-		var words = command.split(" ");
-		if (words[0] == "open-workspace" && words.length == 2) openMachineWorkspace(words[1]);
-	}
-
-	/** Opens the machine workspace `id` unless it is open; its clients then follow the workspace's manager choice. */
-	function openMachineWorkspace(id:String):Void {
-		var current = application.savedWorkspaces.current, known = machineClient == null ? null : machineClient.workspaceById(id);
-		var actions = machineActions;
-		if ((current == null || current.id != id) && known != null && actions != null) actions.open(known);
-		requestFrame();
-	}
-
-	/**
-		The service the window attaches to by workspace id: the open machine
-		workspace's, else the one that holds the active project's folder. `target` is null when the window follows a
-		folder's own service: the flag is off, suit is off, or suit knows no workspace for it. `waiting` is true
-		while suit's answer is awaited, which decides between those.
+		The service the window attaches to by workspace id: the open machine workspace's, else the one that holds the active
+		project's folder. `target` is null when suit knows no workspace for it (the folder is then opened as one:
+		`openFolderWorkspace`). `waiting` is true while suit's answer is awaited.
 	**/
 	function workspaceServiceTarget(projectRoot:Null<String>):{target:Null<workspace.client.WorkspaceServiceTarget>, waiting:Bool} {
 		var open = application.savedWorkspaces.current, machine = machineClient;
 		var none:{target:Null<workspace.client.WorkspaceServiceTarget>, waiting:Bool} = {target: null, waiting: false};
-		if (machine == null || !machine.enabled || !workspace.client.WorkspaceServiceTarget.enabled()) return none;
+		if (machine == null) return none;
 		if (machine.machine == null) return {target: null, waiting: machine.error == null && (open != null || projectRoot != null)};
 		var known:Null<suit.MachineCatalog.MachineWorkspace> = open == null ? null : machine.workspaceById(open.id);
 		if (known == null && projectRoot != null) known = machine.workspaceHolding(projectRoot);
 		if (known == null) return none;
 		if (known.folders.length == 0 && machine.scratchOf(known) == null) {
-			var id = known.id;
-			if (!machine.busy()) machine.scratch(id, function(_, failure) { if (failure != null) application.reportError("workspace", failure); });
+			if (!machine.busy()) workbenchActions.scratch(known, function(_) requestFrame());
 			return {target: null, waiting: true};
 		}
 		return {target: machine.serviceTarget(known), waiting: false};
@@ -2479,1015 +1419,34 @@ class ExosuitApp implements DesktopUiApplication {
 	/** Whether the machine's workspaces are not known yet, so a root cannot say yet which service it belongs to. */
 	public function machineWorkspacesPending():Bool {
 		var machine = machineClient;
-		return machine != null && machine.enabled && workspace.client.WorkspaceServiceTarget.enabled() && machine.machine == null
-			&& machine.error == null;
+		return machine != null && machine.machine == null && machine.error == null;
 	}
 
 	/** The workspace service a terminal root belongs to, or null for a folder's own. */
 	public function terminalServiceTarget(root:String):Null<workspace.client.WorkspaceServiceTarget> {
 		var machine = machineClient;
-		return machine == null || !machine.enabled || !workspace.client.WorkspaceServiceTarget.enabled() ? null : machine.serviceTargetFor(root);
-	}
-
-	/** Opens `root` as the workspace unless it already is; its clients then follow the folder's manager choice. */
-	function openMachineRoot(root:String):Void {
-		var project = application.workspace.activeProject;
-		var normal = workspace.client.MachineWorkspaces.normalPath;
-		if (project == null || normal(project.root) != normal(root)) openArgument(root, true);
-		requestFrame();
-	}
-
-	/**
-		Opening a folder while a workspace is open: the machine workspace that holds exactly this folder opens in its
-		place; the folder never joins the workspace. True when a workspace took it.
-	**/
-	function openFolderAsMachineWorkspace(path:String):Bool {
-		var currentId = application.savedWorkspaces.workspaceId(), machine = machineClient, actions = machineActions;
-		if (currentId == null || machine == null || !machine.enabled || actions == null) return false;
-		var found = machine.workspaceFor(application.workspace.fileSystem.normalize(path));
-		if (found == null) return false;
-		if (found.id != currentId) actions.open(found);
-		return true;
-	}
-
- function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
-  var artifactPreviewAvailable = Std.isOfType(hostContext, haxeon.ui.host.DesktopUiHostContext) && SessionArtifactPreview.available();
-  return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,application.syntaxes,showWorkbenchMenu,
-   function(group:String) {
-    createProviderAgent("codex", group);
-   }, function(destination) openSessionLink(resource, root, destination), {
-    explore: function() { if (sessionRecord(resource, root) != null) showSidebarMode("files"); },
-    reviewChanges: function() { if (sessionRecord(resource, root) != null) showSidebarMode("scm"); },
-    canCommitChanges: function() return sessionCommitRepository(resource, root) != null,
-    commitChanges: function() {
-     var repository = sessionCommitRepository(resource, root), source = sourceControlSource();
-     if (repository == null || source == null) return;
-     rememberScmResource(source, repository, null, null);
-     showSidebarMode("scm");
-     sourceControlPanel();
-     if (sourceControlPanelValue != null) sourceControlPanelValue.focusCommitMessage();
-     requestFrame();
-    },
-    context: function() return sessionWorkspaceLabel(resource, root),
-    resolveImage: function(destination) return resolveSessionImage(resource, root, destination),
-    loadImage: function(destination, done) readSessionImage(resource, root, destination, done),
-    openMessageImage: function(turn,item,imageId,bytes) openSentSessionImage(resource,root,turn,item,imageId,bytes),
-    readContext: function(path, done) readSessionContext(resource, root, path, done),
-    canCreateWorktree: function() return sessionWorktreeRepository(resource, root) != null,
-    newWorktree: function() createSessionWorktree(resource, root),
-    worktreeLabel: function() return sessionDirectoryLabel(resource, root),
-    branchLabel: function() return sessionBranchLabel(resource, root),
-    canSelectWorktree: function() return canSelectSessionDirectory(resource, root),
-    selectWorktree: function() selectSessionDirectory(resource, root),
-    canSelectBranch: function() return sessionBranchSelectable(resource, root),
-    selectBranch: function() selectSessionBranch(resource, root),
-    chooseImage: desktop == null ? null : function(done) chooseSessionImage(resource, root, done),
-    pasteImage: desktop == null ? null : function() return SessionClipboardImage.read(),
-    canOpenGithub: function() return sessionGithubOrigin(resource, root) != null,
-    canOpenPullRequest: function() return sessionGithubOrigin(resource, root) != null && sessionGithubBranch(resource, root) != null,
-    githubRepository: function() openSessionGithub(resource, root, false),
-    githubPullRequest: function() openSessionGithub(resource, root, true),
-    previewArtifact: artifactPreviewAvailable ? function(_, source) {
-     var desktopHost:haxeon.ui.host.DesktopUiHostContext = cast hostContext;
-     if (!SessionArtifactPreview.open(desktopHost.window.rawValue(), source))
-      application.reportError("agent", "Static artifact preview is unavailable or the source exceeds 512 KiB");
-    } : null
-   }, function() return hostContext == null || !hostContext.touchPrimary));
- }
-
- function sessionGithubSource(resource:String, root:String):Null<{source:scm.ScmRemoteReader, repository:scm.ScmRepository}> {
-  var record = sessionRecord(resource, root), source = record == null ? null : sessionSourceControlSource(record.cwd);
-  if (record == null || source == null || !Std.isOfType(source, scm.ScmRemoteReader)) return null;
-  var reader:scm.ScmRemoteReader = cast source, nearest:Null<scm.ScmRepository> = null;
-  for (repository in source.repositories()) if (reader.canReadOrigin(repository.id)
-    && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
-    && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
-  return nearest == null ? null : {source:reader, repository:nearest};
- }
-
- function sessionGithubOrigin(resource:String, root:String):Null<String> {
-  var selected = sessionGithubSource(resource, root);
-  if (selected == null) return null;
-  // An origin belongs to the repository, not to the source viewing it, so switching groups neither refetches nor grows this.
-  var key = root + ":" + selected.repository.id;
-	  var checked = githubOriginsCheckedAt.get(key);
-	  if (checked != null && Sys.time() - checked >= 30) { githubOrigins.remove(key); githubOriginsCheckedAt.remove(key); }
-  if (!githubOrigins.exists(key) && !githubOriginsPending.exists(key)) {
-   githubOriginsPending.set(key, true);
-   selected.source.origin(selected.repository.id, function(result) {
-    githubOriginsPending.remove(key);
-    var current = sessionGithubSource(resource, root);
-    if (current == null || current.source != selected.source || current.repository.id != selected.repository.id) return;
-    githubOrigins.set(key, result.error == null && result.value != null ? result.value : "");
-	   githubOriginsCheckedAt.set(key, Sys.time());
-    requestFrame();
-   });
-  }
-  var origin = githubOrigins.get(key);
-  return origin == null || origin == "" ? null : origin;
- }
-
- function sessionGithubBranch(resource:String, root:String):Null<String> {
-  var selected = sessionGithubSource(resource, root), source = sessionScmSource(resource, root);
-  if (selected == null || source == null) return null;
-  var snapshot = source.snapshot(selected.repository.id);
-  return snapshot == null ? null : snapshot.head.branch;
- }
-
- function openSessionGithub(resource:String, root:String, pullRequest:Bool):Void {
-  var selected = sessionGithubSource(resource, root), branch = pullRequest ? sessionGithubBranch(resource, root) : null;
-  if (selected == null || (pullRequest && branch == null)) return;
-  selected.source.origin(selected.repository.id, function(result) {
-   var current = sessionGithubSource(resource, root);
-   if (current == null || current.source != selected.source || current.repository.id != selected.repository.id
-     || (pullRequest && branch != sessionGithubBranch(resource, root))) return;
-   var url = result.error == null ? result.value : null;
-   if (url == null) { application.reportError("source-control", "GitHub origin is unavailable"); return; }
-   if (pullRequest) url = scm.GithubRemote.pullRequestPage(url, branch);
-   if (url == null || nativekit.ffi.NativeKit.nk_shell_open_url(url) != Result.Ok)
-    application.reportError("source-control", "Could not open GitHub");
-  });
- }
-
- function chooseSessionImage(resource:String, root:String, done:(Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void):Void {
-  var dialogs = desktop, initial = sessionRecord(resource, root);
-  if (dialogs == null || initial == null) { done(null, null, "Image selection is unavailable"); return; }
-  dialogs.openFile(function(accepted, paths) {
-   if (!accepted || paths == null || paths.length == 0) { done(null, null, null); return; }
-   var current = sessionRecord(resource, root);
-   if (current == null || current.thread != initial.thread || current.cwd != initial.cwd) { done(null, null, "Session changed while choosing an image"); return; }
-   var path = paths[0];
-   try {
-    var metadata = sys.FileSystem.metadata(path);
-    if (metadata == null || metadata.size <= 0 || metadata.size > 2 * 1024 * 1024 || sys.FileSystem.isDirectory(path)) {
-     done(null, null, "Choose an image of at most 2 MiB"); return;
-    }
-    var bytes = sys.io.File.getBytes(path);
-    if (bytes.length == 0 || bytes.length > 2 * 1024 * 1024) { done(null, null, "Image is too large"); return; }
-    done(haxe.io.Path.withoutDirectory(path), bytes, null);
-   } catch (_:Dynamic) done(null, null, "Could not read the selected image");
-  }, "Choose an image");
- }
-
- function readSessionContext(resource:String, root:String, input:String, done:(Null<String>, Null<String>)->Void):Void {
-  var record = sessionRecord(resource, root), attachment = workspaceAttachment;
-  var target = workspace.client.SessionLinkTarget.parse(input);
-  if (record == null || target == null || target.line >= 0 || StringTools.startsWith(target.path, "/")
-      || ~/^[A-Za-z]:/.match(target.path) || StringTools.startsWith(target.path, "\\")) {
-   done(null, "Choose a relative file path in this workspace"); return;
-  }
-  var path = target.resolve(record.cwd);
-  var localFiles = attachment == null || attachment.hasLocalFileAccess();
-  if (!workspace.client.SessionFileScope.allows(root, record.cwd, path, localFiles, workspace.client.SessionLinkTarget.relativeWithin)) {
-   done(null, "File is outside this workspace"); return;
-  }
-  function wanted():Bool {
-   var current = sessionRecord(resource, root);
-   return workspaceAttachment == attachment && current != null && current.cwd == record.cwd && current.thread == record.thread;
-  }
-  if (attachment != null && !attachment.hasLocalFileAccess()) {
-   var client = attachment.fileClient(), scope = primaryScope(attachment);
-   var relative = scope == null ? null : workspace.client.SessionLinkTarget.relativeWithin(scope, path);
-   if (client == null || relative == null) { done(null, "Workspace file service is unavailable"); return; }
-   var workspaceId = attachment.fileWorkspace();
-   client.stat(workspaceId, "root", relative, function(stat) {
-    if (!wanted()) { done(null, "Session changed while reading the file"); return; }
-    if (stat == null || stat.workspace != workspaceId || stat.root != "root" || stat.path != relative || stat.entry == null
-      || stat.entry.kind != "file" || stat.entry.revision == null || stat.entry.size == null
-      || haxe.Int64.compare(stat.entry.size, haxe.Int64.ofInt(4096)) > 0 || haxe.Int64.compare(stat.entry.size, haxe.Int64.ofInt(0)) < 0) {
-     done(null, "Choose a text file of at most 4096 bytes"); return;
-    }
-    WorkspaceFileReader.read(client, workspaceId, "root", relative, stat.entry.revision, function(result) {
-     if (!wanted()) done(null, "Session changed while reading the file");
-     else if (result.error != null || result.sizeBytes > 4096) done(null, result.error == null ? "File is too large" : result.error);
-     else done(result.contents, null);
-    }, wanted);
-   }, function(error) done(null, error == null ? "Could not read workspace file" : error.message));
-  } else try {
-   var fs = application.workspace.fileSystem;
-   if (!fs.exists(path) || fs.isDirectory(path)) { done(null, "File is unavailable"); return; }
-   path = fs.normalize(path);
-   if (!workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath)) { done(null, "File is outside this workspace"); return; }
-   var metadata = sys.FileSystem.metadata(path);
-   if (metadata == null || metadata.size < 0 || metadata.size > 4096) { done(null, "Choose a text file of at most 4096 bytes"); return; }
-   var bytes = sys.io.File.getBytes(path);
-   if (bytes.length > 4096) { done(null, "File is too large"); return; }
-   done(workspace.TextFileContent.decode(bytes, path), null);
-  } catch (_:Dynamic) done(null, "Could not read a UTF-8 text file");
- }
-
- function sessionRecord(resource:String, root:String):Null<workspace.service.WorkspaceAgentProtocol.AgentRecord> {
-  var client = workbenchClient == null ? null : workbenchClient.agentService();
-  var catalog = client == null ? null : client.agents();
-  if (catalog == null || catalog.root != root) return null;
-  var view = client.agentView(resource);
-  return view == null ? null : view.record;
- }
-
- function sessionWorkspaceLabel(resource:String, root:String):String {
-  var record = sessionRecord(resource, root);
-  if (record == null) return "Workspace disconnected";
-  var label = record.cwd;
-  var source = sessionSourceControlSource(record.cwd);
-  if (source != null) {
-   var nearest:Null<scm.ScmRepository> = null;
-   for (repository in source.repositories())
-    if (workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
-   var snapshot = nearest == null ? null : source.snapshot(nearest.id);
-   if (snapshot != null && snapshot.head.branch != null) label += " · " + snapshot.head.branch;
-  }
-  return label;
- }
-
- function nearestSessionGitRepository(resource:String, root:String):Null<scm.ScmRepository> {
-  var record = sessionRecord(resource, root), source = record == null ? null : sessionSourceControlSource(record.cwd);
-  if (record == null || source == null || !source.connected()) return null;
-  var nearest:Null<scm.ScmRepository> = null, local = sessionLocalFiles();
-  for (repository in source.repositories()) if (repository.providerId == "git"
-    && workspace.client.SessionFileScope.allowsRepository(root, record.cwd, repository.root, local, workspace.client.SessionLinkTarget.relativeWithin)
-    && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
-  return nearest;
- }
-
- function sessionDirectoryLabel(resource:String, root:String):String {
-  var record = sessionRecord(resource, root);
-  if (record == null) return "Directory unavailable";
-  var path = StringTools.replace(record.cwd, "\\", "/");
-  while (path.length > 1 && StringTools.endsWith(path, "/")) path = path.substr(0, path.length - 1);
-  var name = path.substr(path.lastIndexOf("/") + 1);
-  return name == "" ? path : name;
- }
-
- function sessionBranchLabel(resource:String, root:String):String {
-  var repository = nearestSessionGitRepository(resource, root), source = sessionScmSource(resource, root);
-  if (repository == null || source == null) return "Branch unavailable";
-  var snapshot = source.snapshot(repository.id);
-  if (snapshot == null) return "Branch unavailable";
-  if (snapshot.head.branch != null && snapshot.head.branch != "") return snapshot.head.branch;
-  return snapshot.head.detachedCommit == null ? "Branch unavailable" : "Detached HEAD";
- }
-
- function sessionBranchSelectable(resource:String, root:String):Bool {
-  var client = workbenchClient == null ? null : workbenchClient.agentService();
-  var view = client == null ? null : client.agentView(resource);
-  var repository = nearestSessionGitRepository(resource, root);
-  return sessionRecord(resource, root) != null && client != null && client.canControlAgents() && !client.agentBusy()
-   && view != null && ["idle", "completed", "failed", "interrupted"].indexOf(view.record.state) >= 0
-   && (view.connectionState == null || view.connectionState == "connected") && view.requests.length == 0
-   && repository != null && canCheckoutScmRepository(repository, sessionScmSource(resource, root));
- }
-
- function selectSessionBranch(resource:String, root:String):Void {
-  if (!sessionBranchSelectable(resource, root)) return;
-  var client = workbenchClient, source = sessionScmSource(resource, root), record = sessionRecord(resource, root);
-  var repository = nearestSessionGitRepository(resource, root);
-  var agents = client == null ? null : client.agentService(), catalog = agents == null ? null : agents.agents();
-  var terminals = client == null ? null : client.terminalCatalog();
-  if (client == null || source == null || record == null || repository == null || catalog == null || terminals == null
-    || catalog.root != root || terminals.workspaceRoot != root) return;
-  var instance = catalog.instance, terminalInstance = terminals.instance, repositoryId = repository.id;
-  var thread = record.thread, cwd = record.cwd, group = record.group, provider = record.provider;
-  function valid():Bool {
-   var currentAgents = workbenchClient == null ? null : workbenchClient.agentService();
-   var currentCatalog = currentAgents == null ? null : currentAgents.agents();
-   var currentTerminals = workbenchClient == null ? null : workbenchClient.terminalCatalog();
-   var current = sessionRecord(resource, root), selected = nearestSessionGitRepository(resource, root);
-   return workbenchClient == client && currentAgents == agents && sessionScmSource(resource, root) == source
-    && currentCatalog != null && currentCatalog.instance == instance && currentCatalog.root == root
-    && currentTerminals != null && currentTerminals.instance == terminalInstance && currentTerminals.workspaceRoot == root
-    && current != null && current.thread == thread && current.cwd == cwd && current.group == group && current.provider == provider
-    && selected != null && selected.id == repositoryId && sessionBranchSelectable(resource, root);
-  }
-  if (valid()) scmBranches.open(repository, valid, source);
- }
-
- function canSelectSessionDirectory(resource:String, root:String):Bool {
-  var client = workbenchClient, record = sessionRecord(resource, root);
-  var catalog = client == null ? null : client.terminalCatalog();
-  if (client == null || record == null || catalog == null || catalog.workspaceRoot != root
-   || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) return false;
-  if (sessionWorktreeRepository(resource, root) != null) return true;
-  for (candidate in catalog.groups)
-   if (SessionGroupDirectory.resolve(catalog.groups, root, candidate.id, record.provider) != null) return true;
-  return false;
- }
-
- /** Starts a new session in an existing group; it never retargets this native thread. */
- function selectSessionDirectory(resource:String, root:String):Void {
-  if (!canSelectSessionDirectory(resource, root)) return;
-  var client = workbenchClient, record = sessionRecord(resource, root);
-  if (client == null || record == null) return;
-  var catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog> = client.terminalCatalog();
-  if (catalog == null) return;
-  var source = sessionSourceControlSource(record.cwd), owner = catalog.instance;
-  var thread = record.thread, cwd = record.cwd, provider = record.provider, group = record.group;
-  var entries:Array<commandview.CommandViewEntry> = [];
-  var offered:Map<String,{cwd:String, stamp:String}> = [];
-  if (sessionWorktreeRepository(resource, root) != null)
-   entries.push(new commandview.CommandViewEntry("New worktree…", "Create a worktree and start a new session", "@new"));
-  for (candidate in catalog.groups) {
-   var resolved = SessionGroupDirectory.resolve(catalog.groups, root, candidate.id, provider);
-   if (resolved == null) continue;
-   offered.set(candidate.id, resolved);
-   entries.push(new commandview.CommandViewEntry("New session in " + candidate.name, resolved.cwd, "group:" + candidate.id));
-  }
-  if (entries.length == 0) return;
-  host.openCommandView(new commandview.CommandViewProvider("New session directory: ", entries, function(_) {}, function(entry, _, _) {
-   host.closeCommandView();
-   var current = sessionRecord(resource, root), latest = client.terminalCatalog();
-   if (entry == null || workbenchClient != client || current == null || sessionSourceControlSource(current.cwd) != source
-     || current.thread != thread || current.cwd != cwd || current.provider != provider || current.group != group
-     || latest == null || latest.instance != owner || latest.workspaceRoot != root || !canSelectSessionDirectory(resource, root)) return;
-   if (entry.value == "@new") { if (sessionWorktreeRepository(resource, root) != null) createSessionWorktree(resource, root); return; }
-   if (!StringTools.startsWith(entry.value, "group:")) return;
-   var id = entry.value.substr(6);
-   var candidate = offered.get(id);
-   if (candidate != null) {
-    var fresh = SessionGroupDirectory.resolve(latest.groups, root, id, provider);
-    if (fresh != null && fresh.cwd == candidate.cwd && fresh.stamp == candidate.stamp) {
-     createIntegratedAgent(provider == null ? "codex" : provider, id); return;
-    }
-   }
-  }));
-  requestFrame();
- }
-
- function sessionCommitRepository(resource:String, root:String):Null<scm.ScmRepository> {
-  var record = sessionRecord(resource, root), source = record == null ? null : sessionSourceControlSource(record.cwd);
-  if (record == null || source == null || !source.connected()) return null;
-  var nearest:Null<scm.ScmRepository> = null, local = sessionLocalFiles();
-  for (repository in source.repositories()) if (repository.providerId == "git" && source.canWrite(repository.id)
-    && workspace.client.SessionFileScope.allowsRepository(root, record.cwd, repository.root, local, workspace.client.SessionLinkTarget.relativeWithin)
-    && source.snapshot(repository.id) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
-  return nearest;
- }
-
- function sessionWorktreeRepository(resource:String, root:String):Null<scm.ScmRepository> {
-  var record = sessionRecord(resource, root), client = workbenchClient;
-  var source = record == null ? null : sessionSourceControlSource(record.cwd), local = sessionLocalFiles();
-  if (record == null || source == null || client == null || !source.connected() || !client.canEditGroups()
-    || client.terminalCatalogBusy() || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) return null;
-  var nearest:Null<scm.ScmRepository> = null;
-  for (repository in source.repositories()) {
-   var features = source.features(repository.id);
-   if (repository.providerId == "git" && features != null && features.worktrees && source.canWrite(repository.id)
-     && workspace.client.SessionFileScope.allowsRepository(root, record.cwd, repository.root, local, workspace.client.SessionLinkTarget.relativeWithin)
-     && source.snapshot(repository.id) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
-  }
-  return nearest;
- }
-
- function createSessionWorktree(resource:String, root:String):Void {
-  var record = sessionRecord(resource, root), repository = sessionWorktreeRepository(resource, root), source = sessionScmSource(resource, root);
-  var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-  if (record == null || repository == null || source == null || client == null || catalog == null) return;
-  var owner = catalog.instance, provider = record.provider == null ? "codex" : record.provider;
-  function valid():Bool {
-   var current = client.terminalCatalog(), session = sessionRecord(resource, root);
-   return workbenchClient == client && session != null && sessionSourceControlSource(session.cwd) == source
-    && session.cwd == record.cwd && session.thread == record.thread && session.provider == record.provider && session.group == record.group
-    && current != null && current.instance == owner;
-  }
-  host.openCommandView(new commandview.CommandViewProvider("New worktree branch: ", [], function(_) {}, function(_, branch, _) {
-   host.closeCommandView();
-   branch = StringTools.trim(branch);
-   if (!valid()) return;
-   if (branch.length == 0 || branch.length > 128 || branch.charAt(0) == "-" || ~/[\x00-\x20\x7f]/.match(branch)) {
-    application.reportError("agent", "Enter a valid branch name of at most 128 characters"); return;
-   }
-   host.openCommandView(new commandview.CommandViewProvider("New worktree folder name inside repository: ", [], function(_) {}, function(_, directory, _) {
-    host.closeCommandView(); directory = StringTools.trim(directory);
-    if (!valid()) { application.reportError("agent", "Workspace changed before worktree creation"); return; }
-    var current = source.snapshot(repository.id);
-    var selected = sessionWorktreeRepository(resource, root);
-    if (current == null || selected == null || selected.id != repository.id) { application.reportError("agent", "Repository is unavailable or changed"); return; }
-    var destination = repository.root + "/" + directory;
-    source.apply(repository.id, workspace.client.WorkspaceIds.create("worktree"), current.revision,
-      scm.ScmOperation.CreateWorktree(directory, branch), function(result) {
-       if (result.error != null) { application.reportError("agent", result.error.message); requestFrame(); return; }
-       if (!valid()) { application.reportError("agent", "Worktree created at " + destination + "; workspace changed before a session group could be created"); requestFrame(); return; }
-       var group:workspace.service.WorkspaceProtocol.WorkspaceGroup = {id:workspace.client.WorkspaceIds.create("group"), name:branch, cwd:destination, revision:0};
-       client.changeGroup(owner, group, branch, null, destination, 0, true, function(created, error) {
-        if (error != null || created == null) application.reportError("agent", "Worktree created at " + destination + "; could not create its session group: " + (error == null ? "unknown error" : error));
-        else if (!valid()) application.reportError("agent", "Worktree and group created at " + destination + "; reconnect to start a session");
-        else createIntegratedAgent(provider, created.id);
-        requestFrame();
-       });
-      });
-   }));
-  }));
- }
-
- function resolveSessionImage(resource:String, root:String, destination:String):Null<String> {
-  var record = sessionRecord(resource, root);
-  if (record == null || (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess())) return null;
-  var target = workspace.client.SessionLinkTarget.parse(destination);
-  if (target == null || !UiImageTab.supports(target.path)) return null;
-  var path = target.resolve(record.cwd);
-  try {
-   if (!application.workspace.fileSystem.exists(path) || application.workspace.fileSystem.isDirectory(path)) return null;
-   path = application.workspace.fileSystem.normalize(path);
-   if (!workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath)) return null;
-   var metadata = sys.FileSystem.metadata(path);
-   return metadata != null && metadata.size <= 4 * 1024 * 1024 ? path : null;
-  } catch (_:Dynamic) return null;
- }
-
- function openSentSessionImage(resource:String,root:String,turn:String,item:String,imageId:String,bytes:haxe.io.Bytes):Void {
-  if(sessionRecord(resource,root)==null) {application.reportError("agent","Reconnect this session to open its image");return;}
-  var image:Null<haxeon.ui.Image>=null;
-  try {
-   var dimensions=SessionImageProbe.dimensions(bytes);
-   if(dimensions==null) throw "Unsupported or invalid sent image";
-   var digest=haxe.crypto.Sha256.make(bytes), fingerprint="";
-   for(index in 0...digest.length) fingerprint+=StringTools.hex(digest.get(index),2);
-   var identity="sent-image:"+root.length+":"+root+resource.length+":"+resource+turn.length+":"+turn+item.length+":"+item+imageId.length+":"+imageId+":"+fingerprint;
-   if(host.activateRemoteImage(identity)) {requestFrame();return;}
-   if(!host.canOpenRemoteImage(dimensions.width,dimensions.height)) throw "Image memory limit reached; close an image and try again";
-   image=SessionImageProbe.decodeFull(bytes);
-   if(image==null) throw "Unsupported or invalid sent image";
-   host.openRemoteImage(identity,"Sent image",image,bytes.length,"session");image=null;
-  } catch(problem:Dynamic) {if(image!=null) image.dispose();application.reportError("agent",Std.string(problem));}
-  requestFrame();
- }
-
- function readSessionImage(resource:String, root:String, destination:String, done:(Null<haxe.io.Bytes>, Null<String>)->Void):Void {
-  var record = sessionRecord(resource, root), attachment = workspaceAttachment;
-  var target = workspace.client.SessionLinkTarget.parse(destination);
-  if (attachment == null || attachment.hasLocalFileAccess()) {
-   try {
-    var local = resolveSessionImage(resource, root, destination);
-    var bytes = local == null ? null : SessionImageProbe.readBounded(local);
-    done(bytes, bytes == null ? "Image preview is unavailable for this location" : null);
-   } catch (_:Dynamic) done(null, "Could not read workspace image");
-   return;
-  }
-  if (record == null || attachment == null || attachment.hasLocalFileAccess() || target == null || target.line >= 0) {
-   done(null, "Image preview is unavailable for this location"); return;
-  }
-  var cwd = record.cwd, thread = record.thread, path = target.resolve(cwd);
-  var scope = primaryScope(attachment), client = attachment.fileClient();
-  var relative = scope == null ? null : workspace.client.SessionLinkTarget.relativeWithin(scope, path);
-  if (client == null || relative == null || workspace.client.SessionLinkTarget.relativeWithin(root, path) == null) {
-   done(null, "Image is outside the connected workspace"); return;
-  }
-  var workspaceId = attachment.fileWorkspace();
-  function wanted():Bool {
-   var current = sessionRecord(resource, root);
-   return workspaceAttachment == attachment && current != null && current.cwd == cwd && current.thread == thread
-    && attachment.fileClient() == client && attachment.fileWorkspace() == workspaceId && primaryScope(attachment) == scope;
-  }
-  WorkspaceImageReader.read(client, workspaceId, "root", relative, done, wanted);
- }
-
- /** Route explicit file links to the owning workspace; external URLs require activation. */
- function openSessionLink(resource:String, root:String, destination:String):Void {
-  var record = sessionRecord(resource, root);
-  if (record == null) { application.reportError("agent", "Reconnect this session’s workspace to open its links"); return; }
-  if (workspace.client.SessionLinkTarget.external(destination)) {
-   try {
-    if (nativekit.ffi.NativeKit.nk_shell_open_url(destination) != Result.Ok)
-     application.reportError("agent", "Could not open link");
-   } catch (error:Dynamic) application.reportError("agent", Std.string(error));
-   return;
-  }
-  var target = workspace.client.SessionLinkTarget.parse(destination);
-  if (target == null) return;
-  var path = target.resolve(record.cwd);
-  // A response is workspace content: never resolve a stale/remote host path locally.
-  var attachment = workspaceAttachment;
-  var remote = attachment != null && !attachment.hasLocalFileAccess();
-  // Locally the session's own folder counts too: a group folder may lie outside the workspace. A remote attachment's
-  // file service shares only the workspace root.
-  var allowed = remote
-   ? workspace.client.SessionFileScope.allows(root, record.cwd, path, false, workspace.client.SessionLinkTarget.relativeWithin)
-   : workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath);
-  if (!allowed) { application.reportError("agent", "This file link is outside the session’s workspace"); return; }
-  if (remote) {
-   var client = attachment.fileClient(), scope = primaryScope(attachment);
-   if (client == null || scope == null) { application.reportError("agent", "Workspace file service is unavailable"); return; }
-   var scopedPath = workspace.client.SessionLinkTarget.relativeWithin(scope, path);
-   if (scopedPath == null) { application.reportError("agent", "This file is outside the connected file root"); return; }
-   var workspaceId = attachment.fileWorkspace();
-   if (UiImageTab.supports(scopedPath)) {
-    readSessionImage(resource, root, destination, function(bytes, error) {
-     if (error != null || bytes == null) { application.reportError("agent", error == null ? "Could not load workspace image" : error); requestFrame(); return; }
-     var image:Null<haxeon.ui.Image> = null;
-     try {
-      var digest = haxe.crypto.Sha256.make(bytes), fingerprint = "";
-      for (index in 0...digest.length) fingerprint += StringTools.hex(digest.get(index), 2);
-      var identity = "remote-image:" + workspaceId.length + ":" + workspaceId + scope.length + ":" + scope
-       + scopedPath.length + ":" + scopedPath + ":" + fingerprint;
-      if (host.activateRemoteImage(identity)) { requestFrame(); return; }
-      var dimensions = SessionImageProbe.dimensions(bytes);
-      if (dimensions == null) throw "Unsupported or invalid workspace image";
-      if (!host.canOpenRemoteImage(dimensions.width, dimensions.height)) throw "Remote image memory limit reached; close an image and try again";
-      image = SessionImageProbe.decodeFull(bytes);
-      if (image == null) throw "Unsupported or invalid workspace image";
-      host.openRemoteImage(identity, scopedPath, image, bytes.length);
-      image = null;
-     } catch (error:Dynamic) { if (image != null) image.dispose(); application.reportError("agent", Std.string(error)); }
-     requestFrame();
-    });
-    return;
-   }
-   client.stat(workspaceId, "root", scopedPath, function(stat) {
-    var current = sessionRecord(resource, root);
-    if (workspaceAttachment != attachment || current == null || current.cwd != record.cwd || current.thread != record.thread) return;
-    if (stat == null || stat.workspace != workspaceId || stat.root != "root" || stat.path != scopedPath
-      || stat.entry == null || stat.entry.kind != "file" || stat.entry.revision == null) {
-     application.reportError("agent", "The linked workspace file is no longer available"); requestFrame(); return;
-    }
-    var match:Null<FileSearchMatch> = target.line < 0 ? null : {path: scopedPath, kind: "file", revision: stat.entry.revision,
-     line: target.line, column: target.column, length: 0, preview: ""};
-    openWorkspaceFileSnapshot(attachment, workspaceId, scope, "root", scope, scopedPath, stat.entry.revision,
-     WorkspaceFileReader.previewSize(stat.entry.size), false, match);
-    requestFrame();
-   }, function(error) { if (workspaceAttachment == attachment) application.reportError("agent", error == null ? "Could not open workspace file" : error.message); requestFrame(); });
-  } else {
-   try {
-    if (!application.workspace.fileSystem.exists(path) || application.workspace.fileSystem.isDirectory(path)) {
-     application.reportError("agent", "The linked file is no longer available"); return;
-    }
-    host.openFile(path, true);
-    var view = host.activeView();
-    if (view != null && target.line >= 0) { view.restoreCursor(target.line, target.column); host.cursorChanged(); }
-    host.focusActiveEditor();
-    requestFrame();
-   } catch (error:Dynamic) application.reportError("agent", "Could not open file: " + Std.string(error));
-  }
- }
-
- function canCreateAgentSession():Bool {
-  var client = workbenchClient;
-  if (client == null) return false;
-  if (application.settings.current.agentSessionMode == "terminal")
-   return client.canCreateGroupedTerminals() && !client.terminalCatalogBusy();
-  return client.agentService().canControlAgents() && client.agentService().agentCreation() == null;
- }
-
- function createProviderAgent(provider:String, group:String):Void createProviderAgentIn(provider, group, null);
-
- /** `directory` is the folder chosen with Change… or the scratch folder; null lets the service resolve it. */
- function createProviderAgentIn(provider:String, group:String, directory:Null<String>):Void {
-  if (!canCreateAgentSession()) {
-   application.reportError("agent", "Cannot create an agent session while the workspace is disconnected or another session operation is in progress. Wait and try again.");
-   requestFrame(); return;
-  }
-  // The built-in agent has no CLI to host in a terminal, so it is always an integrated conversation.
-  if (provider != "agentkit" && application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group, directory); return; }
-  createIntegratedAgent(provider, group, directory);
- }
-
- function createIntegratedAgent(provider:String, group:String, ?directory:String):Void {
-  var client=workbenchClient;
-  if(client == null || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) {
-   application.reportError("agent", "The worktree group is ready; connect to start an integrated session"); return;
-  }
-  var defaults:workspace.client.AgentSessionDefaults={provider:provider,model:null,effort:null,
-   permissionProfile:provider == "claude" ? "default" : "supervised",directory:directory};
-  if(provider == "codex") {
-   var settings=application.settings.current,model=StringTools.trim(settings.codexDefaultModel);
-   defaults.model=model == "" ? null : model;
-   defaults.effort=settings.codexDefaultEffort == "model-default" ? null : settings.codexDefaultEffort;
-   defaults.permissionProfile=settings.codexDefaultPermissions;
-  }
-  client.agentService().createAgent(group,null,openCreatedAgent,defaults);
- }
-
- function createAgentTerminal(provider:String, group:String, ?directory:String):Void {
-  var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-  if (catalog == null || catalog.agentProviders == null || catalog.agentProviders.indexOf(provider) < 0) {
-   application.reportError("agent", "Update the workspace service to launch interactive agent terminals"); return;
-  }
-  var terminal = newTerminalTab(group, provider, directory);
-  if (terminal != null) showTerminalInEditor(terminal);
- }
-
- function syncWorkbenchSessionSelection(tab:Null<UiEditorTab>):Void {
-  if(workbenchPanel == null) return;
-  var agent=tab == null ? null : UiEditorTabs.agent(tab);
-  var terminal=tab == null ? null : UiEditorTabs.terminal(tab);
-  if(agent != null) workbenchPanel.syncActiveSession(WorkbenchRowKey.agent(agent.resource),agent.workspaceRoot);
-  else if(terminal != null && terminal.remote) workbenchPanel.syncActiveSession(WorkbenchRowKey.terminal(terminal.resourceId),terminal.workspaceRoot);
-  else workbenchPanel.syncActiveSession(null,null);
- }
-
- function openCreatedAgent(record:workspace.service.WorkspaceAgentProtocol.AgentRecord):Void {
-  var client=workbenchClient;
-  if(client == null) return;
-  var groups=client.terminalCatalog();
-  if(groups != null && groups.workspaceRoot != record.workspaceRoot) return;
-  if(groups != null) application.activeContext.openSessionGroup(record.group,groups.groups,record.workspaceRoot);
-  var id=ResourceViewIdentity.view(record.workspaceRoot,record.id,"agent");
-  host.attachAgent(makeAgentTab(id,record.id,record.workspaceRoot,record.name));
-  if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
-  requestFrame();
- }
-
- public function openCodexAgent(resource:String):Void {
-  var client=workbenchClient,catalog=client == null ? null : client.agentService().agents();
-  if(catalog == null) return;
-  for(record in catalog.records) if(record.id == resource) {openCreatedAgent(record);return;}
- }
-
-	function newGroupedTerminal(group:String):Void {
-		var terminal = newTerminalTab(group);
-		if (terminal != null) showTerminalInEditor(terminal);
-	}
-
-	function sessionFolders():SessionFolderChooser {
-		var chooser = sessionFolderChooser;
-		if (chooser != null) return chooser;
-		var created = new SessionFolderChooser({host: host, desktop: desktop,
-			localFiles: function() return workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess(),
-			machine: function() return machineClient,
-			workspaceId: function() { var saved = application.savedWorkspaces.current; return saved == null ? null : saved.id; },
-			report: function(message) { application.reportError("agent", message); requestFrame(); }});
-		sessionFolderChooser = created;
-		return created;
+		return machine == null ? null : machine.serviceTargetFor(root);
 	}
 
 	/** The folder an agent or terminal tab's session runs in, as its service reports it. */
 	function sessionFolder(resource:String, root:String, terminal:Bool):Null<String> {
-		if (!terminal) { var record = sessionRecord(resource, root); return record == null ? null : record.cwd; }
+		if (!terminal) { var record = agentTabs.sessionRecord(resource, root); return record == null ? null : record.cwd; }
 		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
 		if (catalog == null || catalog.workspaceRoot != root) return null;
 		for (record in catalog.terminals) if (record.id == resource) return record.cwd;
 		return null;
 	}
 
-	function attachCodexThread(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void {
-		if (workbenchClient == null || workbenchPanel == null) return;
-		var cwd = workbenchPanel.model.directory(group);
-		if (cwd == null) return;
-		agentAttach = new AgentAttachPanel(workbenchClient, group, cwd,
-			function() { agentAttach = null; requestFrame(); }, openCreatedAgent, requestFrame);
-		requestFrame();
-	}
-
-	function showWorkbenchMenu(items:Array<MenuItem>, event:UiEvent, valid:Void->Bool):Void {
-		var anchor = contextMenuAnchor(event);
-		var actions:Array<MenuItem> = [];
-		for (item in items) {
-			var action = item;
-			actions.push(new MenuItem(item.key, item.label, function() {
-				contextMenu = null;
-				if (valid() && action.enabled) action.onSelect();
-				requestFrame();
-			}, item.enabled, item.shortcut, item.separatorBefore));
-		}
-		contextMenu = new CommandMenu(application.commands, application.context, [], anchor.x, anchor.y, valid,
-			function() { contextMenu = null; requestFrame(); }, actions, menuOpenedWithKeyboard(event));
-		requestFrame();
-	}
-
-	/** `target` null is the workspace root, which takes only "new-agent" and "new-terminal". */
-	function editWorkspaceGroup(target:Null<workspace.service.WorkspaceProtocol.WorkspaceGroup>, action:String):Void {
-		var client = workbenchClient;
-		var catalog = client == null ? null : client.terminalCatalog();
-		if (client == null || catalog == null) return;
-		var into = target == null ? workspace.service.WorkspaceProtocol.ROOT_GROUP : target.id;
-		if (action == "new-agent") {
-			if (!canCreateAgentSession()) { application.reportError("agent", "Wait for the current workspace operation to finish before creating an agent session"); return; }
-			var providers = [for (provider in ["codex", "claude", "pi", "agentkit"])
-				{label: provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Exosuit", value: provider}];
-			var chooser = sessionFolders();
-			var resolved = SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot);
-			chooser.newAgentSession(providers, resolved,
-				function(provider, directory) {
-				if (directory == null) directory = SessionFolderChooser.explicitFor(catalog.groups, into, resolved, catalog.workspaceRoot);
-				if (client != workbenchClient) { application.reportError("agent", "The workspace changed. Choose New Agent Session again."); return; }
-				var current = client.terminalCatalog();
-				if (current == null || current.instance != catalog.instance) { application.reportError("agent", "The workspace connection changed. Choose New Agent Session again."); return; }
-				if (workspace.service.WorkspaceProtocol.knownGroup(into, current.groups)) { createProviderAgentIn(provider, into, directory); return; }
-				application.reportError("agent", "The selected group no longer exists. Choose another group.");
-			});
-			requestFrame(); return;
-		}
-		if (action == "new-terminal") {
-			var chooser = sessionFolders();
-			var resolved = SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot);
-			chooser.newTerminal(resolved, function(directory) {
-				if (directory == null) directory = SessionFolderChooser.explicitFor(catalog.groups, into, resolved, catalog.workspaceRoot);
-				if (client != workbenchClient) { application.reportError("terminal", "The workspace changed. Choose New Terminal again."); return; }
-				var terminal = newTerminalTab(into, null, directory);
-				if (terminal != null) showTerminalInEditor(terminal);
-			});
-			requestFrame(); return;
-		}
-		if (target == null) return;
-		var group = target;
-		var valid = function() {
-			if (client != workbenchClient || !client.canEditGroups() || client.terminalCatalogBusy()) return false;
-			var current = client.terminalCatalog();
-			if (current == null || current.instance != catalog.instance) return false;
-			for (candidate in current.groups) if (candidate.id == group.id) return candidate.revision == group.revision;
-			return false;
-		};
-		if (!valid()) return;
-		var save = function(parent:Null<String>, cwd:Null<String>, order:Int) {
-			if (!valid()) return;
-			client.changeGroup(catalog.instance, group, group.name, parent, cwd, order, false);
-			requestFrame();
-		};
-		switch action {
-			case "inherit":
-				if (GroupContextActions.canInherit(group)) save(group.parent, null, workspace.service.WorkspaceProtocol.order(group.order));
-			case "remove":
-				if (GroupContextActions.removal(group, client) == GroupRemoval.Allowed) {
-					client.removeGroup(catalog.instance, group); requestFrame();
-				}
-			case "parent":
-				var entries = [new commandview.CommandViewEntry("Top level", group.parent == null ? "Current parent" : "Move out of the current group", "")];
-				for (candidate in catalog.groups) if (GroupContextActions.canParent(group.id, candidate.id, catalog.groups))
-					entries.push(new commandview.CommandViewEntry(candidate.name, candidate.id == group.parent ? "Current parent" : "Move group here", candidate.id));
-				host.openCommandView(new commandview.CommandViewProvider("Move Group: ", entries, function(_) {}, function(entry, _, _) {
-					if (entry == null) return;
-					host.closeCommandView();
-					if (!valid()) return;
-					var parent = entry.value == "" ? null : entry.value;
-					var current = client.terminalCatalog();
-					if (current != null && parent != group.parent && GroupContextActions.canParent(group.id,parent,current.groups))
-						save(parent,group.cwd,workspace.service.WorkspaceProtocol.order(group.order));
-				}));
-			case "directory":
-				var promptDirectory = function() {
-					host.openCommandView(new commandview.CommandViewProvider("Group Working Directory (empty inherits): ", [], function(_) {}, function(_, path, _) {
-						host.closeCommandView();
-						path = StringTools.trim(path);
-						save(group.parent,path == "" ? null : path,workspace.service.WorkspaceProtocol.order(group.order));
-					}));
-					if (group.cwd != null) host.commandViewTextInput(group.cwd);
-					host.commandView.input.selectAll();
-				};
-				var local = workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess();
-				var automated = devtools.AutomationProbe.takeFolderAnswer();
-				if (automated != null) save(group.parent,automated,workspace.service.WorkspaceProtocol.order(group.order));
-				else if (desktop != null && local) {
-					try desktop.selectDirectory(function(accepted, paths) {
-						if (accepted && paths.length > 0) save(group.parent,paths[0],workspace.service.WorkspaceProtocol.order(group.order));
-					}, "Choose Group Working Directory", workbenchPanel == null ?
-						(group.cwd == null ? catalog.workspaceRoot : group.cwd) : workbenchPanel.model.directory(group))
-					catch (_:Dynamic) promptDirectory();
-				} else promptDirectory();
-			case "order":
-				host.openCommandView(new commandview.CommandViewProvider("Group Sort Order (0–" + workspace.service.WorkspaceProtocol.MAX_ORDER + "): ", [], function(_) {}, function(_, value, _) {
-					var order = Std.parseInt(value);
-					if (!~/^[0-9]+$/.match(value) || order == null || order < 0 || order > workspace.service.WorkspaceProtocol.MAX_ORDER) return;
-					host.closeCommandView(); save(group.parent,group.cwd,order);
-				}));
-				host.commandViewTextInput(Std.string(workspace.service.WorkspaceProtocol.order(group.order)));
-				host.commandView.input.selectAll();
-		}
-		requestFrame();
-	}
-
-	public function openWorkspaceTerminals():Void {
-		showSidebarMode("workbench");
-		if (workbenchClient != null) workbenchClient.refreshTerminals(true);
-		requestFrame();
-	}
-
-	public function openCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Bool {
-		if (workbenchClient == null || !workbenchClient.canReadTerminals() || !record.available) return false;
-		for (tab in host.allTerminalTabs()) if (tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot && tab.remote && !tab.disposed) {
-			tab.updateWorkspaceName(record.name);
-			var pane = host.terminalPaneFor(tab);
-			if (sidebar.activeId == "workbench") showTerminalInEditor(tab);
-            else if (pane != null) host.attachTerminal(tab);
-			else {
-                host.hiddenTerminals.remove(tab);
-                if (host.panelTerminals.indexOf(tab) < 0) host.panelTerminals.push(tab);
-				host.activePanelTerminalIndex = host.panelTerminals.indexOf(tab);
-				dock.open("terminal");
-				dock.activate("terminal");
-				pendingTerminalFocus = true;
-			}
-			requestFrame();
-			return true;
-		}
-		var terminal = createTerminalTab(ResourceViewIdentity.view(record.workspaceRoot == null ? record.cwd : record.workspaceRoot, record.id), record.name, record.cwd, true, true, record.id, record.workspaceRoot);
-		if (terminal == null) return false;
-        if (sidebar.activeId == "workbench") { showTerminalInEditor(terminal); return true; }
-		host.panelTerminals.push(terminal);
-		host.activePanelTerminalIndex = host.panelTerminals.length - 1;
-		dock.open("terminal");
-		dock.activate("terminal");
-		pendingTerminalFocus = true;
-		requestFrame();
-		return true;
-	}
-
-	function currentCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord, ?owner:String):Bool
-		return TerminalContextActions.isCurrent(record, workbenchClient == null ? null : workbenchClient.terminalCatalog(), owner);
-
-	function catalogTerminalActions(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Array<MenuItem> {
-		var client = workbenchClient;
-		var catalog = client == null ? null : client.terminalCatalog();
-		var owner = catalog == null ? null : catalog.instance;
-		return TerminalContextActions.build(record, client != null && client.canReadTerminals(),
-			client != null && client.canControlTerminals(), client == null || client.terminalCatalogBusy(), function(action) {
-				if (client != workbenchClient || !currentCatalogTerminal(record, owner)) return;
-				// Menus and command pickers can outlive a permission or state change.
-				var allowed = false;
-				for (item in TerminalContextActions.build(record, client.canReadTerminals(), client.canControlTerminals(),
-					client.terminalCatalogBusy(), function(_) {})) if (item.key == "terminal-" + action) allowed = item.enabled;
-				if (!allowed) return;
-				switch action {
-					case "open": openCatalogTerminal(record);
-					case "rename": renameCatalogTerminal(record);
-					case "group": moveCatalogTerminalGroup(record);
-					case "stop": client.stopTerminal(record);
-					case "restart": client.restartTerminal(record);
-					case "close": closeCatalogTerminal(record);
-					case "editor", "panel":
-						if (openCatalogTerminal(record)) for (tab in host.allTerminalTabs())
-							if (matchesCatalogTerminal(tab, record)) { placeTerminal(tab, action == "editor"); break; }
-				}
-				requestFrame();
-			});
-	}
-
-	static function matchesCatalogTerminal(tab:UiTerminalTab, record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Bool
-		return tab.remote && !tab.disposed && tab.resourceId == record.id &&
-			tab.workspaceRoot == (record.workspaceRoot == null ? record.cwd : record.workspaceRoot);
-
-	function renameCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
-		if (catalog == null) return;
-		var owner = catalog.instance;
-		host.openCommandView(new commandview.CommandViewProvider("Rename Terminal: ", [], function(_) {}, function(_, name, _) {
-			name = StringTools.trim(name);
-			if (name.length == 0) return;
-			host.closeCommandView();
-			if (currentCatalogTerminal(record, owner) && workbenchClient.canControlTerminals() && !workbenchClient.terminalCatalogBusy())
-				workbenchClient.renameTerminal(record, name, record.group);
-			requestFrame();
-		}));
-		host.commandViewTextInput(record.name);
-		host.commandView.input.selectAll();
-		requestFrame();
-	}
-
-	function moveCatalogTerminalGroup(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
-		if (catalog == null) return;
-		var entries = groupChoices(record.group, record.name, catalog.groups);
-		host.openCommandView(new commandview.CommandViewProvider("Move Terminal to Group: ", entries, function(_) {}, function(entry, _, _) {
-			if (entry == null) return;
-			host.closeCommandView();
-			if (!currentCatalogTerminal(record, catalog.instance) || !workbenchClient.canControlTerminals() || workbenchClient.terminalCatalogBusy()) return;
-			var current = workbenchClient.terminalCatalog();
-			if (current != null && entry.value != record.group && workspace.service.WorkspaceProtocol.knownGroup(entry.value, current.groups))
-				workbenchClient.renameTerminal(record, record.name, entry.value);
-			requestFrame();
-		}));
-		requestFrame();
-	}
-
-	/** A session's Move to Group…: the same choices as a terminal's, sent as the agent move. */
-	function moveAgentGroup(record:workspace.service.WorkspaceAgentProtocol.AgentRecord):Void {
-		var client = workbenchClient;
-		var catalog = client == null ? null : client.terminalCatalog();
-		if (client == null || catalog == null) return;
-		var entries = groupChoices(record.group, record.name, catalog.groups);
-		host.openCommandView(new commandview.CommandViewProvider("Move Session to Group: ", entries, function(_) {}, function(entry, _, _) {
-			if (entry == null) return;
-			host.closeCommandView();
-			var current = client.terminalCatalog(), service = client.agentService();
-			if (client != workbenchClient || current == null || current.instance != catalog.instance || service.agentBusy()) return;
-			if (entry.value != record.group && workspace.service.WorkspaceProtocol.knownGroup(entry.value, current.groups))
-				service.agentAction(record.id, "move", entry.value, record.group);
-			requestFrame();
-		}));
-		requestFrame();
-	}
-
-	/** Move to Group… choices: the workspace root, then every group, with `current` marked. */
-	static function groupChoices(current:String, name:String, groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>):Array<commandview.CommandViewEntry> {
-		var root = workspace.service.WorkspaceProtocol.ROOT_GROUP;
-		var entries = [new commandview.CommandViewEntry("Workspace", current == root ? "Current group" : "Move " + name + " out of its group", root)];
-		for (group in groups) entries.push(new commandview.CommandViewEntry(group.name,
-			group.id == current ? "Current group" : "Move " + name + " here", group.id));
-		return entries;
-	}
-
-	function placeTerminal(terminal:UiTerminalTab, editor:Bool):Void {
-		if (terminal.disposed) return;
-		if (editor) {
-			host.attachTerminal(terminal);
-			if (host.panelTerminals.length == 0) dock.close("terminal");
-			pendingTerminalFocus = false;
-		} else {
-			host.detachTerminal(terminal);
-			host.hiddenTerminals.remove(terminal);
-			if (host.panelTerminals.indexOf(terminal) < 0) host.panelTerminals.push(terminal);
-			host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
-			openTerminalPanel();
-		}
-		requestFrame();
-	}
-
-	function closeTerminalView(terminal:UiTerminalTab):Void {
-		var pane = host.terminalPaneFor(terminal);
-		if (pane != null) {
-			for (item in pane.items) if (UiEditorTabs.terminal(item) == terminal) { host.closeTab(item, pane.id, true); break; }
-		} else {
-			var index = host.panelTerminals.indexOf(terminal);
-			if (index < 0) return;
-			host.panelTerminals.splice(index, 1);
-			if (index < host.activePanelTerminalIndex) host.activePanelTerminalIndex--;
-			else if (index == host.activePanelTerminalIndex)
-				host.activePanelTerminalIndex = Std.int(Math.min(index, host.panelTerminals.length - 1));
-			if (terminal.retainOnClose) host.hiddenTerminals.push(terminal); else terminal.dispose();
-			if (host.panelTerminals.length == 0) dock.close("terminal");
-		}
-		requestFrame();
-	}
-
-	function showTerminalContextMenu(terminal:UiTerminalTab, event:UiEvent):Void {
-		if (terminal.remote && workbenchClient != null) workbenchClient.refreshTerminals(false);
-		var record:Null<workspace.service.WorkspaceTerminalProtocol.TerminalRecord> = null;
-		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
-		if (catalog != null) for (candidate in catalog.terminals) if (matchesCatalogTerminal(terminal, candidate)) { record = candidate; break; }
-		var items:Array<MenuItem> = [];
-		var inEditor = host.terminalPaneFor(terminal) != null;
-		if (record != null) items = catalogTerminalActions(record).filter(function(item)
-			return item.key != "terminal-open" && item.key != (inEditor ? "terminal-editor" : "terminal-panel"));
-		else {
-			if (terminal.remote) items.push(new MenuItem("terminal-unavailable",
-				workbenchClient == null ? "Workspace disconnected" : "Terminal details unavailable", null, false));
-			if (!terminal.remote) items.push(new MenuItem("terminal-rename", "Rename Terminal…", function() {
-				host.openCommandView(new commandview.CommandViewProvider("Rename Terminal: ", [], function(_) {}, function(_, name, _) {
-					name = StringTools.trim(name);
-					if (name.length == 0) return;
-					if (!terminal.disposed) terminal.title = name;
-					host.closeCommandView(); requestFrame();
-				}));
-				host.commandViewTextInput(terminal.title); host.commandView.input.selectAll(); requestFrame();
-			}));
-			if (!inEditor) items.push(new MenuItem("terminal-editor", "Move Terminal to Editor", function() placeTerminal(terminal, true)));
-			if (inEditor) items.push(new MenuItem("terminal-panel", "Move Terminal to Panel", function() placeTerminal(terminal, false)));
-			if (!terminal.remote) items.push(new MenuItem("terminal-stop", "Stop Terminal", function() {
-				try terminal.panel.terminate(true) catch (failure:Dynamic) application.reportError("terminal", Std.string(failure));
-				requestFrame();
-			}));
-		}
-		if (!terminal.remote) items.push(new MenuItem("terminal-close", "Close Terminal", function() {
-			if (terminal.disposed) return;
-			try {
-				var state=terminal.panel.status();
-				if(state=="running" || state=="starting") terminal.panel.terminate(true);
-				terminal.retainOnClose=false;closeTerminalView(terminal);
-			} catch (failure:Dynamic) application.reportError("terminal",Std.string(failure));
-		},true,null,true));
-		var pane = terminalPaneOf(terminal);
-		if (pane != null && pane.selectedText() != null) {
-			var clipboard = ui.buildContext.clipboard;
-			if (items.length > 0) items[0] = new MenuItem(items[0].key, items[0].label, items[0].onSelect, items[0].enabled, items[0].shortcut, true);
-			items.unshift(new MenuItem("terminal-copy", "Copy Selection", function() pane.copySelection(clipboard), true, "Ctrl+Shift+C"));
-		}
-		var selectedRecord = record;
-		var owner = catalog == null ? null : catalog.instance;
-		showWorkbenchMenu(items, event, function() return !terminal.disposed &&
-			(selectedRecord == null || currentCatalogTerminal(selectedRecord, owner)));
-	}
-
-	function closeCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-		var client=workbenchClient;
-		if(client==null || !client.canControlTerminals()) return;
-		client.closeTerminal(record,function() {
-			// Dispose views only after the owning service confirms permanent removal.
-			if(client!=workbenchClient) return;
-			for(tab in host.allTerminalTabs()) if(matchesCatalogTerminal(tab,record)) {
-				tab.retainOnClose=false;
-				for(pane in host.panes.copy()) for(item in pane.items.copy())
-					if(UiEditorTabs.terminal(item)==tab) host.closeTab(item,pane.id,true);
-				var index=host.panelTerminals.indexOf(tab);
-				if(index>=0) {
-					host.panelTerminals.splice(index,1);
-					if(index<host.activePanelTerminalIndex) host.activePanelTerminalIndex--;
-					else if(index==host.activePanelTerminalIndex) host.activePanelTerminalIndex=Std.int(Math.min(index,host.panelTerminals.length-1));
-				}
-				host.hiddenTerminals.remove(tab);tab.dispose();
-			}
-			if(host.panelTerminals.length==0) dock.close("terminal");
-			requestFrame();
-		});
-		requestFrame();
-	}
-
 	public function attachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
-		clearSourceControlPanel();
-		clearScmPresentation();
+		sourceControl.clearSourceControlPanel();
+		sourceControl.clearScmPresentation();
 		clearExplorerModel();
-		clearLocalScmSource();
-		if (workbenchPanel != null) workbenchPanel.workspaceAttachmentChanged();
+		sourceControl.clearLocalScmSource();
+		if (workbenchPanel != null) workbenchPanel.focusChanged();
 		if (workspaceAttachment != null)
 			workspaceAttachment.dispose();
 		workspaceAttachment = attachment;
-		syncScmSidebar();
+		sourceControl.syncScmSidebar();
 		workspaceFileLoader.clearCache();
 		searchFileClient = null;
 		pendingWorkspaceFolderReveal = null;
@@ -3497,13 +1456,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function detachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
 		if (workspaceAttachment != attachment) return;
-		clearSourceControlPanel();
-		clearScmPresentation();
+		sourceControl.clearSourceControlPanel();
+		sourceControl.clearScmPresentation();
 		clearExplorerModel();
-		clearLocalScmSource();
-		if (workbenchPanel != null) workbenchPanel.workspaceAttachmentChanged();
+		sourceControl.clearLocalScmSource();
+		if (workbenchPanel != null) workbenchPanel.focusChanged();
 		workspaceAttachment = null;
-		syncScmSidebar();
+		sourceControl.syncScmSidebar();
 		workspaceFileLoader.clearCache();
 		searchFileClient = null;
 		pendingWorkspaceFolderReveal = null;
@@ -3535,8 +1494,7 @@ class ExosuitApp implements DesktopUiApplication {
 	/** Whether the window is on a machine workspace with a service of its own that it has not attached to yet, and has not failed to. */
 	function awaitingWorkspaceService():Bool {
 		var machine = machineClient;
-		return machine != null && machine.enabled && workspace.client.WorkspaceServiceTarget.enabled()
-			&& application.savedWorkspaces.current != null && machine.workspaceById(application.savedWorkspaces.current.id) != null
+		return machine != null && application.savedWorkspaces.current != null && machine.workspaceById(application.savedWorkspaces.current.id) != null
 			&& workspaceError == null;
 	}
 
@@ -3558,13 +1516,18 @@ class ExosuitApp implements DesktopUiApplication {
 	function pollBackground():Void {
 		// Terminal IO follows the host event pump. Filesystem/catalog maintenance
 		// keeps its slower cadence without delaying asynchronous shell echo.
-		pollTerminals();
+		terminalTabs.pollTerminals();
 		// The window size, the right panel and the workspace decide what the rail hides.
 		layoutModes.syncRail((phoneLayoutActive ? 1 : 0) | (responsiveRightHidden ? 2 : 0) | (remoteAgentsLayout() ? 4 : 0));
 		var now = Sys.time();
 		if (now < nextBackgroundPoll) {
-			// While a workspace connects, its attachment alone is polled on every turn; everything else keeps its cadence.
-			if (now < eagerPollUntil) pollWorkspaceAttachment();
+			// While a workspace connects, its attachment (and suit's link, which answers the open) is polled on every turn;
+			// everything else keeps its cadence.
+			if (now < eagerPollUntil) {
+				var machine = machineClient;
+				if (machine != null) machine.poll();
+				pollWorkspaceAttachment();
+			}
 			return;
 		}
 		nextBackgroundPoll = now + 0.05;
@@ -3577,11 +1540,11 @@ class ExosuitApp implements DesktopUiApplication {
 		if (contextFiles != null && dock.isOpen("context-panel")) contextFiles.poll(now);
 		if (scopedSearch != null) scopedSearch.update(now);
 		pumpApplication();
-		syncScmDocumentMarkers(now);
-		if (now >= nextScmPoll) {
-			nextScmPoll = now + 0.5;
-			var source = sourceControlSource();
-			if (source != null) { source.poll(); syncScmPresentation(source); maybeAutoFetchScm(source, now); }
+		sourceControl.syncScmDocumentMarkers(now);
+		if (now >= sourceControl.nextScmPoll) {
+			sourceControl.nextScmPoll = now + 0.5;
+			var source = sourceControl.sourceControlSource();
+			if (source != null) { source.poll(); sourceControl.syncScmPresentation(source); sourceControl.maybeAutoFetchScm(source, now); }
 		}
 		// Rendering hover/selection changes must not perform filesystem polling.
 		// Watches make refresh a no-op until a change; unsupported backends poll
@@ -3631,6 +1594,12 @@ class ExosuitApp implements DesktopUiApplication {
 		var now = Sys.time();
 		if (begins || now >= eagerBudgetEnd + EAGER_REST) eagerBudgetEnd = now + EAGER_BUDGET;
 		eagerPollUntil = Math.min(now + seconds, eagerBudgetEnd);
+		workspace.transport.FineTimer.hold(eagerPollUntil - now);
+	}
+
+	/** Moves the window's connection along now: an open asks suit for its workspace's service at once. */
+	public function connectNow():Void {
+		pollWorkspaceAttachment();
 	}
 
 	/**
@@ -3642,20 +1611,22 @@ class ExosuitApp implements DesktopUiApplication {
 		var attachment = workspaceAttachment;
 		if (attachment != null) {
 			var project = application.workspace.activeProject;
-			var local:Null<workspace.client.LocalWorkspaceClient> = null;
-			if (Std.isOfType(attachment, workspace.client.LocalWorkspaceClient)) local = cast attachment;
-			var waiting = false, byWorkspace = false;
-			if (local != null) {
+			var all = links;
+			if (all != null) {
+				// A folder the window shows with no workspace open (the command line, Open Folder, an older session) opens
+				// the workspace that holds it, or a new one; until then the window serves the folder's workspace, if any.
+				if (project != null && application.savedWorkspaces.current == null) openFolderWorkspace(project.root);
 				var service = workspaceServiceTarget(project == null ? null : project.root);
-				var serviceTarget = service.target;
-				waiting = service.waiting;
-				if (serviceTarget != null) { local.selectWorkspace(serviceTarget); byWorkspace = true; }
+				var target = service.target;
+				// The window's workspace: its link, kept connected; a switch is a change of focus to another link.
+				if (target != null) focusLink(all.use(target, true));
+				else if (!service.waiting) focusLink(all.none);
+				attachment = workspaceAttachment;
 			}
-			if (!waiting && !byWorkspace) attachment.select(project == null ? null : project.root);
 			attachment.poll();
 			var fileClient = attachment.fileClient();
-			reconcileServedFolders(attachment, fileClient);
-			pollServedRoots(attachment);
+			servedFolders.reconcileServedFolders(attachment, fileClient);
+			servedFolders.pollServedRoots(attachment);
 			if (fileClient != searchFileClient) {
 				searchFileClient = fileClient;
 				searchPanel.workspaceAttachmentChanged();
@@ -3665,7 +1636,8 @@ class ExosuitApp implements DesktopUiApplication {
 			workspaceError = failure;
 			var label = attachment.statusLabel();
 			if (workbenchClient != null && workbenchClient.terminalCatalog() != null)
-				workspace.client.ConnectTimeline.markOnce("rows-own:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own");
+				if (workspace.client.ConnectTimeline.markOnce("rows-own:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own"))
+					workspace.client.ConnectTimeline.markAtNextFrame("rows-frame", currentWorkspaceName(), "own");
 			markFirstViews(attachment);
 			if (workspaceStatus != label) {
 				// Connecting: poll eagerly until it is done; connected: a little longer, for the first catalog and file reads.
@@ -3676,7 +1648,7 @@ class ExosuitApp implements DesktopUiApplication {
 				workspaceStatus = label;
 				requestFrame();
 			}
-			leaveMissingGroup();
+			contexts.leaveMissingGroup();
 		}
 	}
 
@@ -3703,44 +1675,36 @@ class ExosuitApp implements DesktopUiApplication {
 	function pumpApplication():Void {
 		var pumpedAt = Sys.time();
 		nextBackgroundPoll = pumpedAt + 0.05;
-		if (automationCommands) {
-			var command = devtools.AutomationProbe.takeCommand();
-			if (command != null) runAutomationCommand(command);
-		}
+		// The workspace client reads its lists when the service pushes a change; here only what they changed is applied.
 		if(workbenchClient!=null) {
    var agentService=workbenchClient.agentService();
-   agentService.refreshAgents();
    if(agentRevision!=agentService.agentRevision()) {
     agentRevision=agentService.agentRevision();
     var names=agentService.agents();
-    if(names!=null) UiEditorTabs.syncAgentNames(host.panes,names);
+    if(names!=null) {
+     UiEditorTabs.syncAgentNames(host.panes,names);
+     agentService.showAgents(UiEditorTabs.agentResources(host.panes,names.root));
+    }
     requestFrame();
    }
-   var now=Sys.time(), catalog=agentService.agents();
-   if(catalog!=null && catalog.records.length>0 && now>=codexPoll) {
-    codexPoll=now+0.2;
-    var active=host.activeTab(), activeAgent=active==null?null:UiEditorTabs.agent(active);
-    var selected=activeAgent!=null && activeAgent.workspaceRoot==catalog.root && now>=nextActiveCodexRead
-      ? activeAgent.resource : null;
-    if(selected!=null) nextActiveCodexRead=now+1;
-    else {
-     var count=catalog.records.length;
-     if(codexReadIndex>=count) codexReadIndex=0;
-     selected=catalog.records[codexReadIndex++].id;
-    }
-    agentService.agentAction(selected,"read","",null);
-   }
   }
-        // The catalog is read while the Workbench shows it, and while a switch to a group of another workspace waits for it
-        // (whatever the side bar shows, or the switch would time out without ever seeing the group).
-        if(workbenchClient!=null && ((sidebar.visible && sidebar.activeId == "workbench") || pendingContextTarget != null && workbenchClient.terminalCatalog() == null)) workbenchClient.refreshTerminals(false);
-        if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=lastTerminalCatalogRevision) {
-            lastTerminalCatalogRevision=workbenchClient.terminalCatalogRevision();
-            var catalog=workbenchClient.terminalCatalog();
-            if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
-                if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.updateWorkspaceName(record.name); tab.cwd=record.cwd; }
-            requestFrame();
-        }
+		// Terminal names and folders reach the tabs of every workspace the window holds a link to, not only the open one.
+		var clients:Array<workspace.client.WorkspaceWorkbenchClient> = workbenchClient == null ? [] : [workbenchClient];
+		var held = links;
+		if (held != null)
+			for (id in held.ids()) {
+				var link = held.get(id);
+				if (link != null && link != workbenchClient) clients.push(link);
+			}
+		for (client in clients) {
+			var catalog = client.terminalCatalog();
+			var root = catalog == null || catalog.workspaceRoot == null ? "" : catalog.workspaceRoot;
+			if (catalog == null || terminalNameRevisions.get(root) == client.terminalCatalogRevision()) continue;
+			terminalNameRevisions.set(root, client.terminalCatalogRevision());
+			for (record in catalog.terminals) for (tab in host.allTerminalTabs())
+				if (tab.remote && tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot) { tab.updateWorkspaceName(record.name); tab.cwd = record.cwd; }
+			requestFrame();
+		}
 		var previousLanguageStatus = application.language.statusLabel();
 		var previousProblems = host.getProblems().revision;
 		var previousNotification = visibleNotification;
@@ -3754,37 +1718,20 @@ class ExosuitApp implements DesktopUiApplication {
 		var previousExternal = application.documents.externalRevision;
 		application.update();
 		pollWorkspaceAttachment();
+		workbenchActions.poll();
 		remoteFileSearch.update(Sys.time());
 		// O(1) per frame: the key (strings built and escaped) is made only when the context, workspace or machine id changed.
-		var shown = application.activeContext;
-		if (shown.revision != presenceRevision || shown.contextWorkspaceId != presenceWorkspace || shown.machineId != presenceMachine) {
+		var shown = application.activeContext, link = suit.SuitLink.instance;
+		if (link != null && (shown.revision != presenceRevision || shown.contextWorkspaceId != presenceWorkspace || shown.machineId != presenceMachine)) {
 			presenceRevision = shown.revision; presenceWorkspace = shown.contextWorkspaceId; presenceMachine = shown.machineId;
-			presence.focus(shown.key());
+			link.setContext(shown.key());
 		}
-		presence.poll();
-		var workspaces = machineClient;
-		if (workspaces != null && workspaces.enabled) {
-			// Another window or suit's CLI may change the list; look again every few seconds while the Workbench shows it.
-			var now = Sys.time();
-			var pool = catalogConnections, starter = workspaceStarter;
-			// A connection that went down, or a service being started, asks suit again sooner: suit knows whether it stopped.
-			var eager = pool != null && pool.anyDown() || startingWorkspaces.keys().hasNext();
-			if ((sidebar.visible && sidebar.activeId == "workbench" || eager) && now >= machineRefreshAt && !workspaces.busy()) {
-				machineRefreshAt = now + (eager ? 1.5 : 5);
-				workspaces.refresh();
-			}
-			workspaces.poll();
-			if (pool != null) {
-				syncCatalogConnections(workspaces, pool);
-				pool.poll();
-				if (catalogRevision != pool.revision()) {
-					catalogRevision = pool.revision();
-					requestFrame();
-				}
-			}
-			if (starter != null) starter.poll();
-			applyStartContext();
-			applyPendingContextTarget(false);
+		var workspaces = machineClient, shownMachine = suitWorkbench;
+		if (workspaces != null && shownMachine != null) {
+			// suit pushes every change to the machine over the link; polling only moves the link along.
+			var panel = workbenchPanel;
+			if (shownMachine.poll(panel == null ? [] : panel.expandedWorkspaceIds())) requestFrame();
+			contexts.applyStartContext();
 			if (machineClientRevision != workspaces.revision) {
 				machineClientRevision = workspaces.revision;
 				var named = workspaces.machine;
@@ -3793,23 +1740,8 @@ class ExosuitApp implements DesktopUiApplication {
 					application.activeContext.assignMachine(named.id);
 				}
 				// Another window may have attached or detached a folder; its change reaches the service shortly after.
-				startServedRefresh();
-				pruneRecentContexts();
-				requestFrame();
-			}
-		}
-		var machine = machineWorkspaces;
-		if (machine != null) {
-			machine.poll(sidebar.visible && sidebar.activeId == "machine" ? 3000 : 0);
-			if (machineRevision != machine.revision) {
-				machineRevision = machine.revision;
-				requestFrame();
-			}
-		}
-		if (pairingClient != null) {
-			if (sidebar.visible && sidebar.activeId == "remote-access") pairingClient.refreshPairings(false);
-			if (pairingRevision != pairingClient.pairingRevision()) {
-				pairingRevision = pairingClient.pairingRevision();
+				servedFolders.startServedRefresh();
+				contexts.pruneRecentContexts();
 				requestFrame();
 			}
 		}
@@ -3832,59 +1764,11 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
 	}
 
-	function pollTerminals():Void {
-		for (terminal in host.allTerminalTabs()) {
-			if (terminal.disposed) continue;
-			try {
-				if (terminal.poll()) requestFrame();
-				terminalErrors.remove(terminal.id);
-			} catch (error:Dynamic) {
-				statusMessage = "Terminal: " + Std.string(error);
-				var message = Std.string(error);
-				if (terminalErrors.get(terminal.id) != message) {
-					terminalErrors.set(terminal.id, message);
-					application.errors.record("terminal", message);
-					var actions:Array<feedback.NotificationAction> = [];
-					var terminalId = terminal.id;
-					if (terminal.remote) actions.push(new feedback.NotificationAction("Open terminal", function() {
-						for (target in host.allTerminalTabs()) if (target.id == terminalId && !target.disposed) {
-							hideNotifications();
-							var index = host.panelTerminals.indexOf(target);
-							if (index >= 0) { host.activePanelTerminalIndex = index; openTerminalPanel(); }
-							else showTerminalInEditor(target);
-							return;
-						}
-					}));
-					if (createTerminal != null || createWorkspaceTerminal != null)
-						actions.push(new feedback.NotificationAction("Create terminal", function() {
-							hideNotifications();
-							var replacement = newTerminalTab();
-							if (replacement != null) showTerminalInEditor(replacement);
-						}));
-					var explanation = terminal.title + ": " + message;
-					if (terminal.remote) explanation += "\nWorkspace: " + terminal.workspaceRoot
-						+ "\nSession: " + terminal.resourceId
-						+ "\nThis view refers to the original session. Create a terminal to start a new shell in the current workspace.";
-					host.getNotifications().publish(explanation, feedback.NotificationKind.Error, "terminal", actions);
-				}
-				if (terminal.remote) { requestFrame(); continue; }
-				terminal.dispose();
-                host.hiddenTerminals.remove(terminal);
-				host.detachTerminal(terminal);
-				var index = host.panelTerminals.indexOf(terminal);
-				if (index >= 0) {
-					host.panelTerminals.splice(index, 1);
-					if (host.activePanelTerminalIndex > index) host.activePanelTerminalIndex--;
-					else if (host.activePanelTerminalIndex == index)
-						host.activePanelTerminalIndex = Std.int(Math.min(index, host.panelTerminals.length - 1));
-				}
-				requestFrame();
-			}
-		}
-
-	}
-
 	public function context():UiContext return ui;
+
+	/** The view tree and window state a host's diagnostics read (DesktopUiApplication); see ExosuitDiagnostics. */
+	public function diagnosticState():Dynamic
+		return diagnostics.diagnosticState();
 
 	public function dispose():Void {
 		layoutModes.dispose();
@@ -3899,198 +1783,15 @@ class ExosuitApp implements DesktopUiApplication {
 		scmFocusSubscription = null;
 		if (scmDirectoryWatch != null) scmDirectoryWatch.dispose();
 		scmDirectoryWatch = null;
-		clearLocalScmSource();
+		sourceControl.clearLocalScmSource();
 		clearExplorerModel();
 		remoteFileSearch.cancel();
-		if (workspaceAttachment != null) workspaceAttachment.dispose();
-		if (catalogConnections != null) catalogConnections.dispose();
+		if (links != null) links.dispose();
+		else if (workspaceAttachment != null) workspaceAttachment.dispose();
 		application.shutdown();
 		host.dispose();
 		if (desktop != null) desktop.shutdown();
 		ui.dispose();
-	}
-
-	function findStyleNode(node:Null<RenderNode>, key:String):Null<RenderNode> {
-		if (node == null) return null;
-		if (node.styleKey == key) return node;
-		for (child in node.children) {
-			var found = findStyleNode(child, key);
-			if (found != null) return found;
-		}
-		return null;
-	}
-
-	function diagnosticTreeItems(node:Null<RenderNode>, result:Array<Dynamic>):Void {
-		if (node == null) return;
-		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem)
-			result.push({key: node.semantics.label, bounds: targetBounds(node)});
-		for (child in node.children) diagnosticTreeItems(child, result);
-	}
-
-	public function diagnosticState():Dynamic {
-		var treeItems:Array<Dynamic> = [];
-		diagnosticTreeItems(ui.root, treeItems);
-		var active = host.activeDocument();
-		var activeView = host.activeView();
-		var tab = host.activeTab();
-		var source = sourceControlSource();
-		var repositories = source == null ? [] : source.repositories();
-		var firstRepository = repositories.length == 0 ? null : repositories[0];
-		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
-		var agent = tab == null ? null : UiEditorTabs.agent(tab);
-		var agentClient = workbenchClient == null ? null : workbenchClient.agentService();
-		var agentView = agent == null || agentClient == null ? null : agentClient.agentView(agent.resource);
-		var agentRequest = agentView == null || agentView.requests.length == 0 ? null : agentView.requests[0];
-		var agentItems = agentView == null || agentView.items == null ? [] : agentView.items;
-		var agentSummary = agentView == null ? null : {
-			id: agentView.record.id,
-			workspaceRoot: agentView.record.workspaceRoot,
-			thread: agentView.record.thread,
-			state: agentView.record.state,
-			itemCount: agentItems.length,
-			messageCount: [for (item in agentItems) if (item.kind == "agentMessage") item].length,
-			requestMethods: [for (request in agentView.requests) request.method]
-		};
-		if (terminal == null) terminal = host.activePanelTerminal();
-		var panel = terminal == null ? null : terminal.panel;
-		var target = function(id:String):Dynamic {
-			var node = findStyleNode(ui.root, id);
-			return targetBounds(node);
-		};
-		var targetByLabel = function(label:String):Dynamic return targetBounds(findSemanticsLabel(ui.root, label));
-		var searchQueryNode = findSemanticsLabel(ui.root, "Search in projects");
-		var remoteFileResultIndex = -1;
-		var remoteDirectoryResultIndex = -1;
-		for (index in 0...remoteFileSearch.results.length) {
-			var match = remoteFileSearch.results[index];
-			if (match.kind == "file" && remoteFileResultIndex < 0) remoteFileResultIndex = index;
-			if (match.kind == "directory" && remoteDirectoryResultIndex < 0) remoteDirectoryResultIndex = index;
-		}
-		return {
-			documents: [for (view in host.allViews()) view.document.title],
-			editorSelections: [for (view in host.allViews()) {
-				title:view.document.title, anchorLine:view.selection.anchor.line,
-				anchorColumn:view.selection.anchor.column, cursorLine:view.selection.cursor.line,
-				cursorColumn:view.selection.cursor.column, scrollY:view.scrollController.offsetY
-			}],
-			workspaceFileTabs: workspaceFileDiagnostics(),
-			workspaceFileReads: {active: workspaceFileLoader.active, completed: workspaceFileLoader.completedReads,
-				cacheHits: workspaceFileLoader.cacheHits, cachedBytes: workspaceFileLoader.cachedBytes, lastReadMs: workspaceFileLoader.lastReadMs},
-			viewport: {width: viewportWidth, height: viewportHeight, phoneLayout: phoneLayoutActive,
-				sidebarVisible: sidebar.visible, explorerOpen: dock.isOpen("explorer"), activePanel: dock.activePanelId},
-			sourceControl: source == null ? null : {
-				remote: source.isRemote(), connected: source.connected(), repositoryCount: repositories.length,
-				canWrite: firstRepository != null && source.canWrite(firstRepository.id),
-				canUseRemotes: firstRepository != null && source.canUseRemotes(firstRepository.id),
-				commitMessage: target("scm-commit-message:" + (firstRepository == null ? "" : firstRepository.id)),
-				commitButton: target("scm-commit-staged"), rowMutation: target("scm-row-action:file-mutation")
-			},
-			activeDiff: activeView != null && activeView.diffDocument != null,
-			active: active == null ? -1 : active.id,
-				documentsSource: "core.Application (via UiWorkbenchHost)",
-			treeItems: treeItems,
-			explorerRoot: explorerRoot,
-			explorerIdentity: explorerModel == null ? null : explorerModel.rootIdentity(),
-			explorerWatching: explorerModel != null && explorerModel.watchesChanges(),
-			explorerRevision: explorerModel == null ? -1 : explorerModel.revision(),
-			workspaceIndex: [for (project in application.workspace.projects) {
-				root: project.root, files: project.files().length, indexing: project.indexing(), generation: project.indexGeneration()
-			}],
-			sidebarMode: sidebar.activeId,
-            workbenchSelectedNode: workbenchPanel == null ? null : workbenchPanel.tree.selectedKey,
-			sidebarState: sidebar.encode(),
-			panels: dock.panelIds(),
-			status: statusMessage,
-			workspaceConnection: workspaceStatus,
-			notificationCount: host.getNotifications().entries.length,
-			unreadNotifications: host.getNotifications().unreadCount(),
-			notificationsVisible: notificationsVisible,
-			paletteCommandCount: ui.commands.ids().length,
-			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
-			plugins: application.plugins.enabledIds(),
-			terminalIds: [for (terminal in host.allTerminalTabs()) terminal.id],
-			terminalResourceIds: [for (terminal in host.allTerminalTabs()) terminal.resourceId],
-			terminalCreationFailure: terminalCreationFailure(),
-            terminalEditorTabs: host.terminalEditorResourceIds(),
-            terminalPanelTabs: [for (terminal in host.panelTerminals) terminal.resourceId],
-            terminalHiddenTabs: [for (terminal in host.hiddenTerminals) terminal.resourceId],
-			agentCatalog:workbenchClient==null?null:workbenchClient.agentService().agents(),
-            agentCreation:agentClient == null ? null : agentClient.agentCreation(),
-	   agentTabs:host.agentResourceIds(),
-			activeAgentSummary: agentSummary,
-			testTargets: {
-				newCodex: target("workbench-new-codex"),
-				codexViewport: target("codex-session-viewport"),
-				filesActivity: targetByLabel("Files"),
-				sourceControlActivity: targetByLabel("Source Control"),
-				sourceControlPanel: target("source-control-panel"),
-				newTerminal: target("workbench-new-terminal"),
-				terminalToolbar: target("toolbar-Terminal"),
-				terminalPane: target("terminal-pane"),
-				pairingUrl: target("remote-pairing-url"),
-				pairingConnect: target("remote-pairing-connect"),
-				pairingConfirm: target("remote-pairing-confirm-code"),
-				prompt: target("codex-prompt"),
-				send: target("codex-send"),
-				approve: agentRequest == null ? null : target("codex-approve-" + agentRequest.id),
-				answer: agentRequest == null ? null : target("codex-answer-" + agentRequest.id),
-				searchActivity: targetByLabel("Search"),
-				remoteAccessActivity: targetByLabel("Remote Access"),
-				workbenchActivity: targetByLabel("Workbench"),
-				localSearchResult: target("workspace-search-result-0"),
-				remoteSearchQuery: targetByLabel("Search in projects"),
-				remoteSearchQueryFocused: searchQueryNode != null && searchQueryNode.semantics != null
-					&& (searchQueryNode.semantics.states & AccessibilityState.Focused) != 0,
-				remoteSearchMode: target("workspace-search-remote-mode"),
-				remoteSearchResult: target("workspace-remote-search-result-0"),
-				remoteSearchResult1: target("workspace-remote-search-result-1"),
-				remoteSearchFileResult: remoteFileResultIndex < 0 ? null : target("workspace-remote-search-result-" + remoteFileResultIndex),
-				remoteSearchDirectoryResult: remoteDirectoryResultIndex < 0 ? null : target("workspace-remote-search-result-" + remoteDirectoryResultIndex),
-				remoteSearchState: {
-					active: remoteFileSearch.active, query: remoteFileSearch.query, mode: remoteFileSearch.mode,
-					count: remoteFileSearch.results.length, complete: remoteFileSearch.complete,
-					results: [for (match in remoteFileSearch.results) {kind: match.kind, path: match.path}],
-					truncated: remoteFileSearch.truncated, scannedEntries: remoteFileSearch.scannedEntries,
-					skippedEntries: remoteFileSearch.skippedEntries, error: remoteFileSearch.error
-				}
-			},
-			terminalCatalog: workbenchClient == null ? null : workbenchClient.terminalCatalog(),
-			terminal: panel == null ? "closed" : panel.status(),
-			terminalColumns: panel == null ? 0 : panel.columns(),
-			terminalControl: Std.isOfType(panel, TerminalPane) ? cast(panel, TerminalPane).controlStatus() : null,
-			terminalRows: panel == null ? 0 : panel.rows(),
-			terminalScreen: Std.isOfType(panel, TerminalPane) ? cast(panel, TerminalPane).diagnosticState() : null
-		};
-	}
-
-	static function targetBounds(node:Null<RenderNode>):Dynamic {
-		if (node == null) return null;
-		var bounds = node.globalBounds();
-		return {x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height};
-	}
-
-	static function findSemanticsLabel(node:Null<RenderNode>, label:String):Null<RenderNode> {
-		if (node == null) return null;
-		if (node.semantics != null && node.semantics.label == label) return node;
-		for (child in node.children) {
-			var found = findSemanticsLabel(child, label);
-			if (found != null) return found;
-		}
-		return null;
-	}
-
-	function workspaceFileDiagnostics():Array<Dynamic> {
-		var result:Array<Dynamic> = [];
-		for (pane in host.panes) for (item in pane.items) {
-			var file = UiEditorTabs.workspaceFile(item);
-			if (file != null) result.push({scope: file.scope, root: file.rootName, path: file.path,
-				revision: file.revision, preview: file.preview, syntax: file.textModel.syntax.name,
-				loading: file.loading, loadError: file.loadError, contentReadyMs: file.contentReadyMs,
-				diskChanged: file.diskChanged, searchSelection: file.searchSelection == null ? null : {
-					start: file.searchSelection.anchor, end: file.searchSelection.focus
-				}});
-		}
-		return result;
 	}
 
 	function contextPanel():View {
@@ -4112,7 +1813,7 @@ class ExosuitApp implements DesktopUiApplication {
 				if (Std.isOfType(model, WorkspaceFileTreeModel)) {
 					var remote:WorkspaceFileTreeModel = cast model;
 					if (remote.isMoreKey(path) || remote.isRetryKey(path)) remote.activateSpecial(path);
-					else if (!remote.isDirectoryKey(path)) openWorkspaceFile(remote, path, pin);
+					else if (!remote.isDirectoryKey(path)) remoteFileTabs.openWorkspaceFile(remote, path, pin);
 				} else if (Std.isOfType(model, DirectoryTreeModel)) {
 					var local:DirectoryTreeModel = cast model;
 					if (local.isSyntheticRow(path)) local.activateSyntheticRow(path);
@@ -4138,7 +1839,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return new TabItem(key, label, content, true, compact || withIcons ? icon : null, compact ? "" : null);
 		var tabs = new Tabs("context-panel-tabs", [tab(ContextPanelTab.Files, "Files", IconName.FolderOpen, contextFiles),
 			tab(ContextPanelTab.Search, "Search", IconName.Search, searchContent),
-			tab(ContextPanelTab.Changes, "Changes", IconName.Hierarchy, sourceControlPanel())], contextTab,
+			tab(ContextPanelTab.Changes, "Changes", IconName.Hierarchy, sourceControl.sourceControlPanel())], contextTab,
 			function(next) {
 				var selected = ContextPanelTabs.fromKey(next);
 				if (selected != null) contextTab = selected;
@@ -4199,8 +1900,6 @@ class ExosuitApp implements DesktopUiApplication {
 		"Open folder" on a group: the window works in that group's folder (its context), as a switch to the group does. It
 		never adds the folder to the open workspace, which keeps the folders it was given.
 	**/
-	function focusGroupFolder(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void focusGroupById(group.id);
-
 	function focusGroupById(id:String):Void {
 		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
 		if (catalog != null) application.activeContext.openSessionGroup(id, catalog.groups, catalog.workspaceRoot);
@@ -4305,12 +2004,12 @@ class ExosuitApp implements DesktopUiApplication {
 	function handleMenuTriggerClick(event:UiEvent):Bool {
 		if (event.button != 0 || ui.root == null) return false;
 		var point = new haxeon.ui.Point(event.x, event.y);
-		var layout = findStyleNode(ui.root, "layout-menu");
+		var layout = diagnostics.findStyleNode(ui.root, "layout-menu");
 		if (!phoneLayoutActive && layout != null && layout.enabled && layout.resolved != null && layout.containsGlobalPoint(point)) {
 			ui.commands.executeContext("view.layout-menu", ui.commandContext);
 			return true;
 		}
-		var manage = findStyleNode(ui.root, "activity-manage");
+		var manage = diagnostics.findStyleNode(ui.root, "activity-manage");
 		if (manage != null && manage.enabled && manage.resolved != null && manage.containsGlobalPoint(point)) {
 			showManageMenu(event);
 			return true;
@@ -4339,7 +2038,7 @@ class ExosuitApp implements DesktopUiApplication {
 			items.push(new MenuItem("view.mode-" + mode.id, (layoutModes.current.id == mode.id ? "✓ " : "") + mode.label + " Layout", function() { contextMenu = null; layoutModes.select(selected.id); requestFrame(); }));
 		}
 		items.push(new MenuItem("view.mode-auto", "Automatic Layout", function() { contextMenu = null; layoutModes.automatic(); requestFrame(); }));
-		var anchor = findStyleNode(ui.root, "layout-menu");
+		var anchor = diagnostics.findStyleNode(ui.root, "layout-menu");
 		var x = Math.max(0, viewportWidth - 290), y = TOOLBAR_HEIGHT + 4;
 		if (anchor != null) { var bounds = anchor.globalBounds(); x = Math.min(x, bounds.x); y = bounds.y + bounds.height + 4; }
 		layoutMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return !phoneLayoutActive,
@@ -4350,7 +2049,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function topBar():View {
 		return new RetainedView("toolbar", function(_) return buildTopBar(),
-			function() return dock.revision + ":" + phoneLayoutActive + ":" + viewportWidth + ":" + application.activeContext.revision + ":" + application.savedWorkspaces.dirty + ":" + explorerRoot + ":" + workspaceStatus + ":" + canShowTerminal() + ":" + terminalCreationFailure() + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
+			function() return dock.revision + ":" + phoneLayoutActive + ":" + viewportWidth + ":" + application.activeContext.revision + ":" + explorerRoot + ":" + workspaceStatus + ":" + terminalTabs.canShowTerminal() + ":" + terminalTabs.terminalCreationFailure() + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
 	}
 
 	function buildTopBar():View {
@@ -4430,12 +2129,12 @@ class ExosuitApp implements DesktopUiApplication {
 		if (custom) { style.width = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH); style.height = LayoutAxis.fixed(28); style.padding = new Insets(8, 0, 8, 0); }
 		var button = new Button(custom ? "" : label, style, action, "toolbar-" + label);
 		button.accessibilityLabel = label;
-		if (label == "Terminal") button.enabled = canShowTerminal();
+		if (label == "Terminal") button.enabled = terminalTabs.canShowTerminal();
 		button.variant = custom ? ButtonVariant.Navigation : ButtonVariant.Secondary;
 		if (custom) button.classes.push("chrome-action");
 		button.leadingIcon = icon;
 		return custom || label == "Terminal" ? new TabTooltip("toolbar-tooltip:" + label, button,
-			new Text(label == "Terminal" && !canShowTerminal() ? terminalCreationFailure() : label),
+			new Text(label == "Terminal" && !terminalTabs.canShowTerminal() ? terminalTabs.terminalCreationFailure() : label),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay) : button;
 	}
 
@@ -4509,7 +2208,7 @@ class ExosuitApp implements DesktopUiApplication {
 		host.openCommandView(new commandview.CommandViewProvider("Files Scope: ", entries, _ -> {}, function(entry, _, _) {
 			if (entry != null) {
 				filesUseWorkspaceRoots = entry.value == "workspace";
-				var roots = localExplorerRoots(); explorerRoot = roots.length == 0 ? null : roots[0];
+				var roots = explorer.localExplorerRoots(); explorerRoot = roots.length == 0 ? null : roots[0];
 				clearExplorerModel(); requestFrame();
 			}
 			host.closeCommandView();
@@ -4543,497 +2242,11 @@ class ExosuitApp implements DesktopUiApplication {
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
 	}
 
-	function explorerHeaderActions():View {
-		var remote = workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess();
-		var available = explorerRoot != null;
-		var style = new LayoutStyle();
-		style.childAlignY = LayoutAlignmentY.Center;
-		style.childGap = 2;
-		style.padding = new Insets(2, 0, 6, 0);
-		return new Row("explorer-header-actions", [
-			new KeyedView("scope", explorerHeaderButton("Files scope and workspace", IconName.ChevronDown, showFilesScope, true, false,
-				function(event) showWorkbenchMenu(filesMenuItems(), event, function() return true))),
-			new KeyedView("new-file", explorerHeaderButton("New File", IconName.NewFile,
-				function() createExplorerEntry(false), available && !remote, remote)),
-			new KeyedView("new-folder", explorerHeaderButton("New Folder", IconName.NewFolder,
-				function() createExplorerEntry(true), available && !remote, remote)),
-			new KeyedView("refresh", explorerHeaderButton("Refresh", IconName.Reset, function() {
-				if (explorerModel != null) explorerModel.refreshAll();
-				requestFrame();
-			}, available)),
-			new KeyedView("collapse", explorerHeaderButton("Collapse All", IconName.CollapseAll, function() {
-				if (explorerTree != null) explorerTree.collapseAll(true);
-				requestFrame();
-			}, available))
-		], style);
-	}
-
-	function explorerHeaderButton(label:String, icon:IconName, action:Void->Void, enabled:Bool, readOnly:Bool = false,
-			?onEvent:UiEvent->Void):View {
-		var style = new LayoutStyle();
-		style.width = LayoutAxis.fixed(24);
-		style.height = LayoutAxis.fixed(24);
-		style.padding = new Insets(4, 4, 4, 4);
-		style.childDistribution = haxeon.ui.LayoutDistribution.Center;
-		style.childAlignY = LayoutAlignmentY.Center;
-		var button = new Button("", style, action, "explorer-action:" + label);
-		if (onEvent != null) button.onClickEvent = onEvent;
-		button.enabled = enabled;
-		button.variant = ButtonVariant.Navigation;
-		button.leadingIcon = icon;
-		button.iconSize = 16;
-		button.accessibilityLabel = label;
-		return new TabTooltip("explorer-action-tooltip:" + label, button,
-			new Text(readOnly ? label + " (remote files are read-only)" : label),
-			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
-	}
-
-	/** Files header menu: the scope picker and the window's workspace actions (desktop only). */
-	function filesMenuItems():Array<MenuItem> {
-		var items:Array<MenuItem> = [new MenuItem("files-scope", "Files Scope…", showFilesScope)];
-		for (item in [commandMenuItem("workspace:add-folder", "Add Folder to Workspace…", true),
-				commandMenuItem("workspace:remove-folder", "Remove Folder from Workspace…"),
-				commandMenuItem("workspace:close", "Close Workspace")])
-			if (item != null) items.push(item);
-		return items;
-	}
-
-	/** A workspace root row: folder creation plus workspace membership for that root, with no picker. */
-	function workspaceRootMenuItems(root:String):Array<MenuItem> {
-		var items:Array<MenuItem> = [];
-		var available = controller.SavedWorkspaceController.available(root);
-		for (item in [commandMenuItem("file:new", "New File…", false, available), commandMenuItem("folder:new", "New Folder…", false, available),
-				commandMenuItem("workspace:add-folder", "Add Folder to Workspace…", true)])
-			if (item != null) items.push(item);
-		items.push(new MenuItem("workspace-remove-root", "Remove Folder from Workspace",
-			function() application.savedWorkspaces.removeFolder(root), application.savedWorkspaces.hasRoot(root)));
-		var close = commandMenuItem("workspace:close", "Close Workspace");
-		if (close != null) items.push(close);
-		return items;
-	}
-
-	/** Remote Files are read-only and owned by the workspace service: only view actions are offered. */
-	function remoteExplorerMenuItems():Array<MenuItem> {
-		return [
-			new MenuItem("files-refresh", "Refresh", function() { if (explorerModel != null) explorerModel.refreshAll(); }),
-			new MenuItem("files-collapse", "Collapse All", function() { if (explorerTree != null) explorerTree.collapseAll(true); })
-		];
-	}
-
 	function commandMenuItem(command:String, label:String, separatorBefore:Bool = false, enabled:Bool = true):Null<MenuItem> {
 		if (!application.commands.contains(command)) return null;
 		return new MenuItem(command, label, function() application.commands.perform(command, application.context),
 			enabled && application.commands.isValid(command, application.context), null, separatorBefore);
 	}
-
-	function createExplorerEntry(folder:Bool):Void {
-		if (explorerRoot == null || (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess())) return;
-		var base = explorerRoot;
-		var selected = explorerTree == null ? null : explorerTree.selectedKey;
-		var model:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel) ? cast explorerModel : null;
-		if (selected != null && model != null && !model.isSyntheticRow(selected))
-			base = model.isDirectoryPath(selected) ? selected : haxe.io.Path.directory(selected);
-		var refresh = function() {
-			if (model != null) model.refreshDirectory(base);
-			requestFrame();
-		};
-		if (folder) application.files.openCreateFolder(base, refresh);
-		else application.files.openCreateFile(base, refresh);
-	}
-
-	function beginExplorerRename(path:String, rename:String->Bool):Bool {
-		if (!sidebar.visible || sidebar.activeId != "files") return false;
-		var tree = explorerTree;
-		var model:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel) ? cast explorerModel : null;
-		if (tree == null || model == null || tree.selectedKey != path || model.isSyntheticRow(path)) return false;
-		if (application.savedWorkspaces.roots().indexOf(path) >= 0) { application.reportError("files", "Project roots cannot be renamed while open."); return true; }
-		host.closeCommandView();
-		tree.scrollIntoView(path);
-		host.focusExplorer();
-		explorerRename = new ExplorerRename(path, model.isDirectoryPath(path), rename, function(destination) {
-			if (explorerRename == null || explorerRename.path != path) return;
-			explorerRename = null;
-			if (destination != null) {
-				renamedExplorerPath = destination;
-				host.setSelectedExplorerPath(destination);
-				model.refreshDirectory(haxe.io.Path.directory(path));
-			}
-			requestFrame();
-		}, requestFrame, function(message) application.reportError("files", message), application.settings.current.explorerFontSize);
-		requestFrame();
-		return true;
-	}
-
-	function localExplorerRoots():Array<String> {
-		var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
-		if (filesUseWorkspaceRoots) return roots;
-		return roots.length == 0 && explorerRoot != null ? [explorerRoot] : roots;
-	}
-
-	function explorerPanel():View {
-		if (explorerRoot == null) {
-			var open = new Button("Open", null, openFolderDialog, "explorer-open-folder");
-			open.variant = ButtonVariant.Secondary;
-			open.leadingIcon = IconName.FolderOpen;
-			var compact = new LayoutStyle();
-			compact.width = LayoutAxis.grow();
-			compact.padding = new Insets(4.0, 8.0, 4.0, 8.0);
-			return new Column("explorer-empty", [new KeyedView("open", open)], compact);
-		}
-		var attachment = workspaceAttachment;
-		var remoteFiles = attachment != null && !attachment.hasLocalFileAccess();
-		var remoteScope:String = explorerRoot;
-		var remoteWorkspace = attachment == null ? "" : attachment.fileWorkspace();
-		if (attachment != null && attachment.fileScope() != null) remoteScope = attachment.fileScope();
-		var remoteModelCurrent = explorerModel != null && Std.isOfType(explorerModel, WorkspaceFileTreeModel)
-			&& (cast(explorerModel, WorkspaceFileTreeModel)).scopeId() == remoteScope
-			&& (cast(explorerModel, WorkspaceFileTreeModel)).workspaceId() == remoteWorkspace;
-		var localModelCurrent = explorerModel != null && Std.isOfType(explorerModel, DirectoryTreeModel)
-			&& explorerModel.rootIdentity() == localExplorerRoots().join("\n");
-		if (remoteFiles ? !remoteModelCurrent : !localModelCurrent) {
-			clearExplorerModel();
-			if (remoteFiles) {
-				var rootName = remoteScope;
-				var slash = rootName.lastIndexOf("/");
-				if (slash >= 0 && slash + 1 < rootName.length) rootName = rootName.substring(slash + 1);
-				explorerModel = new WorkspaceFileTreeModel(function()
-					return workspaceAttachment == null ? null : workspaceAttachment.fileClient(),
-					remoteWorkspace, remoteScope, rootName, theme, requestFrame,
-					function(root) { workspaceFileLoader.clearCache(); host.markWorkspaceFilesChanged(remoteScope, root); },
-					attachment == null || attachment.hasLocalFileAccess() ? null : attachment.sourceControlSource());
-			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme, localExplorerRoots());
-		}
-		if (explorerModel != null) explorerModel.setResourceDecorations(host.getResourceDecorations());
-		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
-			? cast explorerModel : null;
-		var localModel:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel)
-			? cast explorerModel : null;
-		if (remoteModel != null) remoteModel.fontSize = application.settings.current.explorerFontSize;
-		if (localModel != null) localModel.fontSize = application.settings.current.explorerFontSize;
-		if (explorerTree != null) {
-			if (remoteModel != null) advanceWorkspaceFolderReveal(explorerTree, remoteModel);
-			return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events, explorerRename,
-			host.focusExplorer, function(command) application.commands.perform(command, application.context));
-		}
-		var viewportStyle = new LayoutStyle();
-		viewportStyle.width = LayoutAxis.grow();
-		viewportStyle.height = LayoutAxis.grow();
-		viewportStyle.clipHorizontal = true;
-		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, filesScroll, 640.0,
-			null, [for (index in 0...explorerModel.rootCount()) explorerModel.rootKeyAt(index)], function(key) {
-				if (localModel == null || !localModel.isSyntheticRow(key)) host.setSelectedExplorerPath(key);
-			}, function(key) {
-				if (remoteModel != null) {
-					if (remoteModel.isMoreKey(key) || remoteModel.isRetryKey(key)) remoteModel.activateSpecial(key);
-					else if (!remoteModel.isDirectoryKey(key)) openWorkspaceFile(remoteModel, key, true);
-				} else if (localModel != null && !localModel.isSyntheticRow(key) && !localModel.isDirectoryPath(key)) application.openInBackground(key);
-			}, null, null);
-		tree.indentWidth = 10.0;
-		tree.verticalGuidesOnly = true;
-		tree.guidesOnInteraction = true;
-		tree.compactLeafIndent = true;
-		tree.expandOnSingleClick = true;
-		if (remoteModel != null)
-			tree.hasChildrenHint = function(key) return remoteModel.isDirectoryKey(key);
-		if (localModel != null) {
-			tree.onStateReady = function(current) {
-				var path = renamedExplorerPath;
-				if (path == null) return;
-				var parent = haxe.io.Path.directory(path);
-				for (index in 0...localModel.childCount(parent)) if (localModel.childKeyAt(parent, index) == path) {
-					current.select(path);
-					current.scrollIntoView(path);
-					renamedExplorerPath = null;
-					break;
-				}
-			};
-			tree.hasChildrenHint = function(key) return localModel.hasChildrenHint(key);
-			tree.onExpansionRequested = function(path, expanded, toggle) {
-				var allowed = localModel.requestExpansion(path, expanded, toggle);
-				requestFrame();
-				return allowed;
-			};
-			tree.onCollapseAll = localModel.cancelRequestedExpansions;
-			tree.onExpandedChanged = function(path, expanded) localModel.setDirectoryExpanded(path, expanded);
-		}
-		tree.onItemClicked = function(path, count) {
-			if (remoteModel != null) {
-				if (remoteModel.isMoreKey(path) || remoteModel.isRetryKey(path)) {
-					if (count == 1) remoteModel.activateSpecial(path);
-					return;
-				}
-				if (count == 1 && !remoteModel.isDirectoryKey(path)) openWorkspaceFile(remoteModel, path, false);
-				return;
-			}
-			if (localModel != null && localModel.isSyntheticRow(path)) {
-				if (count == 1 && localModel.activateSyntheticRow(path)) requestFrame();
-				return;
-			}
-			if (count != 1 || (localModel != null && localModel.isDirectoryPath(path))) return;
-			try {
-				application.openInBackground(path, true, false);
-			} catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
-		};
-		if (localModel != null) tree.onItemRename = function(path) {
-			if (explorerRename != null || localModel.isSyntheticRow(path)) return;
-			tree.select(path);
-			host.setSelectedExplorerPath(path);
-			application.files.openRenameFile();
-		};
-		tree.onItemContextMenu = function(path, event) {
-			if (remoteModel != null) {
-				if (path == remoteModel.rootKeyAt(0))
-					showWorkbenchMenu(remoteExplorerMenuItems(), event, function() return explorerModel == remoteModel);
-				return;
-			}
-			if (localModel != null && localModel.isSyntheticRow(path)) return;
-			var menuRoot = explorerRoot;
-			host.setSelectedExplorerPath(path);
-			if (application.savedWorkspaces.hasRoot(path)) {
-				showWorkbenchMenu(workspaceRootMenuItems(path), event,
-					function() return explorerRoot == menuRoot && application.savedWorkspaces.hasRoot(path));
-				return;
-			}
-			showContextMenu([
-				new CommandMenuEntry("file:new", "New File…"),
-				new CommandMenuEntry("folder:new", "New Folder…"),
-				new CommandMenuEntry("file:rename", "Rename…"),
-				new CommandMenuEntry("file:delete", "Delete…"),
-				new CommandMenuEntry("workspace:remove-folder", "Remove Folder from Workspace…")
-			], event, function() return explorerRoot == menuRoot && host.focusedFilePath() == path && FileSystem.exists(path));
-		};
-		explorerTree = tree;
-		if (remoteModel != null) advanceWorkspaceFolderReveal(tree, remoteModel);
-		return new ExplorerTreeView(tree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events, explorerRename,
-			host.focusExplorer, function(command) application.commands.perform(command, application.context));
-	}
-
-	function advanceWorkspaceFolderReveal(tree:TreeView, model:WorkspaceFileTreeModel):Void {
-		var path = pendingWorkspaceFolderReveal;
-		if (path == null || path.length == 0) return;
-		var parts = path.split("/"), parentKey = model.rootKeyAt(0), currentPath = "";
-		for (index in 0...parts.length) {
-			if (parts[index].length == 0) { pendingWorkspaceFolderReveal = null; return; }
-			currentPath = currentPath.length == 0 ? parts[index] : currentPath + "/" + parts[index];
-			var key = model.keyForPath(currentPath), visible = false;
-			try { tree.scrollTo(key); visible = true; } catch (_:Dynamic) {}
-			if (!visible) {
-				if (!tree.isExpanded(parentKey) && tree.setExpanded(parentKey, true)) requestFrame();
-				return;
-			}
-			if (index + 1 < parts.length) {
-				if (!tree.isExpanded(key)) {
-					if (!tree.setExpanded(key, true)) { pendingWorkspaceFolderReveal = null; return; }
-					requestFrame();
-				}
-				parentKey = key;
-				return;
-			}
-			if (model.isDirectoryKey(key) && !tree.isExpanded(key) && tree.setExpanded(key, true))
-				requestFrame();
-			tree.select(key);
-			tree.scrollTo(key);
-			pendingWorkspaceFolderReveal = null;
-			requestFrame();
-			return;
-		}
-	}
-
-	function openWorkspaceFile(model:WorkspaceFileTreeModel, key:String, sticky:Bool):Void {
-		var path = model.relativePath(key), entry = model.entryForKey(key);
-		if (path == null || path.length == 0 || entry == null) return;
-		openWorkspaceFileSnapshot(workspaceAttachment, model.workspaceId(), model.scopeId(), model.rootId(),
-			model.rootDisplayName(), path, entry.revision, WorkspaceFileReader.previewSize(entry.size), sticky, null, sticky);
-	}
-
-	function openWorkspaceSearchResult(match:FileSearchMatch):Void {
-		if (match == null || match.path == null || match.path.length == 0) return;
-		if (match.kind == "directory") {
-			pendingWorkspaceFolderReveal = match.path;
-			showSidebarMode("files");
-			return;
-		}
-		if (match.kind != "file") return;
-		var attachment = workspaceAttachment;
-		var client = attachment == null ? null : attachment.fileClient();
-		if (attachment == null || client == null) {
-			application.reportError("search", "Workspace file service is not connected");
-			return;
-		}
-		var scope = primaryScope(attachment);
-		var root = match.root == null ? "root" : match.root;
-		// A result under another of the workspace's folders is scoped to that folder.
-		var matchFolder = remoteFileSearch.rootPath(match);
-		if (root != "root" && matchFolder != null) scope = matchFolder;
-		if (scope == null || scope.length == 0) scope = explorerRoot;
-		if (scope == null || scope.length == 0) scope = attachment.fileWorkspace();
-		if (host.activateWorkspaceFile(scope, root, match.path, false)) {
-			var existing = host.workspaceFile(scope, root, match.path);
-			if (existing != null && match.line >= 0) existing.selectSearchMatch(match.line, match.column, match.length);
-			requestFrame();
-			return;
-		}
-		var workspace = attachment.fileWorkspace();
-		client.stat(workspace, root, match.path, function(stat) {
-			if (workspaceAttachment != attachment) return;
-			if (stat == null || stat.workspace != workspace || stat.root != root || stat.path != match.path
-				|| stat.entry == null || stat.entry.kind != "file" || stat.entry.revision == null) {
-				application.reportError("search", "Workspace search result is no longer a file");
-				return;
-			}
-			var rootName = scope;
-			var slash = rootName.lastIndexOf("/");
-			if (slash >= 0 && slash + 1 < rootName.length) rootName = rootName.substring(slash + 1);
-			openWorkspaceFileSnapshot(attachment, workspace, scope, root, rootName, match.path, match.revision,
-				WorkspaceFileReader.previewSize(stat.entry.size), false, match);
-		}, function(error) {
-			if (workspaceAttachment == attachment)
-				application.reportError("search", error == null ? "Could not open workspace search result" : error.message);
-		});
-	}
-
-	function openWorkspaceFileSnapshot(attachment:Null<workspace.client.WorkspaceAttachment>, workspace:String,
-			scope:String, root:String, rootName:String, path:String, revision:Null<String>, sizeBytes:Null<Int>,
-			sticky:Bool, match:Null<FileSearchMatch>, focusEditor:Bool = true):Void {
-		if (host.activateWorkspaceFile(scope, root, path, sticky, focusEditor)) {
-			var existing = host.workspaceFile(scope, root, path);
-			if (existing != null && existing.loading)
-				workspaceFileLoader.prioritize(workspaceFileKey(workspace, scope, root, path));
-			if (existing != null && match != null && match.line >= 0)
-				existing.selectSearchMatch(match.line, match.column, match.length);
-			requestFrame();
-			return;
-		}
-		if (sizeBytes == null) {
-			application.reportError("files", "File exceeds the 16 MiB preview limit");
-			return;
-		}
-		if (!host.canOpenWorkspaceFile(scope, root, path, sizeBytes)) {
-			application.reportError("files", "Workspace file preview memory limit reached; close another file first");
-			return;
-		}
-		var file = new UiWorkspaceFileTab(workspace, root, scope, rootName, path, revision == null ? "" : revision,
-			"", sizeBytes, !sticky, application.syntaxes, editorPalette);
-		file.loading = true;
-		host.openWorkspaceFile(file, !sticky, focusEditor);
-		if (focusEditor) host.focusActiveEditor();
-		requestFrame();
-		loadWorkspaceFile(file, attachment, revision, match);
-	}
-
-	function loadWorkspaceFile(file:UiWorkspaceFileTab, attachment:Null<workspace.client.WorkspaceAttachment>,
-			revision:Null<String>, match:Null<FileSearchMatch>):Void {
-		file.loading = true;
-		file.loadError = null;
-		var started = Sys.time();
-		var key = workspaceFileKey(file.workspace, file.scope, file.root, file.path);
-		workspaceFileLoader.load(key, revision, function(complete, wanted) {
-			var client = attachment == null ? null : attachment.fileClient();
-			if (workspaceAttachment != attachment || client == null || attachment.fileWorkspace() != file.workspace ||
-				!resolveFileRoot(attachment, file)) {
-				complete({contents: null, revision: null, sizeBytes: 0, error: "Workspace file service is not connected"});
-				return;
-			}
-			WorkspaceFileReader.read(client, file.workspace, file.root, file.path, revision, complete, wanted);
-		}, function() return host.hasWorkspaceFile(file), function(result) {
-			file.loading = false;
-			if (workspaceAttachment != attachment) {
-				file.loadError = "Workspace is disconnected. Reconnect and retry.";
-			} else if (result.error != null || result.contents == null || result.revision == null) {
-				file.loadError = result.error == null ? "Could not read workspace file" : result.error;
-			} else if (!host.canOpenWorkspaceFile(file.scope, file.root, file.path, result.sizeBytes)) {
-				file.loadError = "Workspace file preview memory limit reached; close another file first";
-			} else {
-				var updated = new UiWorkspaceFileTab(file.workspace, file.root, file.scope, file.rootName,
-					file.path, result.revision, result.contents, result.sizeBytes, file.preview, application.syntaxes, editorPalette);
-				updated.contentReadyMs = (Sys.time() - started) * 1000;
-				if (match != null && match.line >= 0) updated.selectSearchMatch(match.line, match.column, match.length);
-				// Replace in place: an older response must never activate its tab again.
-				host.replaceWorkspaceFileSnapshot(file, updated);
-			}
-			requestFrame();
-		});
-	}
-
-	function refreshWorkspaceFile(file:UiWorkspaceFileTab):Void {
-		if (file == null || file.loading || file.refreshing || !host.hasWorkspaceFile(file)) return;
-		if (file.loadError != null) {
-			loadWorkspaceFile(file, workspaceAttachment, null, null);
-			requestFrame();
-			return;
-		}
-		var key = workspaceFileKey(file.workspace, file.scope, file.root, file.path);
-		if (workspaceFileRefreshPending.exists(key)) return;
-		if (workspaceFileReadCount() >= 2) {
-			file.refreshError = "Two workspace file reads are already in progress";
-			requestFrame();
-			return;
-		}
-		var attachment = workspaceAttachment;
-		var client = attachment == null ? null : attachment.fileClient();
-		if (client == null || attachment.fileWorkspace() != file.workspace
-			|| !resolveFileRoot(attachment, file)) {
-			file.refreshError = "Workspace is disconnected; showing the last loaded snapshot";
-			requestFrame();
-			return;
-		}
-		file.refreshing = true;
-		file.refreshError = null;
-		workspaceFileRefreshPending.set(key, true);
-		requestFrame();
-		var fail = function(message:String):Void {
-			workspaceFileRefreshPending.remove(key);
-			workspaceFileLoader.pump();
-			file.refreshing = false;
-			if (host.hasWorkspaceFile(file)) file.refreshError = message;
-			requestFrame();
-		};
-		client.stat(file.workspace, file.root, file.path, function(stat) {
-			if (!host.hasWorkspaceFile(file)) { fail(""); return; }
-			if (stat == null || stat.workspace != file.workspace || stat.root != file.root || stat.path != file.path
-				|| stat.entry == null || stat.entry.kind != "file" || stat.entry.revision == null) {
-				fail("Workspace returned invalid file metadata; showing the last loaded snapshot");
-				return;
-			}
-			var sizeBytes = WorkspaceFileReader.previewSize(stat.entry.size);
-			if (sizeBytes == null) {
-				fail("File is larger than the 16 MiB preview limit; showing the last loaded snapshot");
-				return;
-			}
-			if (!host.canOpenWorkspaceFile(file.scope, file.root, file.path, sizeBytes)) {
-				fail("Workspace file preview memory limit reached; showing the last loaded snapshot");
-				return;
-			}
-			WorkspaceFileReader.read(client, file.workspace, file.root, file.path, stat.entry.revision,
-				function(result:WorkspaceFileReadResult) {
-					if (result.error != null || result.contents == null || result.revision == null) {
-						fail((result.error == null ? "Could not refresh file" : result.error) + "; showing the last loaded snapshot");
-						return;
-					}
-					if (!host.canOpenWorkspaceFile(file.scope, file.root, file.path, result.sizeBytes)) {
-						fail("Workspace file preview memory limit reached; showing the last loaded snapshot");
-						return;
-					}
-					var updated = new UiWorkspaceFileTab(file.workspace, file.root, file.scope, file.rootName, file.path,
-						result.revision, result.contents, result.sizeBytes, file.preview, application.syntaxes, editorPalette);
-					workspaceFileRefreshPending.remove(key);
-					workspaceFileLoader.clearCache();
-					workspaceFileLoader.pump();
-					file.refreshing = false;
-					if (host.replaceWorkspaceFileSnapshot(file, updated)) requestFrame();
-				});
-		}, function(error) fail((error == null ? "Could not refresh file" : error.message) +
-			"; showing the last loaded snapshot"));
-	}
-
-	function workspaceFileReadCount():Int {
-		var count = workspaceFileLoader.active;
-		for (_ in workspaceFileRefreshPending.keys()) count++;
-		return count;
-	}
-
-	static function workspaceFileKey(workspace:String, scope:String, root:String, path:String):String
-		return workspace.length + ":" + workspace + scope.length + ":" + scope + root.length + ":" + root + path;
 
 	/** Register a destination once; the Activity Bar follows the sidebar's order and visibility. */
 	public function registerSidebarDestination(id:String, icon:IconName, provider:Void->View,
@@ -5100,7 +2313,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var fileTab = new TabItem(fileKey,
 					workspaceFile.title + (workspaceFile.preview ? " (preview)" : ""),
 					new WorkspaceFilePreviewView(workspaceFile, theme, editorPalette,
-						function() refreshWorkspaceFile(workspaceFile), application.settings.current.fontSize), true);
+						function() remoteFileTabs.refreshWorkspaceFile(workspaceFile), application.settings.current.fontSize), true);
 				fileTab.onClose = function() host.closeTab(item, paneId, true);
 				filenames.set(fileKey, workspaceFile.rootName + "/" + workspaceFile.path);
 				items.push(fileTab);
@@ -5113,7 +2326,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var terminalTab = new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
 					function() host.activateEditorTab(terminalKey, paneId),
 					function(bounds, id) host.editorResolved(paneId, bounds, id),
-					function(event) showTerminalContextMenu(terminal, event), terminalCommandSkipsShell), true, IconName.Terminal);
+					function(event) terminalTabs.showTerminalContextMenu(terminal, event), terminalTabs.terminalCommandSkipsShell), true, IconName.Terminal);
 				terminalTab.onClose = function() host.closeTab(item, paneId, true);
 				tooltips.set(terminalKey, SessionFolderChooser.tooltip(terminal.title, terminal.remote
 					? sessionFolder(terminal.resourceId, terminal.workspaceRoot, true) : terminal.cwd));
@@ -5235,10 +2448,10 @@ class ExosuitApp implements DesktopUiApplication {
 				tooltips.set(documentKey, document.path.indexOf("\\") >= 0 ? StringTools.replace(document.path, "/", "\\") : document.path);
 			if (diffDocument != null) {
 				var path = diffDocument.path;
-				var source = editorSourceControlSource();
+				var source = sourceControl.editorSourceControlSource();
 				if (source != null) for (repository in source.repositories())
 					if (repository.id == diffDocument.repositoryId) {
-						var relative = pathUnderScope(repository.root, path);
+						var relative = ScmPanelController.pathUnderScope(repository.root, path);
 						if (relative != null) path = relative;
 					}
 				tooltips.set(documentKey, path + "\n" + (diffDocument.reference == "HEAD→INDEX" ? "HEAD → Staged Changes" :
@@ -5308,7 +2521,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var terminal = UiEditorTabs.terminal(item);
 				if (terminal == null || key != UiEditorTabs.key(item)) continue;
 				host.activateEditorTab(key, paneId);
-				showTerminalContextMenu(terminal, event);
+				terminalTabs.showTerminalContextMenu(terminal, event);
 				return;
 			}
 			for (view in tabs) {
@@ -5389,14 +2602,14 @@ class ExosuitApp implements DesktopUiApplication {
 			return bindings.length == 0 ? null : bindings[0].label();
 		};
 		var openPreferences = function(category:Null<String>, advanced:Bool):Void {
-			openSettings();
+			settingsTab.openSettings();
 			settingsPanel.setShowAdvanced(advanced);
 			if (category != null) settingsPanel.select(category);
 		};
 		var actions = [
 			new MenuItem("manage-palette", "Command Palette…", togglePalette,
 				true, shortcut("view.toggle-palette")),
-			new MenuItem("manage-settings", "Settings", openSettings,
+			new MenuItem("manage-settings", "Settings", settingsTab.openSettings,
 				true, shortcut("preferences.open"), true),
 			new MenuItem("manage-keyboard", "Keyboard Shortcuts",
 				function() openPreferences("editor/keyboard", true)),
@@ -5488,23 +2701,11 @@ class ExosuitApp implements DesktopUiApplication {
 			new KeyedView("open", openButton)
 		];
 		if (capabilities.supports(HostCapability.Filesystem)) {
-			items.push(new KeyedView("open-workspace", new Button("Open Workspace…", null, application.savedWorkspaces.openPicker, "welcome-open-workspace")));
 			items.push(new KeyedView("add-folder", new Button("Add Folder to Workspace…", null, application.savedWorkspaces.addPicker, "welcome-add-folder")));
-			if (application.savedWorkspaces.roots().length > 0)
-				items.push(new KeyedView("save-workspace", new Button("Save Workspace As…", null, application.savedWorkspaces.savePicker, "welcome-save-workspace")));
 			if (application.savedWorkspaces.isOpen())
 				items.push(new KeyedView("close-workspace", new Button("Close Workspace", null, function() {
 					application.savedWorkspaces.close(); requestFrame();
 				}, "welcome-close-workspace")));
-			for (index in 0...application.savedWorkspaces.recents.paths.length) {
-				var file = application.savedWorkspaces.recents.paths[index];
-				var available = FileSystem.exists(file);
-				var recent = new Button(workspace.SavedWorkspace.nameFromPath(file) +
-					(available ? "" : " (unavailable)"), null, function() application.savedWorkspaces.open(file), "welcome-workspace-recent-" + index);
-				items.push(new KeyedView("workspace-recent-" + index, new ContextMenuTarget(recent, function(event) showWorkbenchMenu([
-					new MenuItem("remove-recent-workspace", "Remove from Recent Workspaces", function() application.savedWorkspaces.recents.remove(file))
-				], event, function() return application.savedWorkspaces.recents.paths.indexOf(file) >= 0))));
-			}
 		}
 		if (actions != null && actions.recentProjects.length > 0) {
 			var recentStyle = new LayoutStyle();
@@ -5542,15 +2743,17 @@ class ExosuitApp implements DesktopUiApplication {
 		return new Text(message, style, theme.tokens.textSecondary, TextStyleOverride.text(13.0));
 	}
 
-	/** `join`: the folder is added to what is open (startup arguments, Machine attach); otherwise it replaces an open workspace. */
-	function openArgument(path:String, join:Bool = false):Void {
+	/**
+		A folder opens as a workspace (`openFolderWorkspace`, once the window polls); a file opens in a tab, with the
+		cursor on `line` and `column` (1-based) when given.
+	**/
+	function openArgument(path:String, ?line:Int, ?column:Int):Void {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
-			if (!join && openFolderAsMachineWorkspace(path)) return;
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			clearExplorerModel();
 			filesScroll.jumpTo(0, 0);
 			openExplorer();
-			if (join) application.attachFolder(path); else application.openArgument(path);
+			application.openArgument(path);
 			return;
 		}
 		if (explorerRoot == null) {
@@ -5560,7 +2763,11 @@ class ExosuitApp implements DesktopUiApplication {
 				openExplorer();
 			}
 		}
-		application.openArgument(path);
+		var view = application.openArgument(path);
+		if (view != null && line != null && line > 0) {
+			view.restoreCursor(line - 1, column == null || column < 1 ? 0 : column - 1);
+			view.cursorChanged();
+		}
 		statusMessage = "Opened " + path;
 	}
 
@@ -5574,20 +2781,8 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openFolderDialog():Void {
 		if (desktop == null) { application.workbench.openPathCommandView(true); requestFrame(); return; }
-		var automated = devtools.AutomationProbe.takeFolderAnswer();
-		if (automated != null) { openArgument(automated); requestFrame(); return; }
 		desktop.selectDirectory(function(accepted, paths) {
-			if (accepted && paths.length > 0 && openFolderAsMachineWorkspace(paths[0])) {
-				requestFrame();
-				return;
-			}
-			if (accepted && paths.length > 0) {
-				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
-				clearExplorerModel();
-				filesScroll.jumpTo(0, 0);
-				openExplorer();
-				application.openArgument(paths[0]);
-			}
+			if (accepted && paths.length > 0) openArgument(paths[0]);
 			requestFrame();
 		});
 	}
@@ -5621,458 +2816,8 @@ class ExosuitApp implements DesktopUiApplication {
 		explorerTree = null;
 	}
 
-	/** The Source Control view's source: the active explorer root's, or in the Agents layout the group folder's. */
-	public function sourceControlSource():Null<ScmSource> {
-		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) {
-			clearLocalScmSource();
-			return workspaceAttachment.sourceControlSource();
-		}
-		if (!capabilities.supports(HostCapability.SourceControl) || explorerRoot == null && contextScope() == null) {
-			clearLocalScmSource();
-			return null;
-		}
-		// A group's folder narrows to itself; the workspace's scope covers its folders whole.
-		var scope = contextScope(), narrow = scope != null && !scope.isWorkspace();
-		var roots = [for (root in contextRoots()) if (controller.SavedWorkspaceController.available(root)) root];
-		if (roots.length == 0) { clearLocalScmSource(); return null; }
-		return panelScm.get(application.scm, roots, narrow, function(_) {
-			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover each unless a
-			// discovered root already covers it, which would only duplicate that root's polling.
-			if (scope != null) for (root in roots)
-				if (application.scm.repositories(root).length == 0) application.scm.discover(root, _ -> requestFrame());
-		});
-	}
-
-	/**
-		The source behind the editor's change markers and hunk actions. It never narrows to the Agents group's folder: a
-		file opened from anywhere keeps its markers. While the Source Control source narrows, this one covers the active
-		context's folders and the group's folder whole; otherwise it is the same source.
-	**/
-	function editorSourceControlSource():Null<ScmSource> {
-		var panel = sourceControlSource(), scope = contextScope();
-		if (scope == null || panel == null || panel.isRemote()) { editorScm.clear(); return panel; }
-		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
-		for (folder in contextRoots())
-			if (!Lambda.exists(roots, function(root) return PathKey.within(root, folder))) roots.push(folder);
-		return editorScm.get(application.scm, roots, false);
-	}
-
-	/**
-		The source behind an Agent session's branch, commit, worktree and GitHub controls. It never narrows to the Workbench
-		selection: it covers the active context's folders and the session's folder `cwd`, so the controls describe the
-		session's own folder whichever group is selected (see SessionScmSources). A workspace without local file access
-		uses its own source.
-	**/
-	function sessionSourceControlSource(cwd:String):Null<ScmSource> {
-		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) {
-			sessionScm.clear();
-			return workspaceAttachment.sourceControlSource();
-		}
-		if (!capabilities.supports(HostCapability.SourceControl)) { sessionScm.clear(); return null; }
-		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
-		var folder = normalizedPath(cwd);
-		if (!controller.SavedWorkspaceController.available(folder)) folder = "";
-		return sessionScm.get(application.scm, roots, folder, Sys.time(), function(_) {
-			// A group folder may be any folder; discover it unless a discovered root already covers it.
-			if (folder != "" && application.scm.repositories(folder).length == 0) application.scm.discover(folder, _ -> requestFrame());
-		});
-	}
-
-	/** The session's source (see sessionSourceControlSource); null without a session record. */
-	function sessionScmSource(resource:String, root:String):Null<ScmSource> {
-		var record = sessionRecord(resource, root);
-		return record == null ? null : sessionSourceControlSource(record.cwd);
-	}
-
-	/** Whether the session's files are on this machine (no remote attachment without local file access). */
-	function sessionLocalFiles():Bool return workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess();
-
-	function syncScmSidebar():Void {
-		var remoteRead = workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()
-			&& workspaceAttachment.sourceControlSource() != null;
-		var enabled = capabilities.supports(HostCapability.SourceControl) || remoteRead;
-		if (enabled && sidebar.find("scm") == null)
-			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel,
-				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
-		else if (!enabled && sidebar.find("scm") != null) {
-			sidebar.unregister("scm");
-			application.commands.remove("sidebar:scm");
-			application.keymap.removeCommand("sidebar:scm");
-		}
-		if (enabled && application != null && !application.commands.contains("sidebar:scm")) {
-			application.commands.add("sidebar:scm", function(_) { activateSidebarDestination("scm"); requestFrame(); });
-			application.keymap.add(platform.Platform.KEY_G, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["sidebar:scm"]);
-		}
-	}
-
-	function sourceControlPanel():View {
-		var source = sourceControlSource();
-		if (source == null) {
-			clearSourceControlPanel();
-			return new Text(explorerRoot == null && contextScope() == null ? "Open a folder to view source control" : "Source control access is unavailable",
-				null, theme.tokens.textSecondary, new TextStyleOverride(null, 13.0, null, haxeon.ui.TextWrap.WordCharacter));
-		}
-		// Compare the source itself: the local source cache replaces a disposed source with one of the same identity, and a
-		// panel kept on the disposed one shows "disconnected" and "Loading repositories…" for good.
-		if (sourceControlPanelValue == null || sourceControlPanelIdentity != source.identity() || !sourceControlPanelValue.shows(source)) {
-			clearSourceControlPanel();
-			sourceControlPanelIdentity = source.identity();
-			sourceControlPanelValue = new SourceControlPanel(source, theme, function() {
-				syncScmPresentation(source);
-				requestFrame();
-			}, function(repository, group, resource) {
-				rememberScmResource(source, repository, group, resource);
-				openScmResource(source, repository, group, resource);
-				requestFrame();
-			}, showScmResourceMenu,
-				function() { source.discover(_ -> requestFrame()); }, trustScmRepository,
-			function(repository, group, resource) {
-				rememberScmResource(source, repository, group, resource);
-				openScmSourceFile(source, repository, resource);
-			}, function(repository, group, event) { showScmRepositoryMenu(source, repository, group, event); },
-			function() return scmCommitRepository(source), function(repository) {
-				var value = application.scmCommitDrafts.get(repository.id);
-				return value == null ? "" : value;
-			}, function(repository, value) {
-				application.scmCommitDrafts.set(repository.id, value);
-				requestFrame();
-			}, function(repository, amend, all) {
-				var value = application.scmCommitDrafts.get(repository.id);
-				commitScmMessage(source, repository, value, amend, all);
-			}, function(repository) return source.canWrite(repository.id) && hasStagedScmChanges(source, repository), function(repository, group, resource) {
-				rememberScmResource(source, repository, group, resource);
-			if (resource != null && group != null) applyPendingScmFile(group.id != ScmGroupId.Index);
-			else applyPendingScmGroup(group == null || group.id != ScmGroupId.Index);
-			}, function(repository, event) showScmCommitMenu(source, repository, event));
-			syncScmPresentation(source);
-		}
-		return sourceControlPanelValue;
-	}
-
-	function clearSourceControlPanel():Void {
-		if (sourceControlPanelValue != null) sourceControlPanelValue.dispose();
-		sourceControlPanelValue = null;
-		sourceControlPanelIdentity = null;
-	}
-
-	function clearScmPresentation():Void {
-		scmBranches.cancel();
-		for (owner in [for (value in scmDecorationOwners.keys()) value]) host.getResourceDecorations().removeOwner(owner);
-		scmDecorationOwners.clear(); scmDecorationRevisions.clear();
-		scmPresentationSourceIdentity = null;
-		host.getPluginStatusItems().removeOwner("scm");
-		scmBranchStatus = null;
-	}
-
-	function syncScmPresentation(source:ScmSource):Void {
-		if (source == null) return;
-		var decorationRegistry = host.getResourceDecorations();
-		var statusRegistry = host.getPluginStatusItems();
-		var decorationRevisionBefore = decorationRegistry.revision;
-		var statusRevisionBefore = statusRegistry.revision;
-		if (scmPresentationSourceIdentity != null && scmPresentationSourceIdentity != source.identity()) clearScmPresentation();
-		scmPresentationSourceIdentity = source.identity();
-		var desired:Map<String, Bool> = [];
-		var repositories = source.repositories();
-		for (repository in repositories) {
-			var snapshot = source.snapshot(repository.id);
-			if (snapshot == null) continue;
-			var owner = "scm:" + source.identity() + ":" + repository.id;
-			desired.set(owner, true);
-			var revision = haxe.Int64.toStr(snapshot.revision);
-			if (scmDecorationRevisions.get(owner) == revision) continue;
-			host.getResourceDecorations().removeOwner(owner);
-			for (group in snapshot.groups) {
-			for (resource in group.resources) {
-				var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
-				var path:String;
-				if (source.isRemote()) {
-					var scope = workspaceAttachment == null ? null : primaryScope(workspaceAttachment);
-					var repoRelative = scope == null ? null : pathUnderScope(scope, repository.root);
-					if (repoRelative == null) continue;
-					path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
-				} else path = repository.root + "/" + relative;
-				path = StringTools.replace(path, "\\", "/");
-				var badge = scmStatusBadge(resource);
-				var color = resource.conflictKind != null || resource.changeKind == scm.ScmChangeKind.Unmerged
-					? plugin.PluginResourceDecorationColor.Danger
-					: resource.changeKind == scm.ScmChangeKind.Added || resource.changeKind == scm.ScmChangeKind.Untracked
-						? plugin.PluginResourceDecorationColor.Success
-						: resource.changeKind == scm.ScmChangeKind.Deleted ? plugin.PluginResourceDecorationColor.Danger
-						: resource.changeKind == scm.ScmChangeKind.Ignored ? plugin.PluginResourceDecorationColor.Secondary
-						: plugin.PluginResourceDecorationColor.Warning;
-				var priority = group.id == ScmGroupId.Merge ? 400 : group.id == ScmGroupId.Index ? 300 :
-					group.id == ScmGroupId.WorkingTree ? 200 : group.id == ScmGroupId.Untracked ? 100 : 0;
-				host.getResourceDecorations().add(owner, "resource:" + group.id + ":" + resource.pathBytes.length + ":" + resource.path,
-					path, badge, color, "Source control · " + scmGroupLabel(group.id) + " · " + resource.path, true, priority);
-			}
-			}
-			scmDecorationOwners.set(owner, true);
-			scmDecorationRevisions.set(owner, revision);
-		}
-		for (owner in [for (owner in scmDecorationOwners.keys()) if (!desired.exists(owner)) owner]) {
-			host.getResourceDecorations().removeOwner(owner);
-			scmDecorationOwners.remove(owner); scmDecorationRevisions.remove(owner);
-		}
-		if (repositories.length == 0) {
-			statusRegistry.removeOwner("scm"); scmBranchStatus = null;
-			if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) requestFrame();
-			return;
-		}
-		var activeRepository = repositories[0], snapshot = source.snapshot(activeRepository.id);
-		if (snapshot == null) return;
-		var head = snapshot.head;
-		var branch = head.branch != null ? head.branch : head.detachedCommit == null ? "No branch" : "detached " + head.detachedCommit.substr(0, 8);
-		var text = branch;
-		var tooltip = activeRepository.root + "\n" + text + (head.upstream == null ? "" : "\nUpstream: " + head.upstream)
-			+ (head.operation == null ? "" : "\n" + Std.string(head.operation));
-		var branchCommand = "scm:branches";
-		var registry = statusRegistry;
-		if (scmBranchStatus == null || registry.find("scm", "branch") == null)
-			scmBranchStatus = registry.add("scm", "branch", text, 100, plugin.PluginStatusSide.Left,
-				null, tooltip, branchCommand);
-		else registry.update(scmBranchStatus, text, 100, plugin.PluginStatusSide.Left, null, tooltip, branchCommand);
-		for (direction in ["ahead", "behind"]) {
-			var count = direction == "ahead" ? head.ahead : head.behind;
-			var id = "branch-" + direction;
-			var item = registry.find("scm", id);
-			if (count <= 0) {
-				if (item != null) registry.remove(item);
-				continue;
-			}
-			var icon = direction == "ahead" ? IconName.ArrowUp : IconName.ArrowDown;
-			var priority = direction == "ahead" ? 99 : 98;
-			var description = count + (count == 1 ? " commit " : " commits ") + direction
-				+ (head.upstream == null ? "" : (direction == "ahead" ? " of " : " ") + head.upstream);
-			if (item == null) registry.add("scm", id, Std.string(count), priority, plugin.PluginStatusSide.Left,
-				icon, description, branchCommand);
-			else registry.update(item, Std.string(count), priority, plugin.PluginStatusSide.Left,
-				icon, description, branchCommand);
-		}
-		if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) requestFrame();
-	}
-
-	function syncScmDocumentMarkers(now:Float):Void {
-		var source = editorSourceControlSource();
-		var desired:Map<Int, Bool> = [];
-		var visited:Map<Int, Bool> = [];
-		if (source != null && !source.isRemote()) {
-			var repositories = source.repositories();
-			var sourceIdentity = source.identity();
-			for (view in host.allViews()) {
-				var document = view.document;
-				if (view.diffDocument != null || document.path == null) continue;
-				visited.set(document.id, true);
-				var target = scmMarkerTarget(sourceIdentity, repositories, document);
-				if (target == null) continue;
-				var repository = target.repository;
-				var relative = target.relative;
-				if (repository == null || relative == null) continue;
-				var snapshot = source.snapshot(repository.id);
-				if (snapshot == null) continue;
-				// The group scan costs as much as the change list is long, so redo it only for a new snapshot.
-				var scanned = target.snapshot;
-				if (scanned != snapshot) {
-					var untracked = false, worktree = false;
-					for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
-						if (group.id == ScmGroupId.Untracked) untracked = true;
-						if (group.id == ScmGroupId.WorkingTree) worktree = true;
-					}
-					target.snapshot = snapshot;
-					target.untracked = untracked;
-					target.worktree = worktree;
-				}
-				var identity = target.identity;
-				var untracked = target.untracked, worktree = target.worktree;
-				var previousIdentity = scmDocumentMarkerKeys.get(document.id);
-				var tracker = scmDocumentMarkers.get(document.id);
-				if (tracker != null && previousIdentity != identity) {
-					tracker.dispose();
-					scmDocumentMarkers.remove(document.id);
-					scmDocumentMarkerKeys.remove(document.id);
-					tracker = null;
-				}
-				if (tracker == null) {
-					var documentId = document.id;
-					tracker = new scm.ScmOpenDocumentMarkers(source, repository.id, haxe.io.Bytes.ofString(relative), document,
-						"scm-open:" + documentId, host.getPluginGutterMarkers(), application.workspace.jobs,
-						application.settings.current.scmDiffSizeLimit, requestFrame);
-					scmDocumentMarkers.set(document.id, tracker);
-					scmDocumentMarkerKeys.set(document.id, identity);
-				}
-				tracker.update(snapshot, document.dirty || worktree || untracked, untracked, now);
-				desired.set(document.id, true);
-			}
-		}
-		for (id in [for (id in scmDocumentMarkers.keys()) if (!desired.exists(id)) id]) {
-			var tracker = scmDocumentMarkers.get(id);
-			if (tracker != null) tracker.dispose();
-			scmDocumentMarkers.remove(id);
-			scmDocumentMarkerKeys.remove(id);
-		}
-		for (id in [for (id in scmMarkerTargets.keys()) if (!visited.exists(id)) id]) scmMarkerTargets.remove(id);
-	}
-
-	/** Resolves a document to its repository, recomputing only when its path or the repository list changed. */
-	function scmMarkerTarget(sourceIdentity:String, repositories:Array<scm.ScmRepository>, document:editor.Document):Null<ScmMarkerTarget> {
-		var cached = scmMarkerTargets.get(document.id);
-		if (cached != null && cached.path == document.path && cached.sourceIdentity == sourceIdentity
-			&& sameScmRepositories(cached.repositories, repositories)) return cached.repository == null ? null : cached;
-		var repository:Null<scm.ScmRepository> = null, relative:Null<String> = null;
-		for (candidate in repositories) {
-			var candidatePath = scmRelativePath(candidate.root, document.path);
-			if (candidatePath != null && (repository == null || candidate.root.length > repository.root.length)) {
-				repository = candidate;
-				relative = candidatePath;
-			}
-		}
-		if (relative == null || relative.length == 0) repository = null;
-		var target:ScmMarkerTarget = {
-			path: document.path, sourceIdentity: sourceIdentity, repositories: repositories, repository: repository,
-			relative: relative, identity: repository == null ? "" : sourceIdentity + "|" + repository.id + "|" + relative,
-			snapshot: null, untracked: false, worktree: false
-		};
-		scmMarkerTargets.set(document.id, target);
-		return repository == null ? null : target;
-	}
-
-	static function sameScmRepositories(left:Array<scm.ScmRepository>, right:Array<scm.ScmRepository>):Bool {
-		if (left.length != right.length) return false;
-		for (index in 0...left.length)
-			if (left[index] != right[index] && (left[index].id != right[index].id || left[index].root != right[index].root)) return false;
-		return true;
-	}
-
-	function scmRelativePath(root:String, path:String):Null<String> return PathKey.relative(normalizedPath(root), normalizedPath(path));
-
-	static function scmStatusBadge(resource:scm.ScmResource):String {
-		if (resource.conflictKind != null) return "!";
-		return resource.changeKind == scm.ScmChangeKind.Added || resource.changeKind == scm.ScmChangeKind.Untracked ? "A" :
-			resource.changeKind == scm.ScmChangeKind.Modified ? "M" : resource.changeKind == scm.ScmChangeKind.Deleted ? "D" :
-			resource.changeKind == scm.ScmChangeKind.Renamed ? "R" : resource.changeKind == scm.ScmChangeKind.Copied ? "C" :
-			resource.changeKind == scm.ScmChangeKind.TypeChanged ? "T" : resource.changeKind == scm.ScmChangeKind.Unmerged ? "!" :
-			resource.changeKind == scm.ScmChangeKind.Ignored ? "I" : "?";
-	}
-
-	static function scmGroupLabel(group:ScmGroupId):String
-		return group == ScmGroupId.Merge ? "Merge Changes" : group == ScmGroupId.Index ? "Staged Changes" :
-			group == ScmGroupId.WorkingTree ? "Changes" : group == ScmGroupId.Untracked ? "Untracked" : Std.string(group);
-
-	function trustScmRepository(repository:scm.ScmRepository):Void {
-		var source = sourceControlSource();
-		if (source == null || source.isRemote()) {
-			application.reportError("source-control", "Trust this repository on the machine that runs Git");
-			return;
-		}
-		source.trust(repository.id, function(result) {
-			if (result.error != null || result.value != true)
-				application.reportError("source-control", result.error == null ? "Could not trust repository" : result.error.message);
-			else {
-				source.refreshNow(repository.id);
-				requestFrame();
-			}
-		});
-	}
-
-	function openScmResource(source:ScmSource, repository:scm.ScmRepository, group:scm.ScmGroup, resource:scm.ScmResource,
-		sideBySide:Bool = false):Void {
-		if (source == null || repository == null || group == null || resource == null) return;
-		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
-		if (group.id == ScmGroupId.Merge) {
-			openScmWorktreeFile(source, repository, relative, function(path, contents, live) {
-				if (source.isRemote()) openRemoteScmFile(repository, relative, -1);
-				else if (path != null) application.open(path);
-				closePhoneSidebarAfterOpen();
-			});
-			return;
-		}
-		var absolute = source.isRemote() ? null : repository.root + "/" + relative;
-		var live = absolute == null ? null : findDocument(absolute);
-		var snapshot = source.snapshot(repository.id);
-		var revision = snapshot == null ? "" : haxe.Int64.toStr(snapshot.revision);
-		var baseRef:scm.ScmRef = group.id == ScmGroupId.Index ? scm.ScmRef.Head : scm.ScmRef.Index;
-		var refLabel = group.id == ScmGroupId.Index ? "HEAD→INDEX" : group.id == ScmGroupId.Untracked ? "EMPTY→WORKTREE" : "INDEX→WORKTREE";
-		var open = function(oldText:String, newText:String):Void {
-			var diffPath = absolute == null ? relative : absolute;
-			if (sideBySide && !phoneLayoutActive) host.openScmSideBySide(repository.id, diffPath, refLabel, revision, oldText, newText, live);
-			else host.openScmDiff(repository.id, diffPath, refLabel, revision, oldText, newText, live);
-			closePhoneSidebarAfterOpen();
-		};
-		var loadCurrent = function(complete:String->Void):Void {
-			if (group.id == ScmGroupId.Untracked) {
-				openScmWorktreeFile(source, repository, relative, function(path, contents, _) {
-					if (contents == null) reportScmReadError("Could not read untracked file " + resource.path);
-					else open("", contents);
-				});
-				return;
-			}
-			if (group.id == ScmGroupId.Index) {
-				readScmOriginal(source, repository.id, scm.ScmRef.Index, resource.pathBytes, function(contents, error) {
-					if (error != null && error.code != "not_found" && error.code != "missing") reportScmReadError(error.message);
-					else if (contents == null) open("", "");
-					else open("", contents);
-				});
-				return;
-			}
-			openScmWorktreeFile(source, repository, relative, function(path, contents, live) {
-				if (contents == null) reportScmReadError("Could not read changed file " + resource.path);
-				else complete(contents);
-			});
-		};
-		if (group.id == ScmGroupId.Index) {
-			readScmOriginal(source, repository.id, baseRef, resource.pathBytes, function(base, error) {
-				if (error != null && error.code != "not_found" && error.code != "missing") { reportScmReadError(error.message); return; }
-				readScmOriginal(source, repository.id, scm.ScmRef.Index, resource.pathBytes, function(indexText, indexError) {
-					if (indexError != null && indexError.code != "not_found" && indexError.code != "missing") { reportScmReadError(indexError.message); return; }
-					open(base == null ? "" : base, indexText == null ? "" : indexText);
-				});
-			});
-			return;
-		}
-		if (group.id == ScmGroupId.Untracked) { loadCurrent(function(_) {}); return; }
-		readScmOriginal(source, repository.id, baseRef, resource.pathBytes, function(base, error) {
-			if (error != null && error.code != "not_found" && error.code != "missing") { reportScmReadError(error.message); return; }
-			loadCurrent(function(current) open(base == null ? "" : base, live != null ? live.buffer.text : current));
-		});
-	}
-
 	function closePhoneSidebarAfterOpen():Void {
 		if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
-	}
-
-	function readScmOriginal(source:ScmSource, repositoryId:String, reference:scm.ScmRef, path:haxe.io.Bytes,
-		complete:Null<String>->Null<scm.ScmError>->Void):Void {
-		// A remote source answers over the workspace connection, whose events do not redraw the window.
-		source.originalBytes(repositoryId, reference, path, function(result) {
-			if (result.error != null || result.value == null) complete(null, result.error);
-			else if (result.value.binary) complete(null, new scm.ScmError("binary", "Binary files cannot be shown as text diffs"));
-			else complete(result.value.bytes.toString(), null);
-			requestFrame();
-		});
-	}
-
-	function openScmWorktreeFile(source:ScmSource, repository:scm.ScmRepository, relative:String,
-		complete:Null<String>->Null<String>->Null<editor.Document>->Void):Void {
-		if (source.isRemote()) {
-			var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
-			var scope = attachment == null ? null : primaryScope(attachment);
-			if (attachment == null || client == null || scope == null) { complete(null, null, null); return; }
-			var repoRelative = pathUnderScope(scope, repository.root);
-			if (repoRelative == null) { complete(null, null, null); return; }
-			var path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
-			// The result arrives over the workspace connection, whose events do not redraw the window.
-			WorkspaceFileReader.read(client, attachment.fileWorkspace(), "root", path, null, function(result) {
-				complete(null, result.error == null ? result.contents : null, null);
-				requestFrame();
-			});
-			return;
-		}
-		var path = repository.root + "/" + relative;
-		var live = findDocument(path);
-		if (live != null && live.dirty) { complete(path, live.buffer.text, live); return; }
-		if (!application.workspace.fileSystem.exists(path)) { complete(path, "", live); return; }
-		try complete(path, application.workspace.fileSystem.read(path), live)
-		catch (_:Dynamic) complete(path, null, live);
 	}
 
 	function findDocument(path:String):Null<editor.Document> {
@@ -6083,590 +2828,6 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** An open document whose folder was deleted or renamed cannot be normalized; compare it as written rather than fail the lookup. */
 	function normalizedPath(path:String):String return try application.workspace.fileSystem.normalize(path) catch (_:Dynamic) path;
-
-	function openRemoteScmFile(repository:scm.ScmRepository, relative:String, line:Int):Void {
-		var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
-		var scope = attachment == null ? null : primaryScope(attachment);
-		if (attachment == null || client == null || scope == null) { reportScmReadError("Workspace file service is unavailable"); return; }
-		var repoRelative = pathUnderScope(scope, repository.root);
-		if (repoRelative == null) { reportScmReadError("Repository is outside the workspace file root"); return; }
-		var path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
-		var workspaceId = attachment.fileWorkspace();
-		client.stat(workspaceId, "root", path, function(stat) {
-			if (workspaceAttachment != attachment || stat == null || stat.entry == null || stat.entry.kind != "file") {
-				reportScmReadError("The changed file is no longer available");
-				requestFrame();
-				return;
-			}
-			var rootName = scope;
-			var slash = rootName.lastIndexOf("/");
-			if (slash >= 0) rootName = rootName.substring(slash + 1);
-			openWorkspaceFileSnapshot(attachment, workspaceId, scope, "root", rootName, path, stat.entry.revision,
-				WorkspaceFileReader.previewSize(stat.entry.size), false, null);
-			if (line >= 0) {
-				var existing = host.workspaceFile(scope, "root", path);
-				if (existing != null) existing.selectSearchMatch(line, 0, 0);
-			}
-			requestFrame();
-		}, function(error) {
-			reportScmReadError(error == null ? "Could not open changed workspace file" : error.message);
-			requestFrame();
-		});
-	}
-
-	static function pathUnderScope(scope:String, root:String):Null<String> {
-		var base = StringTools.replace(scope, "\\", "/"), full = StringTools.replace(root, "\\", "/");
-		while (StringTools.endsWith(base, "/")) base = base.substr(0, base.length - 1);
-		if (full == base) return "";
-		var prefix = base + "/";
-		if (!StringTools.startsWith(full, prefix)) return null;
-		return full.substr(prefix.length);
-	}
-
-	function reportScmReadError(message:String):Void application.reportError("source-control", message);
-
-	function rememberScmResource(source:Null<ScmSource>, repository:scm.ScmRepository, group:Null<scm.ScmGroup>,
-		resource:Null<scm.ScmResource>):Void {
-		pendingScmSource = source;
-		pendingScmRepository = repository;
-		pendingScmGroup = group;
-		pendingScmResource = resource;
-	}
-
-	function showScmResourceMenu(repository:scm.ScmRepository, group:scm.ScmGroup, resource:scm.ScmResource, event:UiEvent):Void {
-		rememberScmResource(sourceControlSource(), repository, group, resource);
-		var entries = [
-			new CommandMenuEntry("scm:open-changes", "Open Changes"),
-			new CommandMenuEntry("scm:open-file", "Open File")
-		];
-		if (group.id != ScmGroupId.Merge)
-			entries.push(new CommandMenuEntry("scm:open-side-by-side", "Compare Side by Side"));
-		if (group.id == ScmGroupId.Merge && canResolvePendingScmConflict()) {
-			entries.push(new CommandMenuEntry("scm:resolve-ours", "Accept Ours"));
-			entries.push(new CommandMenuEntry("scm:resolve-theirs", "Accept Theirs"));
-			entries.push(new CommandMenuEntry("scm:resolve-both", "Accept Both"));
-		}
-		if (canStagePendingScmFile()) entries.push(new CommandMenuEntry("scm:stage", group.id == ScmGroupId.Merge ? "Mark Resolved (Stage)" : "Stage File"));
-		if (canUnstagePendingScmFile()) entries.push(new CommandMenuEntry("scm:unstage", "Unstage File"));
-		if (canDiscardPendingScmFile()) entries.push(new CommandMenuEntry("scm:discard", "Discard Changes"));
-		showContextMenu(entries, event, function() return true);
-	}
-
-	function showScmRepositoryMenu(source:ScmSource, repository:scm.ScmRepository, group:Null<scm.ScmGroup>, event:UiEvent):Void {
-		rememberScmResource(source, repository, group, null);
-		var entries:Array<CommandMenuEntry> = [];
-		if (group == null && canCheckoutScmRepository(repository)) {
-			entries.push(new CommandMenuEntry("scm:checkout-selected", "Switch Branch…"));
-			entries.push(new CommandMenuEntry("scm:create-branch-selected", "Create Branch…"));
-		}
-		if (canStagePendingScmGroup()) entries.push(new CommandMenuEntry("scm:stage-all", group == null ? "Stage All Changes" : "Stage Group"));
-		if (canUnstagePendingScmGroup()) entries.push(new CommandMenuEntry("scm:unstage-all", group == null ? "Unstage All Changes" : "Unstage Group"));
-		if (group == null && source.canUseRemotes(repository.id)) {
-			entries.push(new CommandMenuEntry("scm:fetch", "Fetch Remotes"));
-			entries.push(new CommandMenuEntry("scm:pull", "Pull (Fast Forward Only)"));
-			entries.push(new CommandMenuEntry("scm:push", "Push"));
-		}
-		if (entries.length == 0) return;
-		showContextMenu(entries, event, function() return true);
-	}
-
-	/** Whether branches can be switched in `repository` (the first one when null) through `through`, or the panel's source. */
-	function canCheckoutScmRepository(repository:Null<scm.ScmRepository>, ?through:ScmSource):Bool {
-		var source = through != null ? through : sourceControlSource();
-		if (source == null) return false;
-		var target = repository;
-		if (target == null) {
-			var repositories = source.repositories();
-			target = repositories.length == 0 ? null : repositories[0];
-		}
-		if (target == null || !source.canWrite(target.id)) return false;
-		var features = source.features(target.id);
-		return features != null && features.branches;
-	}
-
-	function isScmSourceActive(identity:String):Bool {
-		var source = sourceControlSource();
-		return source != null && source.identity() == identity;
-	}
-
-	function canUsePendingScmRemotes():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository;
-		if (source == null || repository == null || !source.canUseRemotes(repository.id)) return false;
-		var features = source.features(repository.id);
-		return features != null && features.remotes;
-	}
-
-	function applyPendingScmRemote(operation:scm.ScmOperation):Void {
-		if (!canUsePendingScmRemotes()) return;
-		var source = pendingScmSource, repository = pendingScmRepository;
-		if (source == null || repository == null) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) {
-			application.reportError("source-control", "Refresh the repository before running a Git remote operation");
-			return;
-		}
-		function start():Void {
-			var label = switch operation {
-				case Fetch(_): "Fetch";
-				case Pull: "Pull";
-				case Push: "Push";
-				case _: "Git remote operation";
-			};
-			host.getNotifications().publish(label + " in progress…", feedback.NotificationKind.Information, "source-control");
-			var operationId = "ui-" + Std.string(nextScmOperationId++);
-			switch operation {
-				case Fetch(_): scmAutoFetchLast.set(source.identity() + "\n" + repository.id, Sys.time());
-				case _:
-			}
-			source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
-				if (result.error != null) {
-					host.getNotifications().publish(label + " failed: " + result.error.message,
-						feedback.NotificationKind.Error, "source-control");
-					application.reportError("source-control", result.error.message);
-				} else {
-					host.getNotifications().publish(label + " completed", feedback.NotificationKind.Information, "source-control");
-					source.refreshNow(repository.id);
-				}
-				requestFrame();
-			});
-		}
-		var isInitialPush = switch operation {
-			case Push: snapshot.head.upstream == null;
-			case _: false;
-		};
-		if (isInitialPush) {
-			application.confirmations.choose('Push the current branch to origin and set its upstream?', ["push", "cancel"], function(answer) {
-				if (answer == "push") start();
-			});
-		} else start();
-	}
-
-	function maybeAutoFetchScm(source:ScmSource, now:Float):Void {
-		if (!application.settings.current.scmAutoFetch || !source.connected()) return;
-		for (repository in source.repositories()) {
-			if (!source.canUseRemotes(repository.id)) continue;
-			var features = source.features(repository.id);
-			if (features == null || !features.remotes) continue;
-			var key = source.identity() + "\n" + repository.id;
-			if (scmAutoFetchPending.exists(key)) continue;
-			var last = scmAutoFetchLast.get(key);
-			if (last == null) { scmAutoFetchLast.set(key, now); continue; }
-			if (now - last < 300.0) continue;
-			var snapshot = source.snapshot(repository.id);
-			if (snapshot == null) continue;
-			scmAutoFetchLast.set(key, now);
-			scmAutoFetchPending.set(key, true);
-			var operationId = "auto-fetch-" + Std.string(nextScmOperationId++);
-			source.apply(repository.id, operationId, snapshot.revision, scm.ScmOperation.Fetch(null), function(result) {
-				scmAutoFetchPending.remove(key);
-				if (result.error != null) {
-					host.getNotifications().publish("Automatic fetch failed: " + result.error.message,
-						feedback.NotificationKind.Warning, "source-control");
-					application.reportError("source-control", result.error.message);
-				} else source.refreshNow(repository.id);
-				requestFrame();
-			});
-		}
-	}
-
-	function canStagePendingScmFile():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
-		return source != null && repository != null && group != null && resource != null && source.canWrite(repository.id)
-			&& (group.id == ScmGroupId.WorkingTree || group.id == ScmGroupId.Untracked || group.id == ScmGroupId.Merge);
-	}
-
-	function canResolvePendingScmConflict():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
-		if (source == null || repository == null || group == null || resource == null || group.id != ScmGroupId.Merge
-			|| !source.canWrite(repository.id)) return false;
-		var features = source.features(repository.id);
-		return features != null && features.staging;
-	}
-
-	function applyPendingScmConflict(choice:String):Void {
-		if (!canResolvePendingScmConflict()) return;
-		var source = pendingScmSource, repository = pendingScmRepository, resource = pendingScmResource;
-		if (source == null || repository == null || resource == null) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) { application.reportError("source-control", "Refresh the repository before resolving conflicts"); return; }
-		host.getNotifications().publish("Resolving conflict in " + resource.path + "…", feedback.NotificationKind.Information, "source-control");
-		var operationId = "ui-" + Std.string(nextScmOperationId++);
-		source.apply(repository.id, operationId, snapshot.revision, scm.ScmOperation.ResolveConflict(resource.path, choice), function(result) {
-			if (result.error != null) {
-				host.getNotifications().publish("Conflict resolution failed: " + result.error.message,
-					feedback.NotificationKind.Error, "source-control");
-				application.reportError("source-control", result.error.message);
-			} else {
-				host.getNotifications().publish("Resolved " + resource.path + " using " + choice,
-					feedback.NotificationKind.Information, "source-control");
-				source.refreshNow(repository.id);
-			}
-			requestFrame();
-		});
-	}
-
-	function canTrustPendingScmRepository():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository;
-		return source != null && repository != null && !source.isRemote() && !repository.trusted;
-	}
-
-	function refreshSourceControl():Void {
-		var source = sourceControlSource();
-		if (source == null) return;
-		source.poll();
-		for (repository in source.repositories()) source.refreshNow(repository.id);
-		source.discover(function(result) {
-			if (result.error != null) application.reportError("source-control", result.error.message);
-			else for (repository in result.value) source.refreshNow(repository.id);
-			source.poll();
-			syncScmPresentation(source);
-			requestFrame();
-		});
-	}
-
-	function canUnstagePendingScmFile():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
-		return source != null && repository != null && group != null && resource != null && source.canWrite(repository.id)
-			&& group.id == ScmGroupId.Index;
-	}
-
-	function canDiscardPendingScmFile():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
-		return source != null && repository != null && group != null && resource != null && source.canWrite(repository.id)
-			&& (group.id == ScmGroupId.WorkingTree || group.id == ScmGroupId.Untracked);
-	}
-
-	function discardPendingScmFile():Void {
-		if (!canDiscardPendingScmFile()) return;
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
-		if (source == null || repository == null || group == null || resource == null) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) { application.reportError("source-control", "Refresh the repository before discarding changes"); return; }
-		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
-		var path = repository.root + "/" + StringTools.replace(relative, "\\", "/");
-		var dirty = [for (document in application.documents.documents)
-			if (document.dirty && document.hasBackingPath() && PathKey.same(document.requirePath(), path)) document];
-		function confirmDiscard(reloadBuffers:Bool):Void {
-			application.confirmations.choose("Discard changes to 1 file?",
-				["discard", "cancel"], function(answer) {
-					if (answer != "discard") return;
-					if (group.id == ScmGroupId.Untracked && !source.isRemote()) {
-						var removed = application.fileOperations.remove(path);
-						if (!removed.success) { application.reportError("source-control", removed.detail); return; }
-						application.workspace.refreshProjects();
-						source.refreshNow(repository.id);
-						var trashPath = removed.destination;
-						host.getNotifications().publish("Moved " + relative + " to recoverable trash", feedback.NotificationKind.Information,
-							"source-control", [new feedback.NotificationAction("Undo", function() {
-								if (trashPath == null || application.workspace.fileSystem.exists(path)
-									|| !application.workspace.fileSystem.rename(trashPath, path)) {
-								application.reportError("source-control", "Could not restore " + relative + " from trash");
-								return;
-							}
-							application.workspace.refreshProjects();
-							source.refreshNow(repository.id);
-							requestFrame();
-							})]);
-						if (reloadBuffers) for (document in dirty) document.reloadFromDisk();
-						requestFrame();
-						return;
-					}
-					var operationId = "ui-" + Std.string(nextScmOperationId++);
-					source.apply(repository.id, operationId, snapshot.revision, scm.ScmOperation.Discard(relative), function(result) {
-						if (result.error != null) { application.reportError("source-control", result.error.message); return; }
-						source.refreshNow(repository.id);
-						if (reloadBuffers) for (document in dirty) document.reloadFromDisk();
-						var token = result.value == null ? null : result.value.recoveryToken;
-						if (token != null) host.getNotifications().publish("Discarded changes to " + relative,
-							feedback.NotificationKind.Information, "source-control", [new feedback.NotificationAction("Undo", function() {
-								var latest = source.snapshot(repository.id);
-								if (latest == null) { application.reportError("source-control", "Refresh before undoing the discard"); return; }
-								var undoId = "ui-" + Std.string(nextScmOperationId++);
-								source.apply(repository.id, undoId, latest.revision, scm.ScmOperation.RestoreDiscard(relative, token), function(undo) {
-									if (undo.error != null) application.reportError("source-control", undo.error.message);
-									else source.refreshNow(repository.id);
-									requestFrame();
-								});
-							})]);
-						requestFrame();
-					});
-				});
-		}
-		if (dirty.length > 0) {
-			application.confirmations.choose('An open buffer has unsaved edits. Choose reload after discard or keep the buffer: ',
-				["reload", "keep", "cancel"], function(choice) {
-					if (choice == "reload") confirmDiscard(true);
-					else if (choice == "keep") confirmDiscard(false);
-				});
-		} else confirmDiscard(false);
-	}
-
-	function canStagePendingScmGroup():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup;
-		if (source == null || repository == null || !source.canWrite(repository.id)) return false;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) return false;
-		if (group == null) return hasScmResources(snapshot, [ScmGroupId.WorkingTree, ScmGroupId.Untracked]);
-		return (group.id == ScmGroupId.WorkingTree || group.id == ScmGroupId.Untracked) && group.resources.length > 0;
-	}
-
-	function canUnstagePendingScmGroup():Bool {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup;
-		if (source == null || repository == null || !source.canWrite(repository.id)) return false;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) return false;
-		if (group == null) return hasScmResources(snapshot, [ScmGroupId.Index]);
-		return group.id == ScmGroupId.Index && group.resources.length > 0;
-	}
-
-	static function hasScmResources(snapshot:scm.ScmSnapshot, ids:Array<ScmGroupId>):Bool {
-		for (group in snapshot.groups) if (ids.indexOf(group.id) >= 0 && group.resources.length > 0) return true;
-		return false;
-	}
-
-	function applyPendingScmGroup(stage:Bool):Void {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup;
-		if (source == null || repository == null || (stage ? !canStagePendingScmGroup() : !canUnstagePendingScmGroup())) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) return;
-		if (group == null) {
-			var operation = stage ? scm.ScmOperation.StageAll : scm.ScmOperation.UnstageAll;
-			applyScmOperation(source, repository, snapshot, operation);
-			return;
-		}
-		var paths = [for (resource in group.resources) resource.pathBytes.getString(0, resource.pathBytes.length)];
-		var operation = stage ? scm.ScmOperation.StagePaths(paths) : scm.ScmOperation.UnstagePaths(paths);
-		applyScmOperation(source, repository, snapshot, operation);
-	}
-
-	function applyScmOperation(source:ScmSource, repository:scm.ScmRepository, snapshot:scm.ScmSnapshot,
-		operation:scm.ScmOperation):Void {
-		var operationId = "ui-" + Std.string(nextScmOperationId++);
-		source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
-			if (result.error != null) application.reportError("source-control", scmErrorText(result.error));
-			source.refreshNow(repository.id);
-			requestFrame();
-		});
-	}
-
-	/** A Source Control error as the user reads it, with what to do when a folder-narrowed source refused it. */
-	static function scmErrorText(error:scm.ScmError):String
-		return error.code == scm.ScmFolderScope.OUTSIDE_FOLDER
-			? error.message + " Unstage them, or commit from the Editor layout's Source Control."
-			: error.code == scm.git.GitScopedCommit.OPERATION_IN_PROGRESS
-			? error.message + " Finish or abort it from the Editor layout's Source Control." : error.message;
-
-	function scmCommitRepository(source:ScmSource):Null<scm.ScmRepository> {
-		if (source == null) return null;
-		if (pendingScmSource != null && pendingScmSource.identity() == source.identity() && pendingScmRepository != null)
-			return pendingScmRepository;
-		var repositories = source.repositories();
-		return repositories.length == 0 ? null : repositories[0];
-	}
-
-	function hasStagedScmChanges(source:ScmSource, repository:scm.ScmRepository):Bool {
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) return false;
-		for (group in snapshot.groups)
-			if (group.id == ScmGroupId.Index && group.resources.length > 0) return true;
-		return false;
-	}
-
-	function canCommitStagedCurrentScmRepository():Bool {
-		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-		return source != null && repository != null && source.canWrite(repository.id) && hasStagedScmChanges(source, repository)
-			&& canCommitCurrentScmRepository();
-	}
-
-	function canAmendCurrentScmRepository():Bool {
-		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-		if (source == null || repository == null || !source.canWrite(repository.id) || !canCommitCurrentScmRepository()) return false;
-		var features = source.features(repository.id);
-		return features != null && features.amend;
-	}
-
-	function canCommitAllCurrentScmRepository():Bool {
-		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-		return application.settings.current.scmCommitAllWhenNothingStaged && source != null && repository != null
-			&& source.canWrite(repository.id) && !hasStagedScmChanges(source, repository) && canCommitCurrentScmRepository();
-	}
-
-	function showScmCommitMenu(source:ScmSource, repository:scm.ScmRepository, event:UiEvent):Void {
-		rememberScmResource(source, repository, null, null);
-		var entries:Array<CommandMenuEntry> = [];
-		if (hasStagedScmChanges(source, repository)) entries.push(new CommandMenuEntry("scm:commit", "Commit Staged"));
-		var features = source.features(repository.id);
-		if (features != null && features.amend) entries.push(new CommandMenuEntry("scm:commit-amend", "Amend Last Commit"));
-		if (application.settings.current.scmCommitAllWhenNothingStaged && !hasStagedScmChanges(source, repository))
-			entries.push(new CommandMenuEntry("scm:commit-all", "Commit All Changes"));
-		if (entries.length == 0) return;
-		showContextMenu(entries, event, function() return isScmSourceActive(source.identity()) && source.canWrite(repository.id));
-	}
-
-	function canCommitCurrentScmRepository():Bool {
-		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
-		if (source == null || repository == null || !source.canWrite(repository.id)) return false;
-		var message = application.scmCommitDrafts.get(repository.id);
-		return message != null && StringTools.trim(message).length > 0;
-	}
-
-	function commitScmMessage(source:ScmSource, repository:scm.ScmRepository, message:Null<String>, amend:Bool, all:Bool):Void {
-		if (source == null || repository == null || !source.canWrite(repository.id)) return;
-		var commitMessage = message == null ? "" : message;
-		if (StringTools.trim(commitMessage).length == 0) return;
-		if (amend) {
-			var features = source.features(repository.id);
-			if (features == null || !features.amend) return;
-		}
-		function beginCommit():Void {
-			var snapshot = source.snapshot(repository.id);
-			if (snapshot == null) { application.reportError("source-control", "Refresh the repository before committing"); return; }
-			function commitWithSnapshot(expected:scm.ScmSnapshot):Void {
-				var operationId = "ui-" + Std.string(nextScmOperationId++);
-				source.apply(repository.id, operationId, expected.revision, scm.ScmOperation.Commit(commitMessage, amend), function(result) {
-					if (result.error != null) {
-						application.build.output.reset(repository.root);
-						application.build.output.append("Git commit failed\n" + scmErrorText(result.error) + "\n");
-						application.build.output.finish();
-						host.showBuildOutput("Source Control Commit", application.build.output);
-						application.reportError("source-control", scmErrorText(result.error));
-						return;
-					}
-					application.scmCommitDrafts.set(repository.id, "");
-					source.refreshNow(repository.id);
-					host.getNotifications().publish(amend ? "Commit amended" : "Commit created",
-						feedback.NotificationKind.Information, "source-control");
-					requestFrame();
-				});
-			}
-			if (!all) { commitWithSnapshot(snapshot); return; }
-			var stageId = "ui-" + Std.string(nextScmOperationId++);
-			source.apply(repository.id, stageId, snapshot.revision, scm.ScmOperation.StageAll, function(staged) {
-				if (staged.error != null) { application.reportError("source-control", staged.error.message); return; }
-				var refreshed = source.snapshot(repository.id);
-				commitWithSnapshot(refreshed == null ? snapshot : refreshed);
-			});
-		}
-		var dirtyDocuments = [for (document in application.documents.documents) if (document.dirty) document];
-		if (dirtyDocuments.length == 0) { beginCommit(); return; }
-		application.confirmations.choose('There are ' + dirtyDocuments.length + ' unsaved document(s). Save All before committing? ',
-			["save-all", "commit-without-saving", "cancel"], function(answer) {
-				if (answer == "save-all") application.files.saveAll(function(saved) {
-					if (saved) beginCommit();
-					else application.reportError("source-control", "Save All did not complete; commit cancelled");
-				});
-				else if (answer == "commit-without-saving") beginCommit();
-			});
-	}
-
-	function applyPendingScmFile(stage:Bool):Void {
-		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
-		if (source == null || repository == null || group == null || resource == null
-			|| (stage ? !canStagePendingScmFile() : !canUnstagePendingScmFile())) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) { application.reportError("source-control", "Refresh the repository before changing its index"); return; }
-		var path = resource.pathBytes.getString(0, resource.pathBytes.length);
-		var operation = stage ? scm.ScmOperation.Stage(path) : scm.ScmOperation.Unstage(path);
-		applyScmOperation(source, repository, snapshot, operation);
-	}
-
-	function openPendingScmFile():Void {
-		var source = pendingScmSource;
-		if (source == null) return;
-		var repository = pendingScmRepository;
-		if (repository == null) return;
-		var resource = pendingScmResource;
-		if (resource == null) return;
-		openScmSourceFile(source, repository, resource);
-	}
-
-	function openScmSourceFile(source:ScmSource, repository:scm.ScmRepository, resource:scm.ScmResource):Void {
-		if (source == null || repository == null || resource == null) return;
-		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
-		if (source.isRemote()) openRemoteScmFile(repository, relative, -1);
-		else application.open(repository.root + "/" + relative);
-		closePhoneSidebarAfterOpen();
-	}
-
-	function activeDiffView():Null<UiDocumentView> {
-		var view = host.activeView();
-		return view != null && view.diffDocument != null && !view.sideBySideDiff ? view : null;
-	}
-
-	function canApplyActiveScmHunk(action:String):Bool {
-		var source = editorSourceControlSource(), view = host.activeView();
-		if (source == null || view == null) return false;
-		if (view.diffDocument != null) {
-			if (view.sideBySideDiff) return false;
-			var diff = view.diffDocument, repository = source.repository(diff.repositoryId);
-			if (repository == null || !source.canWrite(repository.id)) return false;
-			var features = source.features(repository.id), snapshot = source.snapshot(repository.id);
-			if (features == null || !features.partialStaging || snapshot == null) return false;
-			var staged = diff.reference == "HEAD→INDEX";
-			if (action == "unstage" ? !staged : staged ||
-				(diff.reference != "INDEX→WORKTREE" && diff.reference != "EMPTY→WORKTREE")) return false;
-			var relative = source.isRemote() ? diff.path : pathUnderScope(repository.root, diff.path);
-			var hunk = diff.hunkIndexAtLine(view.selection.cursor.line);
-			return relative != null && hunk >= 0 && diff.patchForHunk(hunk, haxe.io.Bytes.ofString(relative)) != null;
-		}
-		if (action == "unstage") return false;
-		var tracker = scmDocumentMarkers.get(view.document.id);
-		if (tracker == null) return false;
-		var repository = source.repository(tracker.getRepositoryId()), features = repository == null ? null : source.features(tracker.getRepositoryId());
-		return repository != null && source.canWrite(repository.id) && features != null && features.partialStaging
-			&& source.snapshot(repository.id) != null && tracker.patchForLine(view.selection.cursor.line) != null;
-	}
-
-	function applyActiveScmHunk(action:String):Void {
-		if (!canApplyActiveScmHunk(action)) return;
-		var source = editorSourceControlSource(), view = host.activeView();
-		if (source == null || view == null) return;
-		var repository:Null<scm.ScmRepository> = null, pathBytes:haxe.io.Bytes = null, patch:haxe.io.Bytes = null;
-		if (view.diffDocument != null) {
-			var diff = view.diffDocument;
-			repository = source.repository(diff.repositoryId);
-			if (repository == null) return;
-			var relative = source.isRemote() ? diff.path : pathUnderScope(repository.root, diff.path);
-			if (relative == null) return;
-			pathBytes = haxe.io.Bytes.ofString(relative);
-			patch = diff.patchForHunk(diff.hunkIndexAtLine(view.selection.cursor.line), pathBytes);
-		} else {
-			var tracker = scmDocumentMarkers.get(view.document.id);
-			if (tracker == null) return;
-			repository = source.repository(tracker.getRepositoryId());
-			pathBytes = tracker.getPathBytes();
-			patch = tracker.patchForLine(view.selection.cursor.line);
-		}
-		if (repository == null || pathBytes == null || patch == null) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) return;
-		var relativePath = pathBytes.toString();
-		var operation:scm.ScmOperation = action == "stage" ? scm.ScmOperation.StagePatch(relativePath, patch) :
-			action == "unstage" ? scm.ScmOperation.UnstagePatch(relativePath, patch) : scm.ScmOperation.RevertPatch(relativePath, patch);
-		applyScmOperation(source, repository, snapshot, operation);
-	}
-
-	function openActiveDiffSourceAtLine():Void {
-		var view = activeDiffView(), diff = view == null ? null : view.diffDocument;
-		if (view == null || diff == null) return;
-		var source = editorSourceControlSource();
-		if (source != null && source.isRemote()) {
-			var repository = source.repository(diff.repositoryId);
-			if (repository != null) openRemoteScmFile(repository, diff.path, diff.sourceLine(view.selection.cursor.line));
-		} else host.openDiffSourceAtLine();
-	}
-
-	function clearLocalScmSource():Void {
-		if (panelScm.clear()) scmBranches.cancel();
-		editorScm.clear();
-		sessionScm.clear();
-	}
-
-	static function normalizedLocalRoot(path:String):String {
-		var value = StringTools.replace(FileSystem.fullPath(path), "\\", "/");
-		while (value.length > 1 && StringTools.endsWith(value, "/")) value = value.substring(0, value.length - 1);
-		return Sys.systemName() == "Windows" ? value.toLowerCase() : value;
-	}
 
 	/** Invalidate application views as well as scheduling a host render. */
 	public function requestFrame():Void {
@@ -6686,18 +2847,4 @@ private typedef ScmMarkerTarget = {
 	var snapshot:Null<scm.ScmSnapshot>;
 	var untracked:Bool;
 	var worktree:Bool;
-}
-
-/** Opens a context menu for a child view on right-click or the keyboard context-menu request. */
-private class ContextMenuTarget implements View {
-	final child:View;
-	final request:UiEvent->Void;
-	public function new(child:View, request:UiEvent->Void) { this.child = child; this.request = request; }
-	public function build(context:haxeon.ui.core.BuildContext):RenderNode {
-		var node = child.build(context);
-		var open = function(event:UiEvent) { request(event); event.preventDefault(); event.stopPropagation(); };
-		node.on(UiEventKind.PointerDown, function(event) { if (event.button == 1) open(event); });
-		node.on(UiEventKind.KeyDown, function(event) { if (UiKey.isContextMenuRequest(event.key, event.modifiers)) open(event); });
-		return node;
-	}
 }

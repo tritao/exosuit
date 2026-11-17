@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
@@ -8,7 +9,6 @@ import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcEnvelope;
 import haxeon.rpc.RpcProtocol;
 import workspace.client.RpcTerminalBackend;
-import workspace.client.WorkspaceRpcEndpoint;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
 import terminalsession.TerminalSession;
@@ -55,28 +55,6 @@ private class Link {
   public function close():Void { client.close(); server.close(); }
 }
 
-private class FlowEndpoint implements WorkspaceRpcEndpoint {
-  public var connection:Null<RpcConnection>;
-  final root:String;
-  final generation:String;
-  var router:Null<workspace.client.WorkspaceTerminalEvents>;
-  public function new(root:String, generation:String) { this.root = root; this.generation = generation; }
-  public function rootPath():Null<String> return root;
-  public function serviceGeneration():String return generation;
-  public function workspaceEpoch():Null<String> return generation;
-  public function rpcConnection():Null<RpcConnection> return connection;
-  public function failureReason():Null<String> return null;
-  public function supportsWorkspaceGroups():Bool return true;
-  public function hasCapability(value:String):Bool return true;
-  public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
-    var c = connection;
-    if (c == null) return null;
-    var current = router;
-    if (current == null || current.connection != c) { current = new workspace.client.WorkspaceTerminalEvents(c); router = current; }
-    return current;
-  }
-}
-
 /** A real WorkspaceTerminalManager with real shells, its client connections and the views polled with it. */
 private class Rig {
   public final manager:WorkspaceTerminalManager;
@@ -85,7 +63,7 @@ private class Rig {
   public final sessions:Array<TerminalSession> = [];
   public function new(root:String, instance:String, journal:Int) {
     this.instance = instance;
-    manager = new WorkspaceTerminalManager("workspace", instance, root, journal);
+    manager = TestTerminals.manager("workspace", instance, root, journal);
   }
   public function link():Link { var made = new Link(manager); links.push(made); return made; }
   public function drop(link:Link):Void { link.close(); links.remove(link); }
@@ -176,6 +154,11 @@ private class Rig {
   paced CHANGED notifications under a flood, recent history on open, and re-attaching by replay.
 **/
 class TerminalFlowTests {
+  static function flowEndpoint(root:String, generation:String):TestEndpoint {
+    var endpoint = new TestEndpoint();
+    endpoint.root = root; endpoint.generation = generation; endpoint.epoch = generation;
+    return endpoint;
+  }
   /** A throw ends this program without its message (0xC0000409 on Windows): say what failed first. */
   static function require(value:Bool, message:String):Void { if (!value) { Sys.println("FAIL: " + message); throw message; } }
   static inline function windows():Bool return Sys.systemName() == "Windows";
@@ -265,7 +248,7 @@ class TerminalFlowTests {
     rig.until(function() return pacedChanges.length > pacedBefore, "The paced view got no CHANGED for the flood");
     var first = pacedChanges[pacedBefore];
     // 1b: the view attaches while the shell floods.
-    var endpoint = new FlowEndpoint(root, "flow-paced");
+    var endpoint = flowEndpoint(root, "flow-paced");
     var viewLink = rig.link();
     endpoint.connection = viewLink.client;
     var backend = new RpcTerminalBackend(function() return endpoint, "flood", root, false);
@@ -365,7 +348,7 @@ class TerminalFlowTests {
   /** 3: a phone view re-attaches by replay (no SNAPSHOT), keeps its content, and sends no transient size; a gap brings a bounded snapshot. */
   static function reattach(root:String):Void {
     var rig = new Rig(root, "flow-reattach", 65536);
-    var phoneEndpoint = new FlowEndpoint(root, "flow-reattach"), deskEndpoint = new FlowEndpoint(root, "flow-reattach");
+    var phoneEndpoint = flowEndpoint(root, "flow-reattach"), deskEndpoint = flowEndpoint(root, "flow-reattach");
     var phoneLink = rig.link(), deskLink = rig.link();
     phoneEndpoint.connection = phoneLink.client;
     deskEndpoint.connection = deskLink.client;

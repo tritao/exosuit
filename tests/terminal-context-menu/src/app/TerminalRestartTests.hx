@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
@@ -13,7 +14,7 @@ class TerminalRestartTests {
  public static function run(fonts:haxeon.ui.FontCollection):Void {
   var clock=function() return Sys.time()*1000;
   var pair=MemoryTransport.pair(),connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
-  var endpoint=new RestartEndpoint(connection);
+  var endpoint=new TestEndpoint(connection);endpoint.root="/tmp";endpoint.generation="owner";endpoint.events=false;
   var state="exited", supported=false, requests=0, opens=0, mode="", pendingOpen:Null<haxeon.rpc.RpcContext<TerminalInfo>>=null;
   var record:TerminalRecord={id:"ended",name:"Saved terminal",cwd:"/tmp",workspaceRoot:"/tmp",group:"work",instance:"owner",
    revision:Int64.ofInt(1),state:state,exitCode:0,available:true};
@@ -30,7 +31,6 @@ class TerminalRestartTests {
    state="running";record.state=state;record.revision+=1;ctx.respond(info());
   });
   server.register(WorkspaceTerminalProtocol.REPLAY,function(q,ctx) ctx.respond({terminal:info(),events:[],next:Int64.ofInt(0),end:Int64.ofInt(0)}));
-  server.register(WorkspaceTerminalProtocol.OUTPUT,function(q,ctx) ctx.respond({terminal:info(),offset:q.offset,data:Bytes.alloc(0)}));
   server.register(WorkspaceTerminalProtocol.SET_CONTROL,function(q,ctx) ctx.respond(info()));
   server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) ctx.respond(info()));
   server.register(WorkspaceTerminalProtocol.UNWATCH,function(q,ctx) ctx.respond(q));
@@ -41,14 +41,14 @@ class TerminalRestartTests {
   function current():TerminalRecord {var catalog=client.terminalCatalog();if(catalog==null) throw "catalog missing";return catalog.terminals[0];}
   client.restartTerminal(current());for(_ in 0...5) pump();
   var error=client.terminalCatalogError();
-  require(requests==0 && error!=null && error.indexOf("Update the workspace service")>=0,"unsupported restart was sent or error lost to refresh");
+  require(requests==0 && error!=null && error.indexOf("cannot restart this terminal")>=0,"unsupported restart was sent or error lost to refresh");
   supported=true;
   var stale:TerminalRecord=cast Reflect.copy(current());stale.revision+=1;
   client.restartTerminal(stale);for(_ in 0...3) pump();require(requests==0,"stale context menu restarted terminal");
   mode="defer";client.restartTerminal(current());pump();
-  require(pendingOpen!=null,"restart probe not issued");endpoint.control=false;
+  require(pendingOpen!=null,"restart probe not issued");endpoint.denied=[WorkspaceTerminalProtocol.CONTROL];
   var pending=pendingOpen;if(pending==null) throw "pending probe missing";pending.respond(info());for(_ in 0...4) pump();
-  require(requests==0,"lost control permission did not fence restart");endpoint.control=true;mode="";
+  require(requests==0,"lost control permission did not fence restart");endpoint.denied=[];mode="";
   client.restartTerminal(current());client.restartTerminal(current());for(_ in 0...6) pump();
   require(requests==1 && current().state=="running" && current().id=="ended","restart duplicated process or failed catalog refresh");
   client.restartTerminal(current());for(_ in 0...3) pump();require(requests==1,"running terminal restarted again");
@@ -89,16 +89,3 @@ class TerminalRestartTests {
  }
 }
 
-private class RestartEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final connection:RpcConnection;
- public var control=true;
- public function new(connection:RpcConnection) this.connection=connection;
- public function rootPath():Null<String> return "/tmp";
- public function serviceGeneration():String return "owner";
- public function rpcConnection():Null<RpcConnection> return connection;
- public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return null;
- public function failureReason():Null<String> return null;
- public function supportsWorkspaceGroups():Bool return true;
- public function workspaceEpoch():Null<String> return "epoch";
- public function hasCapability(capability:String):Bool return capability!=WorkspaceTerminalProtocol.CONTROL || control;
-}

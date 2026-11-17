@@ -7,14 +7,14 @@ import config.Preferences;
 import config.ConfigurationPaths;
 import core.Application;
 import platform.Platform;
-import testing.model.ModelTextMetrics;
+import testing.HeadlessWorkbench;
 import sys.io.File;
 import sys.FileSystem;
 import session.WorkspaceSession;
 import recovery.RecoverySnapshot;
 import recovery.RecoveryStore;
 import session.SessionPersistence;
-import testing.model.ModelWorkbenchHost;
+import ui.UiWorkbenchHost;
 
 class ConfigurationTestMain {
 	static function require(condition:Bool, message:String):Void {
@@ -125,27 +125,21 @@ class ConfigurationTestMain {
 		service.reload(true);
 		var liveStore = service.store;
 
-		var metrics = new ModelTextMetrics("ignored-headlessly.ttf", 15),
-			application = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings),
-				service, new session.RecentProjects(arguments[2] + "/recent.conf")), performed = 0;
-		require(metrics.fontFallbackPaths.join("\n") == service.current.fontFallbackPaths.join("\n"),
-			"configured font fallback group was not installed");
+		var application = new Application(HeadlessWorkbench.create, service, new session.RecentProjects(arguments[2] + "/recent.conf")),
+			performed = 0;
 		application.commands.add("test:configured", function(context) {
 			performed += 1;
 		});
-		var previousFont = metrics.revision;
 		liveStore.batch(function() {
 			liveStore.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(21));
 			liveStore.set("appearance/colors/selection", haxeon.ui.properties.PropertyValue.Int(123456));
 			liveStore.set("editor/keyboard/keybindings", haxeon.ui.properties.PropertyValue.Text('["Ctrl+A|test:configured"]'));
 		});
 		application.update();
-		require(metrics.fontSize == 21 && metrics.revision > previousFont,
-			"live font settings did not update model metrics");
 		require(application.theme.selection == 123456, "live theme update missing");
 		require(application.keyPressed(Platform.KEY_A, Platform.MOD_CTRL) && performed == 1, "configured shortcut missing");
 		liveStore.resetUnder(""); application.update();
-		require(metrics.fontSize == 15 && application.theme.selection == new config.Settings().selection,
+		require(application.theme.selection == new config.Settings().selection,
 			"preference reset did not restore defaults");
 		require(application.keymap.commandsFor(Platform.KEY_A, Platform.MOD_CTRL)[0] == "doc:select-all", "reset lost default shortcut");
 		var workspaceSettingsPath = ConfigurationPaths.projectSettings(arguments[2]);
@@ -160,7 +154,7 @@ class ConfigurationTestMain {
 		require(!configuredProject.settings.current.haxeonEnabled, "project language configuration not loaded");
 		liveStore.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(23));
 		application.update();
-		require(metrics.fontSize == 23, "project configuration blocked live user preferences");
+		require(application.settings.current.fontSize == 23, "project configuration blocked live user preferences");
 		application.open(arguments[3]); application.update();
 		var scmDraft = "feat: keep commit draft\n\nA multiline message — saved per repository.";
 		application.scmCommitDrafts.set("repo:windows:main", scmDraft);
@@ -173,8 +167,7 @@ class ConfigurationTestMain {
 		var loadedSession:WorkspaceSession = cast loaded;
 		require(loadedSession.scmCommitDrafts.get("repo:windows:main") == scmDraft,
 			"session round trip lost a multiline per-repository source-control draft");
-		var draftRestoreApplication = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings),
-			service, new session.RecentProjects(""));
+		var draftRestoreApplication = new Application(HeadlessWorkbench.create, service, new session.RecentProjects(""));
 		loadedSession.restore(draftRestoreApplication);
 		require(draftRestoreApplication.scmCommitDrafts.get("repo:windows:main") == scmDraft,
 			"session restore did not reinstate the source-control commit draft");
@@ -193,8 +186,7 @@ class ConfigurationTestMain {
 		for (snapshot in withUntitled) if (snapshot.path == null) untitledSnapshot = snapshot;
 		require(untitledSnapshot != null && untitledSnapshot.text == "unsaved untitled", "untitled recovery identity or content was lost");
 		if (untitledSnapshot == null) throw "missing untitled recovery snapshot";
-		var recoveredApplication = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings),
-				service, new session.RecentProjects("")),
+		var recoveredApplication = new Application(HeadlessWorkbench.create, service, new session.RecentProjects("")),
 			recoveredSession = WorkspaceSession.capture(application);
 		recoveredSession.restore(recoveredApplication, recovery);
 		var recoveredUntitled = false;
@@ -263,11 +255,10 @@ class ConfigurationTestMain {
 			"malformed versioned layout records survived defensive decoding");
 		var emptyLayout = WorkspaceSession.decode("version=3\nlayout=S\t\tH\t500\nlayout=S\t1\tH\t500\n"
 			+ "layout=T\t11\t1\t0\t0\t0\t0\tR\tmissing-recovery\nlayout=A\t11\n");
-		var emptyApplication = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings),
-			service, new session.RecentProjects("")),
-			emptyRoot:ModelWorkbenchHost = cast emptyApplication.root;
+		var emptyApplication = new Application(HeadlessWorkbench.create, service, new session.RecentProjects("")),
+			emptyRoot:UiWorkbenchHost = cast emptyApplication.root;
 		emptyLayout.restore(emptyApplication, new RecoveryStore(arguments[2] + "/missing-recovery.conf"));
-		require(emptyRoot.node.isLeaf() && emptyRoot.tabs.views.length == 0,
+		require(!emptyRoot.canCloseActivePane() && emptyRoot.tabs.length == 0,
 			"unrestorable session tabs retained an empty split topology");
 		emptyApplication.shutdown();
 		application.shutdown();

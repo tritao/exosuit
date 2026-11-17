@@ -1,8 +1,6 @@
 # ADR 0004: Source control as a core subsystem with VCS providers
 
-Status: proposed
-
-Implementation plan: [M17 — Source control](../roadmap/17-source-control.md)
+Status: accepted, built (`src/scm/`).
 
 ## Context
 
@@ -24,8 +22,7 @@ codebase shape where it can live:
    `SourcePlugins`/`Threads` capability, which the browser host lacks.
 2. **The repository lives with the workspace, not the client.** Under M14 and
    M16 the workspace service owns files, watchers and processes, and web and
-   Android clients own only presentation (16-remote-workspaces.md, "Architecture
-   and ownership"). Git has to run on the machine that holds the files.
+   Android clients own only presentation. Git has to run on the machine that holds the files.
 3. **Workbench is optional.** M14 requires the editor to work when the agent
    daemon is disabled or missing. A desktop user without the daemon still
    expects source control.
@@ -125,7 +122,7 @@ its base.
 ### 6. Permissions and repository trust
 
 - **RPC grants.** There are three device grants, following the
-  WORKSPACE-PROTOCOL rule that distinct powers get distinct grants:
+  workspace protocol's rule that distinct powers get distinct grants:
   - `workspace.scm.read`: snapshots, original content, diffs.
   - `workspace.scm.write`: stage, unstage, discard, commit, branch switch.
   - `workspace.scm.remote`: fetch, pull, push, which are outward-facing.

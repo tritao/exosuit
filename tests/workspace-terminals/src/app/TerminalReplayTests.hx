@@ -1,40 +1,21 @@
 package app;
 
+import testing.TestEndpoint;
 import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import workspace.client.RpcTerminalBackend;
-import workspace.client.WorkspaceRpcEndpoint;
 import workspace.service.TerminalReplayLog;
 import workspace.service.WorkspaceTerminalProtocol;
 import terminalkit.Emulator;
 import terminalsession.TerminalSession;
 
-private class ReplayEndpoint implements WorkspaceRpcEndpoint {
-  public var connection:RpcConnection;
-  public function new(connection:RpcConnection) this.connection = connection;
-  public function rootPath():Null<String> return "/fixture";
-  public function serviceGeneration():String return "replay-fixture";
-  var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
-  public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
-    if (connection == null) return null;
-    if (eventRouter == null || eventRouter.connection != connection)
-      eventRouter = new workspace.client.WorkspaceTerminalEvents(connection);
-    return eventRouter;
-  }
-  public function rpcConnection():Null<RpcConnection> return connection;
-  public function failureReason():Null<String> return null;
-  public function supportsWorkspaceGroups():Bool return true;
-  public function workspaceEpoch():Null<String> return null;
-  public function hasCapability(capability:String):Bool return true;
-}
-
 /** Deterministic RPC replay using the same journal and emulator as the daemon. */
 private class ReplayFixture {
   public final log:TerminalReplayLog;
   public final emulator:Emulator;
-  public final endpoint:ReplayEndpoint;
+  public final endpoint:TestEndpoint;
   public final backend:RpcTerminalBackend;
   public final session:TerminalSession;
   var server:RpcConnection;
@@ -62,7 +43,8 @@ private class ReplayFixture {
     this.legacy = legacy;
     emulator = Emulator.open(columns, rows, 1000, "xterm-256color", false);
     log = new TerminalReplayLog(columns, rows, limit);
-    endpoint = new ReplayEndpoint(null);
+    endpoint = new TestEndpoint();
+    endpoint.generation = "replay-fixture"; endpoint.epoch = null;
     connect();
     backend = new RpcTerminalBackend(function() return endpoint, "fixture", "/fixture", false, null, null, false, requireGeometry);
     session = new TerminalSession(backend, Emulator.open(80, 24, 1000, "xterm-256color", false), false);

@@ -1,5 +1,8 @@
 package app;
 
+import testing.TestEndpoint;
+import workspace.client.RemoteViewSource;
+import workspace.client.RemoteViewSource.RemoteReopen;
 import haxe.Int64;
 import haxe.Json;
 import haxe.io.Bytes;
@@ -14,9 +17,10 @@ import workspace.service.WorkspaceTerminalProtocol;
 /**
 	The phone's cold start (android/haxe/src/PhoneLastView) against a fake terminal service: the saved terminal is
 	reopened, and a phone that held control before it was killed asks before taking it back from the client that holds
-	it now. The app, the pane and the terminal backend are the real ones; only the relay side (PhoneRemote) is a stand-in.
+	it now. The app, the pane and the terminal backend are the real ones; only the relay side (RemoteMachines) is a stand-in.
 **/
 @:access(ui.ExosuitApp)
+@:access(ui.TerminalTabs)
 class PhoneLastViewTestMain {
 	static function require(ok:Bool, message:String):Void { if (!ok) throw message; }
 
@@ -74,7 +78,9 @@ class PhoneLastViewTestMain {
 
 		var clock = function() return Sys.time() * 1000;
 		var pair = MemoryTransport.pair(), connection = new RpcConnection(pair.client, clock), server = new RpcConnection(pair.server, clock);
-		var endpoint = new PhoneEndpoint(connection);
+		var endpoint = new TestEndpoint(connection);
+		endpoint.root = "/tmp"; endpoint.generation = "owner";
+		endpoint.grants = [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL, WorkspaceTerminalProtocol.CATALOG];
 		var opens = 0, claims = 0, takeovers = 0;
 		function info():TerminalInfo return {id: "shared", name: "Shared", cwd: "/tmp", state: "running", exitCode: 0, columns: 80, rows: 24,
 			start: Int64.ofInt(0), end: Int64.ofInt(0), restartable: true, historyAvailable: true, controller: holder == "phone", controlled: holder != "none",
@@ -86,7 +92,6 @@ class PhoneLastViewTestMain {
 		// As the service: a free lease goes to the view that opens the terminal; a held one moves only on takeover.
 		server.register(WorkspaceTerminalProtocol.OPEN, function(q, ctx) { opens++; if (holder == "none") holder = "phone"; ctx.respond(info()); });
 		server.register(WorkspaceTerminalProtocol.REPLAY, function(q, ctx) ctx.respond({terminal: info(), events: [], next: Int64.ofInt(0), end: Int64.ofInt(0)}));
-		server.register(WorkspaceTerminalProtocol.OUTPUT, function(q, ctx) ctx.respond({terminal: info(), offset: q.offset, data: Bytes.alloc(0)}));
 		server.register(WorkspaceTerminalProtocol.SET_CONTROL, function(q, ctx) {
 			if (q.claim) {
 				claims++;
@@ -135,7 +140,7 @@ class PhoneLastViewTestMain {
 			for (_ in 0...3) {
 				server.poll(); connection.poll(); client.poll();
 				lastView.poll();
-				app.pollTerminals();
+				app.terminalTabs.pollTerminals();
 				root = app.submit(new haxeon.ui.LayoutFrame(390, 800));
 			}
 		}
@@ -176,7 +181,7 @@ class PhoneLastViewTestMain {
 				label + ": the terminal did not open in the terminal panel (sidebar page " + app.sidebar.activeId + ", panel terminals " + app.host.panelTerminals.length
 					+ ", hidden " + app.host.hiddenTerminals.length + ", editor terminals " + app.host.terminalEditorResourceIds().length + ")");
 			app.sidebar.setVisible(false);
-			app.openTerminalPanel();
+			app.terminalTabs.openTerminalPanel();
 		}
 		settle(function() { var current = pane(); return current != null && current.controlStatus() != null && opens > 0
 			&& current.controlStatus().indexOf("Connecting") < 0 && current.controlStatus().indexOf("Loading") < 0; }, "the saved terminal was not reopened and attached");
@@ -239,34 +244,17 @@ class PhoneLastViewTestMain {
 	}
 }
 
-/** Stands in for PhoneRemote: the workspace is one step from open, as when the machine's directory has just arrived. */
-private class PhoneSource implements PhoneViewSource {
+/** Stands in for RemoteMachines: the workspace is one step from open, as when the machine's directory has just arrived. */
+private class PhoneSource implements RemoteViewSource {
 	final client:WorkspaceWorkbenchClient;
 	var asked = false;
 	public function new(client:WorkspaceWorkbenchClient) this.client = client;
 	public function openView():Null<{machine:String, workspace:String}> return asked ? {machine: "machine-1", workspace: "workspace-1"} : null;
-	public function reopen(machine:String, workspace:String):PhoneViewSource.PhoneReopen {
-		if (machine != "machine-1" || workspace != "workspace-1") return PhoneViewSource.PhoneReopen.Gone;
-		if (!asked) { asked = true; return PhoneViewSource.PhoneReopen.Waiting; }
-		return PhoneViewSource.PhoneReopen.Open;
+	public function reopen(machine:String, workspace:String):RemoteReopen {
+		if (machine != "machine-1" || workspace != "workspace-1") return RemoteReopen.Gone;
+		if (!asked) { asked = true; return RemoteReopen.Waiting; }
+		return RemoteReopen.Open;
 	}
 	public function workbenchService():WorkspaceWorkbenchClient return client;
 }
 
-private class PhoneEndpoint implements workspace.client.WorkspaceRpcEndpoint {
-	final connection:RpcConnection;
-	var router:Null<workspace.client.WorkspaceTerminalEvents>;
-	public function new(connection:RpcConnection) this.connection = connection;
-	public function rootPath():Null<String> return "/tmp";
-	public function serviceGeneration():String return "owner";
-	public function rpcConnection():Null<RpcConnection> return connection;
-	public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
-		if (router == null) router = new workspace.client.WorkspaceTerminalEvents(connection);
-		return router;
-	}
-	public function failureReason():Null<String> return null;
-	public function supportsWorkspaceGroups():Bool return true;
-	public function workspaceEpoch():Null<String> return "epoch";
-	public function hasCapability(capability:String):Bool
-		return [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL, WorkspaceTerminalProtocol.CATALOG].indexOf(capability) >= 0;
-}

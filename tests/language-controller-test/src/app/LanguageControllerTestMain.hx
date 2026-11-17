@@ -7,12 +7,12 @@ import core.FocusManager;
 import editor.BufferPosition;
 import platform.Platform;
 import process.ProcessManager;
-import testing.model.ModelTextMetrics;
+import testing.HeadlessWorkbench;
 import style.Theme;
 import syntax.BuiltinSyntax;
 import syntax.SyntaxRegistry;
 import sys.io.File;
-import testing.model.ModelWorkbenchHost;
+import ui.UiWorkbenchHost;
 import workspace.Workspace;
 
 class LanguageControllerTestMain {
@@ -26,7 +26,7 @@ class LanguageControllerTestMain {
 		require(condition(), "language controller condition timed out");
 	}
 
-	static function folderLifecycle(workspace:Workspace, root:ModelWorkbenchHost, context:CommandContext, processes:ProcessManager, fake:String, directory:String):Void {
+	static function folderLifecycle(workspace:Workspace, root:UiWorkbenchHost, context:CommandContext, processes:ProcessManager, fake:String, directory:String):Void {
 		var log = directory + "/server-events.jsonl";
 		File.saveContent(log, "");
 		var value = new config.Settings(); value.haxeonCommand = ["python3", fake, "--events", log];
@@ -133,7 +133,7 @@ class LanguageControllerTestMain {
 		serverSettings.haxeonCommand = ["python3", arguments[0], "--initialize-delay", "--definition-delay"];
 		serverSettings.haxeonVerbose = true;
 		var document = workspace.documents.open(sourcePath), focus = new FocusManager(),
-			metrics = new ModelTextMetrics( "ignored-headlessly.ttf", 15), root = new ModelWorkbenchHost(metrics, new Theme(), focus, workspace, 640, 320),
+			root = HeadlessWorkbench.create(new Theme(), focus, workspace, new config.Settings()),
 			view = root.openDocument(document), commands = new CommandRegistry(), context = new CommandContext(root, focus, workspace.documents),
 			processes = new ProcessManager(), failures:Array<String> = [], controller = new LanguageController(workspace, root, context, commands, processes,
 				"python3", (source, message) -> failures.push(source + ":" + message), [arguments[0]], true, () -> serverSettings);
@@ -202,21 +202,21 @@ class LanguageControllerTestMain {
 
 		selection.setCursor(document.buffer, new BufferPosition(0, 2));
 		document.insert(selection, "x");
-		pump(controller, () -> root.pluginDecorations.forDocument(document).length == 1 && root.problems.values().length == 1, 5.0);
-		require(root.pluginDecorations.forDocument(document)[0].kind == plugin.PluginDecorationKind.WavyUnderline,
+		pump(controller, () -> root.getPluginDecorations().forDocument(document).length == 1 && root.getProblems().values().length == 1, 5.0);
+		require(root.getPluginDecorations().forDocument(document)[0].kind == plugin.PluginDecorationKind.WavyUnderline,
 			"language diagnostic did not request a wavy underline");
 		require(commands.perform("language:hover", context), "hover command was not available");
-		pump(controller, () -> root.languagePopup.visible, 5.0);
-		require(root.languagePopup.visible, "hover was not surfaced through an anchored popup");
-		root.languagePopup.close();
+		pump(controller, () -> root.isLanguagePopupVisible(), 5.0);
+		require(root.isLanguagePopupVisible(), "hover was not surfaced through an anchored popup");
+		root.dismissLanguagePopup();
 		selection.setCursor(document.buffer, new BufferPosition(0, 0));
 		require(commands.perform("language:complete", context), "completion command was not available");
-		pump(controller, () -> root.languagePopup.visible, 5.0);
-		require(root.languagePopup.visible && root.languagePopup.keyPressed(Platform.KEY_ESCAPE, 0),
+		pump(controller, () -> root.isLanguagePopupVisible(), 5.0);
+		require(root.isLanguagePopupVisible() && root.handleLanguagePopupKey(Platform.KEY_ESCAPE, 0),
 			"completion was not surfaced through an interactive anchored popup");
 		require(commands.perform("language:signature-help", context), "signature-help command was not available");
-		pump(controller, () -> root.languagePopup.visible, 5.0);
-		require(root.languagePopup.visible && root.languagePopup.keyPressed(Platform.KEY_ESCAPE, 0),
+		pump(controller, () -> root.isLanguagePopupVisible(), 5.0);
+		require(root.isLanguagePopupVisible() && root.handleLanguagePopupKey(Platform.KEY_ESCAPE, 0),
 			"signature help was not surfaced through an anchored popup");
 		require(commands.perform("language:go-to-definition", context), "definition command was not available");
 		for (_ in 0...32) controller.update(Sys.time());
@@ -234,10 +234,10 @@ class LanguageControllerTestMain {
 		commands.perform("navigation:go-back", context);
 		for (column in [6, 7]) {
 			selection.setCursor(document.buffer, new BufferPosition(0, column));
-			var notifications = root.notifications.entries.length;
+			var notifications = root.getNotifications().entries.length;
 			commands.perform("language:go-to-definition", context);
-			pump(controller, () -> root.notifications.entries.length > notifications, 5);
-			var message = root.notifications.entries[root.notifications.entries.length - 1].message;
+			pump(controller, () -> root.getNotifications().entries.length > notifications, 5);
+			var message = root.getNotifications().entries[root.getNotifications().entries.length - 1].message;
 			require(message.indexOf(column == 6 ? "No definition found" : "still being analysed") >= 0, "definition failure was silent");
 		}
 		selection.setCursor(document.buffer, new BufferPosition(0, 5));
@@ -270,7 +270,7 @@ class LanguageControllerTestMain {
 		require(controller.start(), "service did not restart after graceful stop");
 		controller.shutdown();
 		require(processes.activeCount() == 0, "shutdown retained language process");
-		require(root.pluginDecorations.forDocument(document).length == 0,
+		require(root.getPluginDecorations().forDocument(document).length == 0,
 			"stopped language service left diagnostic decorations behind");
 		folderLifecycle(workspace, root, context, processes, arguments[0], arguments[1]);
 		processes.shutdown();

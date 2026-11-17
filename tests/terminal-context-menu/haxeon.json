@@ -4,7 +4,7 @@
   "entry": "app.TerminalContextMenuTestMain",
   "sourceRoots": ["src"],
   "scopeSourceRoots": false,
-  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}, "exosuit-model-tests": {"path": "../support"}},
   "target": "host",
   "outputDir": "build"
 }

@@ -14,8 +14,7 @@ class IndentationConfigurationTests {
 		for (name in ["settings.json", "project-settings.json", ".editorconfig", "nested/.editorconfig"])
 			if (FileSystem.exists(root + "/" + name)) FileSystem.deleteFile(root + "/" + name);
 		var preferences = new Preferences(root + "/settings.json");
-		var metrics = new testing.model.ModelTextMetrics("ignored.ttf", 15);
-		var app = new core.Application((theme, focus, workspace, settings) -> new testing.model.ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings), preferences, new session.RecentProjects(root + "/recent.conf"));
+		var app = new core.Application(testing.HeadlessWorkbench.create, preferences, new session.RecentProjects(root + "/recent.conf"));
 		var document = new Document(root + "/nested/Main.hx", "class A {\n  var a;\n  var b;\n  var c;\n}", app.documents.syntaxes);
 		var resolver = app.configuration;
 		require(resolver.settingsFor(document).tabWidth == 2 && document.indentation.source == "Detected from document", "detection not resolved");

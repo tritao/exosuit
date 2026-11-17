@@ -1,260 +1,81 @@
-# Headless workspace catalog
+# Workspace service
 
-The daemon hosts a durable named-group catalog over a same-user local socket and
-an authenticated **loopback-only** WebSocket. SQLite persists groups, revisions,
-cursor, operation outcomes and trimmed replay events atomically; restart preserves
-the catalog epoch and mutation idempotency. It has no UIKit or GPU dependency.
+The workspace service is one process per running workspace. It holds the workspace's groups, agent sessions and
+terminal records in SQLite, serves its files and source control, and listens only on a same-user local pipe. It has no
+UIKit or GPU dependency. How it fits with suit, the editor and devices is in
+[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
-The manager implementation lives in Exosuit at `agent/src/app/AgentManager.hx`.
-Haxeon supplies generic host primitives for private files, locks, secure random
-tokens, process lifetime and loopback port allocation. Build and start the Haxe
-manager with:
+The program is `agent/src/app/AgentMain.hx`. suit starts it when an editor opens the workspace (`workspace.open` on the
+editor's suit link) or a paired device needs it. By hand:
 
 ```sh
 python3 scripts/build.py
-haxeon/.tools/hashlink/hl agent/build/host/main.hl --manager /path/to/workspace --detach
+haxeon/.tools/hashlink/hl agent/build/host/main.hl --workspace ID [--folder F]... [--scratch S]
 ```
 
-The graphical app and integration harnesses launch this bytecode directly;
-there is no Python workspace-manager launcher. Without `--detach`, the manager
-runs in the foreground. It creates private state
-under `$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH` on Linux or
-`%LOCALAPPDATA%\Exosuit\workspaces\ROOT_HASH` on Windows; `--state-dir DIRECTORY`
-overrides that location. State files are restricted to the current user. The
-default `--port 0` asks the OS for an available loopback port.
-`EXOSUIT_AGENT_STATE_HOME` overrides the parent of the per-workspace directories,
-allowing local stable builds to keep their catalogs separate from development.
+suit finds the bytecode through `EXOSUIT_AGENT_LAUNCHER`, or beside its own (a checkout's `agent/build/host/main.hl`,
+a bundle's `exosuit-agent.hl`).
 
-The manager holds an exclusive lifetime lock and returns exit 3
-`workspace_in_use` for a duplicate start. On POSIX the daemon inherits the lock;
-on Windows it runs inside the manager's kill-on-close Job Object. It writes
-`endpoint.json` after readiness, with the canonical workspace root, manager
-PID/generation, endpoints and credential file path. The credential itself is
-never included. Windows local RPC uses a named pipe whose DACL grants access only
-to the current user; Linux and macOS continue to use private Unix sockets.
-Discovery is verified by the editor through negotiated capabilities and a typed
-identity query before catalog subscription. Opening a folder discovers or starts
-the detached daemon; switching folders selects the corresponding service.
-Closing a window closes only its client; the daemon stops after a minute without
-authenticated clients. Normal stop removes owned discovery and stops the owned
-child processes while retaining the database and credential. Replaced storage
-stops the daemon rather than silently opening a fresh catalog.
+## State and start
 
-Remote relay hosting is opt-in. In the desktop Remote Access panel, enter your
-HTTPS relay origin and choose **Enable remote access**. The address is saved in
-the private workspace state directory. The running daemon enables the relay
-without restarting terminals, Codex sessions, or sibling workspace clients.
-The panel distinguishes local workspace connection from relay connection and
-shows relay failures beside setup. Older daemons need to be restarted after
-their active sessions have finished before they can expose this setup flow.
+- **State folder.** `workspaces/<id>` under `$XDG_STATE_HOME/exosuit` on Linux or `%LOCALAPPDATA%\Exosuit` on
+  Windows, private to the user (`AgentState.hx`). `EXOSUIT_AGENT_STATE_HOME` moves the parent. It holds `agent.lock`,
+  `workspace.json` (which workspace and folders), `catalog.sqlite`, `service.log`, `catalog-snapshot.bin` and the
+  terminal hosts' folders.
+- **One service per workspace.** The service takes `agent.lock` and exits with status 3 when another holds it.
+- **Ready.** It listens on its pipe at once and reports to suit (`service-attach`: workspace, pipe, pid, generation,
+  root, build; `src/suit/SuitServiceLink.hx`). suit hands that pipe to editors and devices; nothing about how to
+  reach the service is written to disk. Connections that arrive while the catalog, terminals and agents come up wait
+  in the pipe.
+- **Warm spare.** `main.hl --spare` loads, links to suit (`service-spare`) and waits. suit hands it a workspace
+  (`adopt`) when an idle one is opened, so the open needs no process start. suit keeps one spare while an editor is
+  linked.
+- **Pipe.** A Windows named pipe whose DACL grants only the current user; a private `agent.sock` in the state folder
+  elsewhere. Clients check the service's identity (generation and root) before they watch its catalog.
+- **Devices.** The service never dials a relay. suit forwards a paired device's stream to the pipe, sending first an
+  intro with the device's grants (`ForwardedStream`); the service serves that connection with only those grants.
+  Folder changes and source-control trust stay local only.
 
-`EXOSUIT_RELAY_ORIGIN` still overrides the saved address when starting the manager.
-Configuration creates one stable opaque relay identity
-for that workspace service and a private, one-shot bearer bootstrap. The daemon
-moves the bearer into NativeKit's OS credential store, keyed by relay origin and
-machine identity, enrolls it with the Worker, and keeps the daemon alive while
-relay hosting is enabled. Linux builds
-need `libsecret-1-dev`; a user-session Secret Service must be available at runtime.
-The relay socket is outbound, so no inbound port needs to be exposed. Creating
-an invitation requires a connected relay. Incoming devices authenticate through
-Noise, and access starts only after code confirmation and desktop approval.
-Each request initially selects all permissions; the owner can select Read only,
-Edit files, or adjust individual permissions before approving. The choices for
-one request do not affect other requests or already paired devices.
+## Stop
 
-For direct daemon fixtures, build with
-`haxeon/scripts/haxeon build --project agent/haxeon.json`.
-Run arguments are:
+- suit asks over the link (`stop`, now or after the running agent turn). A service of another build is restarted that
+  way when its workspace is next opened.
+- It stops by itself after `EXOSUIT_SERVICE_IDLE_SECONDS` (600 by default) with no client and no busy agent turn.
+  Running terminals do not keep it: they live in terminal hosts, which outlive it. Idle chat processes lengthen the
+  wait to ten times the limit, at most ten minutes (`WorkspaceLifetime`).
+- On stop it writes `catalog-snapshot.bin`, ends its provider processes and closes its database. Closing a window
+  only closes that window's connection.
+- The loop waits on events; it turns every 10 ms only for half a second after something happened, and every 50 ms
+  while provider processes run.
 
-```text
-PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS]]]]
-```
+## Terminals
 
-The caller supplies a private owner-only directory, a 0600 credential file
-containing exactly 64 lowercase hex digits generated from 256 random bits, and an
-independently generated public seed epoch. The seed epoch initializes a new
-catalog; an existing database restores its stored epoch. Omitting `DATABASE`
-selects ephemeral fixture mode, which requires a fresh epoch on every restart.
+Each terminal runs in its own terminal host process ([terminal-host-status.md](../docs/design/terminal-host-status.md)),
+which keeps the program and its screen while the service stops, crashes or idles out; the next service takes it back.
+The service relays at most 2 MiB of recent output per terminal (`WorkspaceTerminalManager.REPLAY_BYTES`); a view
+further behind takes the screen from the host. Input batches are at most 64 KiB; sizes are up to 512 columns by 256
+rows; a catalog holds at most 256 terminal records. Only the host answers the program's terminal queries, using the
+colours the controlling view sends.
 
-NativeKit enforces private-path/same-user checks on the local listener. WebSocket
-clients prove possession of the credential before RPC negotiation or dispatch.
-Plain loopback WebSocket has no network encryption. Remote access requires the
-authenticated secure relay and endpoint/session authorization described in
-`docs/roadmap/16-remote-workspaces.md`.
+## Agent sessions
 
-`--discover` validates existing private discovery without starting a daemon;
-exit 4 means no discovery. `--wire` emits the typed JsonWire profile for the
-native client. The bytecode is selected with `EXOSUIT_AGENT_LAUNCHER`, or found
-from a repository launch directory. Release bundles install the matched agent
-bytecode and HashLink runtime, so managed startup does not compile sources.
+Settings → Workbench → Agents: "Agent session mode" (`workbench/agents/session_mode`) chooses how new Codex, Claude
+and Pi sessions open: `terminal` (the default) runs the provider's own CLI in a terminal; `integrated` runs it under the
+service and draws it in the chat panel. "Default agent provider" (Claude) is what New Agent Session starts at once.
+The executables come from PATH, or `EXOSUIT_CODEX_BIN`, `EXOSUIT_CLAUDE_BIN` and `EXOSUIT_PI_BIN`.
 
-The default idle grace is 60 seconds, including initial startup. `--idle-seconds N`
-changes it for new managed daemons; `--always-available` (or
-`EXOSUIT_AGENT_ALWAYS_AVAILABLE=1`) explicitly disables idle shutdown. Unnegotiated
-or unauthenticated sockets do not keep it alive. Running daemon-owned terminals also retain the service, even with no attached clients. Idle chat processes (a Claude or Pi session with nothing to do, an attached Codex thread) lengthen the grace to ten times the idle limit, at most ten minutes, so a rebuild or a switch to another workspace and back keeps them; after that the service stops and each session resumes its conversation when a message arrives. Existing policies are not changed by client attachment.
-Normal idle stop closes clients/listeners, releases SQLite and the native runtime,
-then the manager retires discovery and its lifetime lock with exit 0. Explicit
-SIGTERM stop uses the same owned-process cleanup. The desktop command palette offers “Terminate Active Terminal”; closing a window only detaches.
+`workspace.provider.WorkspaceAgentService` binds the agent RPCs, shares authorization and limits across providers,
+and builds a provider only when it is first needed. How a session continues after a restart is in
+[agent-sessions.md](../docs/design/agent-sessions.md). Provider references: [CODEX.md](CODEX.md),
+[CLAUDE-PROVIDER.md](CLAUDE-PROVIDER.md), [PI-PROVIDER.md](PI-PROVIDER.md).
 
-Run `python3 scripts/test-agent-idle.py` for real idle shutdown, client retention,
-restart and detached availability. `bash scripts/test-runtime-bundle.sh` exercises
-already-built assets through the production staging routine after relocation,
-without publishing a release or modifying locked revisions.
+## Tests
 
-Managed services advertise a build identity and a same-user lifecycle capability.
-The editor compares that identity with the installed manager's source or bundled
-bytecode identity. An outdated idle service updates automatically. With active
-terminals or attached Codex conversations, the Remote access panel offers
-“Update when idle”, cancellation, and an explicitly confirmed “Restart now”.
-Preparation builds the replacement before asking the daemon to stop; build
-failure leaves current sessions running. The daemon rechecks activity itself,
-closes storage cleanly, and its manager starts a fresh generation. Connected
-editors rediscover and reconnect. Older services without lifecycle support need
-one explicitly confirmed restart because their activity cannot be checked safely.
-Lifecycle control is never offered to relay or loopback WebSocket clients.
-
-Run `python3 scripts/test-service-updates.py` for real idle, busy, forced and
-legacy upgrades with two editor clients, plus failed-build and generation guards.
-Run `bash scripts/test-workspace-attachment.sh` for discovery, identity, shared
-reuse and stale restart acceptance. `python3 scripts/test-workspace-attachment-ui.py`
-checks actual desktop attachment and reuse across windows under Xvfb.
-Run `bash scripts/test-workspace-persistence.sh` for storage and managed lifecycle
-acceptance, and `bash scripts/test-workspace-transport.sh` for real transports.
-`bash scripts/test-workspace-rpc-browser.sh` builds and runs Chrome fixtures on
-both Wasm GC and Wasm32 (using the sibling Emsdk installation). A browser commits
-a rename, suspends/reconnects, then observes its durable state after daemon restart.
-Temporary credentials and child processes are cleaned up. The browser page is a
-test client; the Exosuit web application's connection UX remains pending.
-
-
-### Daemon-owned desktop terminals
-
-With a folder open on Linux, terminals use the verified workspace RPC connection.
-Their opaque IDs are saved in the editor session. Restoring a view attaches to the
-same shell, environment and PID; it never silently starts a replacement shell.
-Folderless terminals retain the existing local backend. Hiding the terminal panel
-keeps its tabs, and closing the editor detaches its views. Running terminals keep
-the daemon alive; the idle grace resumes after all terminals exit and clients leave.
-
-The first runtime slice permits 16 terminal records per daemon instance, including
-exited records. Each retains at most 16 MiB of output in owned 64 KiB chunks, with
-64-bit byte cursors. Replay reads and input batches are bounded to 64 KiB. Restoring
-beyond retained replay recovers the active screen from a snapshot. A daemon restart
-ends its shells, but preserves bounded rendered history. Terminals are rooted at the canonical project
-folder, use the default user shell and accept dimensions up to 512 columns × 256 rows.
-
-The controlling view supplies its default foreground/background on attachment,
-resize/theme changes and explicit shell restart. The daemon answers OSC 10/11
-queries with those RGB values, so terminal applications detect the displayed
-light/dark theme. These updates preserve content, SGR styles and input modes;
-observers cannot overwrite the controller's colours. Existing applications may
-need to probe again or restart if they cache their theme at startup.
-
-Only the daemon responds to VT queries. Client emulators replay output without
-responding to queries, but still send explicit keyboard/paste/mouse input. Both
-remote parsers disable the generic emulator's optional checkpoint event log to
-avoid retaining another unbounded copy of output. Retained PTY bytes require one
-ownership copy; RPC encoding and transport are not claimed to be zero copy.
-
-Development startup builds without passing the workspace lock into the compiler,
-then launches HashLink directly with the lock. Persistent compiler workers cannot
-retain it. NativeKit isolates PTY children from host descriptors. Installed bundles
-run their already-built agent and include its terminal libraries.
-
-Run `python3 scripts/test-workspace-terminals.py` for permission checks, open retry,
-input sequencing, bounded replay, same-shell reattachment and idle ownership.
-Run `xvfb-run -a python3 scripts/test-workspace-terminal-ui.py` for real desktop
-close/reopen, continued execution while detached and restored shell identity.
-
-A restored grid replays raw bytes at its current size; exact historical resize
-reconstruction awaits state checkpoints. Closing an individual tab also detaches.
-Use Workspace Terminals to reopen or stop a detached session.
-
-### Agent session mode
-
-Global Settings → Workbench → Agents → Agent session mode controls how new Codex,
-Claude Code and Pi sessions open. `Integrated` uses the existing structured
-provider integrations. `Terminal` (the default) launches the provider's interactive
-CLI directly in a workspace-owned PTY, in the selected group's working directory.
-The saved setting is `workbench/agents/session_mode`; it is global, with no project
-override. Changing it only affects new sessions.
-
-Interactive agents use the CLI's own model, authentication and approval settings.
-Their executables must be installed on the workspace host's PATH; the existing
-`EXOSUIT_CODEX_BIN`, `EXOSUIT_CLAUDE_BIN` and `EXOSUIT_PI_BIN` overrides also apply.
-The service records the provider with the terminal. Closing/reopening a view
-reattaches the same process; “Restart agent” starts the original CLI explicitly
-after it ends, preserving saved terminal output. It never silently substitutes a
-shell or converts an existing structured conversation. Older workspace services
-must be updated before they can launch interactive agent terminals.
-
-Run `xvfb-run -a python3 scripts/test-agent-session-mode-ui.py` for desktop coverage
-of both modes, interactive input and retaining a CLI while changing the default.
-The workspace terminal contract suite also exercises all three provider CLIs.
-
-
-### Terminal catalog
-
-“Workspace Terminals…” lists service resources even with no saved/open view. Open
-reattaches the same runtime, name/group editing changes durable metadata, Stop kills
-its PTY and Remove forgets an exited, failed or lost record. Running sessions cannot
-be forgotten. Removal releases replay/emulator retention and runtime slots.
-
-The existing database migrates from schema 1/2 to 3 and stores at most 256 terminal
-records; discovery returns six per page. Names/group membership and last known
-state survive service restart. Old active records become lost internally and are
-shown as “session ended”. Every record can open a read-only recovery view without
-starting a process, including records from older services with no saved output.
-The view clearly distinguishes saved history from missing history. “Restart shell” explicitly
-starts a fresh shell under the same terminal identity and appends a visible separator,
-retaining previous output. Variables, jobs and other process state are not restored.
-
-Schema 8 adds a separate SQLite history row per terminal. Rendered UTF-8, colours
-and text attributes are retained from the daemon's 1000-line scrollback plus screen,
-up to 4 MiB, trimming oldest whole rows. This stores displayed rows rather than an
-unbounded raw VT journal; dead-shell input modes, replies and cursor inversion are
-excluded. Dirty history saves at most once every two seconds and flushes on shell
-exit or orderly daemon shutdown. A crash/forced termination can lose output since
-the last successful save. Storage errors appear in the terminal control notice and
-retry at the same bounded cadence. Removing a terminal deletes its history in the
-same transaction. Previously lost sessions without a saved history cannot recover
-their old output.
-
-Archived history never counts as an active shell for service lifetime or updates.
-Sixteen runtime/replay records can be loaded at once; removing finished records
-makes room for new terminals.
-
-The catalog uses current workspace groups. Tasks and
-provider resources are later work. Run `xvfb-run -a python3
-scripts/test-workspace-terminal-catalog-ui.py` to discover a shell created by a
-separate process, reopen it without a saved tab and restore that view on a third
-launch. An optional installation directory exercises the relocated bundle.
-
-
-### Workbench directory groups
-
-The Workbench sidebar supports nested named groups, duplicate names, editing,
-parent moves and sibling order. New terminal uses the selected group. Its launch
-directory comes from an explicit override, the nearest ancestor directory, or the
-workspace root. The daemon canonicalizes existing directories and refuses targets
-outside that root, including symlink escapes. Moving a running session/group never
-changes its cwd. Group selection is local UI state; Open folder is an explicit
-editor action.
-
-This slice uses one authorized project root. The authorized root is pinned in workspace metadata, independently of editable
-group directories; groups may inherit or select subdirectories. Multi-project roots,
-group deletion, drag-and-drop and saved tree expansion/selection are later work.
-Group changes reuse durable revisions, operation IDs and the event journal; schema
-3 migrates older catalogs and refuses unknown schemas. Bounds remain 32 groups and
-256 retained operations. Names/group metadata and terminal owner scope persist;
-the live ordered replay stays in memory, while bounded rendered history persists
-as described above.
-
-Run `xvfb-run -a python3 scripts/test-workbench-groups-ui.py` for real controls,
-nested directory creation and subdirectory terminal restoration. It accepts a
-staged runtime directory as its optional argument for relocation acceptance with
-source compilation disabled. Terminal fixtures also cover two-client updates,
-permissions, cycle/stale-edit rejection and Unicode storage/message bounds.
-
-Codex conversations use a separate structured provider adapter, not terminal
-bytes. See [CODEX.md](CODEX.md) for version support, controls, bounds and recovery.
+- `python3 scripts/test-workspace-terminals.py`: permissions, open retry, input order, bounded replay, reattachment.
+- `python3 scripts/test-terminal-hosts.py`: a terminal survives its service; suit lists, keeps and ends hosts.
+- `python3 scripts/test-workspace-agents.py`, `test-claude-agents.py`, `test-pi-agents.py`: sessions through the
+  service with fake CLIs.
+- `python3 scripts/test-agent-idle.py`: the idle stop.
+- `python3 scripts/test-machine-remote.py`: a device reaching a workspace through suit and a local relay.
+- `python3 scripts/test-workspace-attachment.py`, `bash scripts/test-workspace-persistence.sh`, `test-workspace-transport.sh`:
+  identity and reuse, storage, real transports.

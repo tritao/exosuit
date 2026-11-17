@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-# Thin wrapper around the haxeon CLI: builds and runs the headless test suite.
+# Builds and runs the headless test suites listed in tests/suites.txt (the rows for all and posix), in that order.
+# `--list` prints them and runs nothing.
 #
-# The core project (haxeon.json) and each tests/<name>/haxeon.json project are
-# built and launched with `haxeon build`/`haxeon run`. Fixture setup for tests
-# that need files on disk lives here, matching what each project test entry
-# expects on Sys.args().
+# Haxeon test projects are built and launched with `haxeon run`. Fixture setup for suites that need files on disk lives
+# here (`fixture` below, named by the list's fixture column), matching what each test entry expects on Sys.args().
 #
 # On Windows run scripts/test-windows.ps1 instead: the suites and drivers that run there, each behind the dialog guard
 # with state of its own (-List says what it leaves out and why).
 set -euo pipefail
-# What tests start neither registers with the user's suit nor starts it (see suit/README.md).
-export EXOSUIT_SUIT=${EXOSUIT_SUIT:-off}
+# Everything the tests start keeps its state in a home of the run's own, removed at the end: never the user's suit
+# (which is not started either, see suit/README.md), editor or agent state, ~/.claude or ~/.codex. Variables inherited
+# from the user's session are replaced, not reused. EXOSUIT_TEST_HOME names a folder to use instead (kept).
+test_home=${EXOSUIT_TEST_HOME:-}
+remove_test_home=0
+if [[ -z $test_home ]]; then
+	test_home=$(mktemp -d)
+	remove_test_home=1
+fi
+export EXOSUIT_SUIT_HOME="$test_home/suit" EXOSUIT_SUIT_AUTOSTART=0 PRAGTICAL_PORTABLE="$test_home/portable" 	EXOSUIT_AGENT_STATE_HOME="$test_home/agent-state" CLAUDE_CONFIG_DIR="$test_home/claude-config" CODEX_HOME="$test_home/codex-home"
+mkdir -p "$EXOSUIT_SUIT_HOME" "$PRAGTICAL_PORTABLE" "$EXOSUIT_AGENT_STATE_HOME" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"
 # Headless UI tests check, on every frame that did work, that the retained tree equals a fresh build and that no
 # submitted node was edited in place without BuildContext.willEditRetained (UiContext.verifyRetentionEvery). 0 turns it off.
 export HAXEON_UI_VERIFY_RETENTION=${HAXEON_UI_VERIFY_RETENTION:-1}
@@ -42,21 +50,35 @@ check() {
 	fi
 }
 
-run_test() {
-	local name=$1
-	shift
-	check "$name" "$haxeon" run --project "$root_dir/tests/$name/haxeon.json" "${self_hosted[@]}" -- "$@"
+suites="$root_dir/tests/suites.txt"
+# The rows of tests/suites.txt this runner runs, one per line: name on kind timeout fixture target arguments.
+rows() {
+	local line
+	while IFS= read -r line; do
+		line=${line%% # *}
+		[[ -z ${line// /} || $line == \#* ]] && continue
+		local on
+		read -r _ on _ <<<"$line"
+		[[ $on == all || $on == posix ]] && printf '%s\n' "$line"
+	done <"$suites"
 }
 
+if [[ ${1:-} == --list ]]; then
+	rows | while read -r name _ kind _ _ target arguments; do printf '%-26s %-7s %s\n' "$name" "$kind" "$target${arguments:+ $arguments}"; done
+	exit 0
+fi
+
 mkdir -p "$root_dir/build"
+fixtures=$(mktemp -d)
+workspace_root="$root_dir/build/workspace-test"
+cleanup() {
+	chmod 600 "$workspace_root/unreadable.txt" 2>/dev/null || true
+	chmod -R u+rwx "$fixtures" 2>/dev/null || true
+	rm -rf "$fixtures"
+	if ((remove_test_home)); then rm -rf "$test_home"; fi
+}
+trap cleanup EXIT
 
-check plugin-host-bindings "$root_dir/scripts/update-plugin-host-bindings.sh" --check
-
-check sqlite-native "$root_dir/native-packages/sqlite/tests/run.sh"
-check terminal-native "$root_dir/native-packages/terminal/tests/run.sh"
-check terminal-session-native "$root_dir/native-packages/terminal/session/tests/run.sh"
-check noise-native "$root_dir/native-packages/noise/tests/run.sh"
-check processes-native "$root_dir/native-packages/processes/tests/run.sh"
 terminal_native_dir="$root_dir/native-packages/terminal/session/tests/build/nativekit"
 if [[ $(uname -s) == Darwin ]]; then
 	export DYLD_LIBRARY_PATH="$terminal_native_dir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
@@ -68,147 +90,127 @@ fi
 	"$root_dir/tests/process_fixture.c" \
 	-o "$root_dir/build/process-fixture"
 
-# The core entry checks shared document editing without a simulated native host.
-check core "$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
+# A suite's fixture (the fixture column of tests/suites.txt): makes its files, then sets `args`, the suite's arguments,
+# and `step_env`, variables for that suite only.
+fixture() {
+	local name=$1 dir="$fixtures/$2"
+	args=()
+	step_env=()
+	case $name in
+	-) ;;
+	portable)
+		mkdir -p "$dir"
+		step_env=(PRAGTICAL_PORTABLE="$dir")
+		;;
+	unreadable-folder)
+		mkdir -p "$dir/blocked" "$dir/vanishing"
+		touch "$dir/a.txt"
+		chmod 000 "$dir/blocked"
+		args=("$dir")
+		;;
+	process-cwd)
+		mkdir -p "$root_dir/build/process cwd"
+		args=("$root_dir/build/process-fixture" "$root_dir/build/process cwd")
+		;;
+	process-fixture) args=("$root_dir/build/process-fixture") ;;
+	fake-lsp) args=("$root_dir/tests/fake_lsp.py") ;;
+	fake-lsp-project)
+		mkdir -p "$root_dir/build/language-service-project"
+		args=("$root_dir/tests/fake_lsp.py" "$root_dir/build/language-service-project")
+		;;
+	configuration)
+		local configuration_root="$root_dir/build/configuration-test"
+		mkdir -p "$configuration_root/project"
+		printf '{}' >"$configuration_root/user.json"
+		printf '{}' >"$configuration_root/project.json"
+		args=("$configuration_root/user.json" "$configuration_root/project.json" "$configuration_root/project" "$configuration_root/user.json")
+		;;
+	document)
+		printf 'saved by Haxeon\n' >"$root_dir/build/document-save-smoke.txt"
+		chmod 640 "$root_dir/build/document-save-smoke.txt"
+		args=("$root_dir/build/document-save-smoke.txt")
+		;;
+	workspace)
+		local workspace_other="$root_dir/build/workspace-test-other"
+		mkdir -p "$workspace_root/src" "$workspace_root/.git" "$workspace_root/.cache" "$workspace_root/.pragtical" "$workspace_other"
+		rm -f "$workspace_root/created.txt" "$workspace_root/moved.txt" "$workspace_root/replacement-backup.conf" "$workspace_root-replacement-backup.conf"
+		rm -f "$workspace_root-session-recovery.conf"
+		if [[ -d "$workspace_root-trash" ]]; then
+			find "$workspace_root-trash" -mindepth 1 -delete
+			rmdir "$workspace_root-trash"
+		fi
+		printf 'alpha\n' >"$workspace_root/alpha.txt"
+		printf 'class Main {\n  value;\n}\n' >"$workspace_root/src/Main.hx"
+		printf 'task=editor-test\nexecutable=%s\nargument=diagnostic\nargument=src/Main.hx\ncwd=.\n' "$root_dir/build/process-fixture" >"$workspace_root/.pragtical/tasks.conf"
+		printf '\0needle in binary\n' >"$workspace_root/binary.dat"
+		dd if=/dev/zero of="$workspace_root/oversized.dat" bs=1048576 count=5 status=none
+		printf 'needle but unreadable\n' >"$workspace_root/unreadable.txt"
+		chmod 000 "$workspace_root/unreadable.txt"
+		printf 'ignored\n' >"$workspace_root/.git/ignored"
+		printf 'ignored\n' >"$workspace_root/.cache/ignored"
+		printf 'needle in second project\n' >"$workspace_other/second.txt"
+		args=("$workspace_root" "$workspace_other")
+		;;
+	file-deletion) args=("$root_dir/build/file-deletion-test") ;;
+	state-and-roots)
+		step_env=(PRAGTICAL_PORTABLE="$dir/state")
+		args=("$dir/roots")
+		;;
+	content-store)
+		mkdir -p "$dir/content-store"
+		args=("$dir/content-store")
+		;;
+	codex-history)
+		mkdir -p "$dir/codex-history"
+		args=("$dir/codex-history" python3 "$root_dir/scripts/run-codex-proxy.py" "$root_dir/tests/workspace-agents/fake-codex.py")
+		;;
+	dynamic-plugin)
+		local plugin_dir="$root_dir/build/dynamic-plugin"
+		mkdir -p "$plugin_dir"
+		cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "$plugin_dir/"
+		args=("$plugin_dir/plugin.conf" "$plugin_dir/Main.hx")
+		;;
+	*)
+		echo "test.sh: unknown fixture $name" >&2
+		return 1
+		;;
+	esac
+}
 
-run_test plugin-host
-run_test command-clipboard
-run_test haxeon-rpc
-run_test workspace-catalog
-run_test workspace-migration
-run_test scm-git
-run_test scm-watch
-check workspace-transport bash "$root_dir/scripts/test-workspace-transport.sh"
-check workspace-scm python3 "$root_dir/scripts/test-workspace-scm.py"
-check relay bash "$root_dir/scripts/test-relay.sh"
-check workspace-persistence bash "$root_dir/scripts/test-workspace-persistence.sh"
-check workspace-attachment bash "$root_dir/scripts/test-workspace-attachment.sh"
-check workspace-manager-choice python3 "$root_dir/scripts/test-workspace-manager-choice.py"
-check relay-setup python3 "$root_dir/scripts/test-relay-setup.py"
-run_test workspace-lifecycle
-check service-updates python3 "$root_dir/scripts/test-service-updates.py"
-check agent-idle python3 "$root_dir/scripts/test-agent-idle.py"
-check agent-machine python3 "$root_dir/scripts/test-agent-machine.py"
-check manager-owner-death python3 "$root_dir/scripts/test-manager-owner-death.py"
-check workspace-terminals python3 "$root_dir/scripts/test-workspace-terminals.py"
-check workspace-agents python3 "$root_dir/scripts/test-workspace-agents.py"
-check claude-agents python3 "$root_dir/scripts/test-claude-agents.py"
-check claude-session-names python3 "$root_dir/scripts/test-claude-session-names.py"
-check native-session-names python3 "$root_dir/scripts/test-native-session-names.py"
-check pi-agents python3 "$root_dir/scripts/test-pi-agents.py"
-check pi-inputs python3 "$root_dir/scripts/test-pi-agents.py" --inputs
-check workspace-rpc-wasm bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
-run_test application-test
-run_test problems
-run_test live-build-feed
-capabilities_state=$(mktemp -d)
-PRAGTICAL_PORTABLE="$capabilities_state" run_test host-capabilities-test
-rm -rf "$capabilities_state"
-run_test command-test
-run_test editor-view-test
-run_test tab-tooltip
-run_test quick-picker
-run_test narrow-tabs
-run_test status-bar
-terminal_context_state=$(mktemp -d)
-PRAGTICAL_PORTABLE="$terminal_context_state" run_test terminal-context-menu
-rm -rf "$terminal_context_state"
-phone_last_view_state=$(mktemp -d)
-PRAGTICAL_PORTABLE="$phone_last_view_state" run_test phone-last-view
-rm -rf "$phone_last_view_state"
-run_test sidebar-layout
-run_test terminal-keys
-run_test workbench-drag
-run_test workbench-tree
-run_test context-snapshots
-run_test remote-access-panel
-run_test browser-pairing-url
+# The checks of kind `check`.
+own_check() {
+	case $1 in
+	document-save-mode) test "$(stat -c '%a' "$root_dir/build/document-save-smoke.txt")" = 640 ;;
+	*)
+		echo "test.sh: unknown check $1" >&2
+		return 1
+		;;
+	esac
+}
 
-directory_scan_root=$(mktemp -d)
-mkdir "$directory_scan_root/blocked" "$directory_scan_root/vanishing"
-touch "$directory_scan_root/a.txt"
-chmod 000 "$directory_scan_root/blocked"
-run_test directory-scan "$directory_scan_root"
-chmod 700 "$directory_scan_root/blocked"
-rm -rf "$directory_scan_root"
-
-mkdir -p "$root_dir/build/process cwd"
-run_test process-test "$root_dir/build/process-fixture" "$root_dir/build/process cwd"
-
-run_test json-rpc-transport-test "$root_dir/tests/fake_lsp.py"
-
-language_project="$root_dir/build/language-service-project"
-mkdir -p "$language_project"
-run_test language-service-test "$root_dir/tests/fake_lsp.py" "$language_project"
-run_test language-controller-test "$root_dir/tests/fake_lsp.py" "$language_project"
-
-configuration_root="$root_dir/build/configuration-test"
-configuration_project="$configuration_root/project"
-mkdir -p "$configuration_project"
-printf '{}' >"$configuration_root/user.json"
-printf '{}' >"$configuration_root/project.json"
-run_test configuration-test "$configuration_root/user.json" "$configuration_root/project.json" "$configuration_project" "$configuration_root/user.json"
-
-printf 'saved by Haxeon\n' >"$root_dir/build/document-save-smoke.txt"
-chmod 640 "$root_dir/build/document-save-smoke.txt"
-run_test document-test "$root_dir/build/document-save-smoke.txt"
-check document-save-mode test "$(stat -c '%a' "$root_dir/build/document-save-smoke.txt")" = 640
-
-run_test plugin-test "$root_dir/build/process-fixture"
-
-workspace_root="$root_dir/build/workspace-test"
-workspace_other="$root_dir/build/workspace-test-other"
-mkdir -p "$workspace_root/src" "$workspace_root/.git" "$workspace_root/.cache" "$workspace_root/.pragtical" "$workspace_other"
-rm -f "$workspace_root/created.txt" "$workspace_root/moved.txt" "$workspace_root/replacement-backup.conf" "$workspace_root-replacement-backup.conf"
-rm -f "$workspace_root-session-recovery.conf"
-if [[ -d "$workspace_root-trash" ]]; then
-	find "$workspace_root-trash" -mindepth 1 -delete
-	rmdir "$workspace_root-trash"
+# coreutils timeout; macOS has it as gtimeout (brew install coreutils).
+timeout=$(command -v timeout || command -v gtimeout || true)
+if [[ -z $timeout ]]; then
+	echo "test.sh: needs timeout (coreutils) to stop a suite that hangs" >&2
+	exit 2
 fi
-printf 'alpha\n' >"$workspace_root/alpha.txt"
-printf 'class Main {\n  value;\n}\n' >"$workspace_root/src/Main.hx"
-printf 'task=editor-test\nexecutable=%s\nargument=diagnostic\nargument=src/Main.hx\ncwd=.\n' "$root_dir/build/process-fixture" >"$workspace_root/.pragtical/tasks.conf"
-printf '\0needle in binary\n' >"$workspace_root/binary.dat"
-dd if=/dev/zero of="$workspace_root/oversized.dat" bs=1048576 count=5 status=none
-printf 'needle but unreadable\n' >"$workspace_root/unreadable.txt"
-chmod 000 "$workspace_root/unreadable.txt"
-trap 'chmod 600 "$workspace_root/unreadable.txt" 2>/dev/null || true' EXIT
-printf 'ignored\n' >"$workspace_root/.git/ignored"
-printf 'ignored\n' >"$workspace_root/.cache/ignored"
-printf 'needle in second project\n' >"$workspace_other/second.txt"
-run_test workspace-test "$workspace_root" "$workspace_other"
-run_test file-deletion "$root_dir/build/file-deletion-test"
-saved_workspace_fixture=$(mktemp -d)
-PRAGTICAL_PORTABLE="$saved_workspace_fixture/state" run_test saved-workspace "$saved_workspace_fixture/roots"
-active_context_fixture=$(mktemp -d)
-PRAGTICAL_PORTABLE="$active_context_fixture/state" run_test active-context "$active_context_fixture/roots"
-run_test layout-controls
-run_test layout-modes
-run_test agent-scope
-run_test session-links
-run_test session-chat-ui
-run_test session-diff-regression
-run_test agent-snapshot-client
-# Agent state fixtures take a scratch folder each. agent-image-staging is not run here: it reads
-# graphical/assets/icons/exosuit-16.png relative to its working directory, and `haxeon run` starts it in its project folder.
-agent_state=$(mktemp -d)
-mkdir "$agent_state/content-store" "$agent_state/codex-history"
-run_test agent-content-store "$agent_state/content-store"
-# The native Codex adapter and proxy bridge against the deterministic fake peer; never a real inference turn.
-run_test codex-history "$agent_state/codex-history" python3 "$root_dir/scripts/run-codex-proxy.py" \
-	"$root_dir/tests/workspace-agents/fake-codex.py"
-rm -rf "$agent_state"
-run_test path-key
-run_test workspace-target
-run_test workspace-catalog-pool
-run_test project-scan-yield
-chmod 600 "$workspace_root/unreadable.txt"
-
-# Source compilation, compatible patches, structural reloads and failure rollback are mandatory.
-dynamic_plugin_dir="$root_dir/build/dynamic-plugin"
-mkdir -p "$dynamic_plugin_dir"
-cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "$dynamic_plugin_dir/"
-run_test dynamic-plugin-test "$dynamic_plugin_dir/plugin.conf" "$dynamic_plugin_dir/Main.hx"
+# Each suite is stopped after its timeout (the list's column), and killed 10 s later if it is still running.
+# File descriptor 3: a suite that reads its standard input must not read the list.
+while read -r -u 3 name _ kind seconds fixture_name target arguments; do
+	fixture "$fixture_name" "$name"
+	read -ra extra <<<"$arguments"
+	limit=("$timeout" --kill-after=10 "$seconds")
+	case $kind in
+	haxeon) check "$name" "${limit[@]}" env "${step_env[@]}" "$haxeon" run --project "$root_dir/$target" "${self_hosted[@]}" -- "${args[@]}" ;;
+	python) check "$name" "${limit[@]}" env "${step_env[@]}" python3 "$root_dir/$target" "${extra[@]}" ;;
+	bash) check "$name" "${limit[@]}" env "${step_env[@]}" bash "$root_dir/$target" "${extra[@]}" ;;
+	check) check "$name" own_check "$name" ;;
+	*)
+		echo "test.sh: $name has an unknown kind $kind" >&2
+		exit 2
+		;;
+	esac
+done 3< <(rows)
 
 if ((${#failures[@]} > 0)); then
 	echo "FAIL: ${#failures[@]} of $steps exosuit test steps failed: ${failures[*]}"

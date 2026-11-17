@@ -4,8 +4,14 @@ The browser hosts the same UIKit editor and controllers as the desktop. Its
 filesystem lives in the Haxeon guest's memory for the current page session;
 reloading starts a fresh seeded `/workspace/Main.hx`. Changes do not reach the
 checkout or persist across page reloads. Save writes to this session filesystem.
-Native process, LSP, source-plugin compilation, terminal and local control
-commands are unavailable. Open File and Open Folder use the path command view.
+Native process, LSP, source-plugin compilation and local control commands are
+unavailable. Open File and Open Folder use the path command view.
+
+The browser is also a paired device, like the phone: it pairs with a machine's suit
+over the relay and opens the workspaces the owner grants it, with their terminals and
+sessions (`RemoteMachines`, the same `WorkspaceLink`s as the desktop). Its pairings live
+in IndexedDB, encrypted with a non-extractable key (`BrowserPairedMachines`,
+`remote-device-store.js`).
 
 `./web/build.sh` builds a Wasm32 guest and Emscripten host, checks their C import
 signatures and assembles `build/web/site`. It uses materia's shared `tools/web` manifest
@@ -33,8 +39,7 @@ The loader's `window.exosuit` report includes lifecycle, frame count, unavailabl
 imports and a snapshot function. The snapshot crosses the host boundary as
 UTF-8 JSON; it does not inspect backend-specific Haxe object layouts.
 
-Browser qualification is tracked in `docs/roadmap/STATUS.md`; do not infer a
-passing smoke check from a successful artifact build.
+Do not infer a passing smoke check from a successful artifact build.
 
 `EXOSUIT_CI_WEB=1 ./scripts/ci.sh` adds both guest builds and browser smokes to
 composed CI. `EXOSUIT_CI_WEB=1 ./scripts/test-web.sh` runs that browser stage

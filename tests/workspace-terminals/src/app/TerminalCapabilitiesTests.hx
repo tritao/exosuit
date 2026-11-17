@@ -1,38 +1,24 @@
 package app;
 
+import testing.TestEndpoint;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
-import workspace.client.WorkspaceRpcEndpoint;
 import workspace.client.RpcWorkspaceWorkbenchClient;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
-private class CapabilityEndpoint implements WorkspaceRpcEndpoint {
-  public var connection:Null<RpcConnection>;
-  public var grants:Array<String> = [];
-  public function new(connection:RpcConnection) this.connection = connection;
-  public function rootPath():Null<String> return "/fixture";
-  public function serviceGeneration():String return "fixture";
-  var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
-  public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
-    if (connection == null) return null;
-    if (eventRouter == null || eventRouter.connection != connection)
-      eventRouter = new workspace.client.WorkspaceTerminalEvents(connection);
-    return eventRouter;
-  }
-  public function rpcConnection():Null<RpcConnection> return connection;
-  public function failureReason():Null<String> return null;
-  public function supportsWorkspaceGroups():Bool return hasCapability(WorkspaceProtocol.TREE);
-  public function workspaceEpoch():Null<String> return null;
-  public function hasCapability(capability:String):Bool return grants.indexOf(capability) >= 0;
-}
-
 /** Terminal UI decisions depend on negotiated workspace grants, without a local process host. */
 class TerminalCapabilitiesTests {
+  /** A connection whose grants the test sets. */
+  static function grantedEndpoint(connection:RpcConnection):TestEndpoint {
+    var endpoint = new TestEndpoint(connection);
+    endpoint.epoch = null; endpoint.grants = [];
+    return endpoint;
+  }
   static function require(value:Bool, message:String):Void { if (!value) throw message; }
   public static function run():Void {
     var pair = MemoryTransport.pair(), connection = new RpcConnection(pair.client, () -> 0.0);
-    var endpoint = new CapabilityEndpoint(connection), client = new RpcWorkspaceWorkbenchClient(endpoint, () -> 0.0);
+    var endpoint = grantedEndpoint(connection), client = new RpcWorkspaceWorkbenchClient(endpoint, () -> 0.0);
     endpoint.grants = [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG];
     require(client.canReadTerminals() && !client.canCreateTerminals(), "Read-only device can create terminals");
     endpoint.grants.push(WorkspaceTerminalProtocol.CONTROL);
@@ -50,7 +36,7 @@ class TerminalCapabilitiesTests {
   }
   static function creationCatalog(holdInitial:Bool):Void {
     var pair=MemoryTransport.pair(), connection=new RpcConnection(pair.client,() -> 0.0);
-    var server=new RpcConnection(pair.server,() -> 0.0), endpoint=new CapabilityEndpoint(connection);
+    var server=new RpcConnection(pair.server,() -> 0.0), endpoint=grantedEndpoint(connection);
     endpoint.grants=[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL,WorkspaceTerminalProtocol.CATALOG];
     var client=new RpcWorkspaceWorkbenchClient(endpoint,() -> 0.0);
     var lists=0, opened=false;
@@ -69,7 +55,7 @@ class TerminalCapabilitiesTests {
       context.respond({id:request.id,cwd:"/fixture",state:"running",exitCode:0,columns:80,rows:24,start:0,end:0});
     });
     var step=function() { connection.poll();server.poll();connection.poll();client.poll(); };
-    client.poll();client.refreshTerminals(false);
+    client.poll();
     for (_ in 0...5) step();
     require(lists==1,"Initial terminal catalog was not requested");
     var backend=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",true);
@@ -81,9 +67,9 @@ class TerminalCapabilitiesTests {
     }
     var catalog=client.terminalCatalog();
     require(lists==2 && catalog!=null && catalog.terminals.length==1,
-      "Confirmed creation waited for the periodic catalog timer or accepted a stale in-flight snapshot");
-    for (_ in 0...5) { client.refreshTerminals(false);step(); }
-    require(lists==2,"Creation invalidation disabled idle catalog throttling");
+      "Confirmed creation did not read the catalog again, or accepted a stale in-flight snapshot");
+    for (_ in 0...5) step();
+    require(lists==2,"An idle client listed terminals again");
     var attached=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",false);
     attached.pollEvents(function(_) {});for (_ in 0...5) step();
     require(lists==2,"Reattaching an existing terminal invalidated the catalog");

@@ -98,8 +98,8 @@ atomically with the screen and byte offset. A trimmed journal produces
 `replay_gap`; the client restores that snapshot before resuming replay. Clients
 apply geometry from replay records, never from current-state metadata or
 unacknowledged resize requests. Daemons without method 138 use atomic screen
-snapshots rather than replaying historical bytes at current dimensions. Existing
-byte-only method 111 and its vectors retain their identities.
+snapshots rather than replaying historical bytes at current dimensions. The
+byte-only method 111 was retired on 2026-11-15; its id is not reused.
 
 Terminal OPEN (110) adds optional field 9, `watch`. A daemon supporting change
 notifications returns optional TerminalInfo field 12, `notifications: true`.
@@ -161,8 +161,9 @@ vectors above grew by one entry; the legacy forms still decode (`order` reads as
 
 The legacy four-field group/six-field rename vectors still decode. Current codecs
 also encode the nullable tree fields; legacy decoders skip those unknown IDs.
-Method 105 requires `workspace.groups.tree` and uses create/update rather than
-overloading method 102's rename behavior.
+Method 105 requires `workspace.groups.tree` and uses create/update/delete. Methods
+102 (rename only) and 103 (outcome lookup) were retired on 2026-11-15; their ids are
+not reused.
 
 | Value | Canonical hex |
 | --- | --- |
@@ -189,17 +190,15 @@ structured round trip on each supported wire target. Item retention is capped at
 request bounds.
 
 
-## Workspace refs and the catalog watch (M19 Phase 0)
+## Workspace refs and the catalog watch
 
-Status: **proposed, pending the mobile-app review.** The ids below are reserved and frozen by
-`RpcCompatibilityTests.catalogVectors`. No service implements them yet, so nothing changes behaviour.
+Frozen by `RpcCompatibilityTests.catalogVectors`.
 
 `WorkspaceRef {1 machine, 2 workspace}` names a workspace by suit's machine id and the workspace's id in that
-machine's catalog ([ADR 0006](../architecture/0006-workspaces-without-folders.md)). Folders are attributes of a
+machine's catalog ([ADR 0006](architecture/0006-workspaces-without-folders.md)). Folders are attributes of a
 workspace, not its name. Every new request carries a ref. Existing requests (methods 100–169) keep their
-`workspace:String` field 1 unchanged: today every client sends `"workspace"`, meaning the connection's service.
-From M19 Phase 4 that field carries `ref.workspace`, and `"workspace"` stays an alias for the connection's own
-service. No existing method or field id changes.
+`workspace:String` field 1: it carries `ref.workspace`, and `"workspace"` is an alias for the connection's own
+service. No existing method or field id changed.
 
 The catalog watch is negotiated as `workspace.catalog` (`WorkspaceCatalogProtocol.hx`):
 
@@ -221,9 +220,8 @@ Rules:
 - A catalog holds no content: no activity, output or file data. Clients read those with the existing methods.
 - What a read lists follows the connection's other grants, not `workspace.catalog` alone: groups need
   `workspace.read`, sessions `workspace.agents.read` and terminals `workspace.terminals.read`. A connection holding
-  only `workspace.catalog` gets the workspace's own fields and no items. The editor's catalog pool therefore
-  requests the three read capabilities together with `workspace.catalog` (it never asks for a write or control
-  capability). A listing-level grant (a `catalog` grant that lists ids and names without the read grants) is a
+  only `workspace.catalog` gets the workspace's own fields and no items. A window's link (`WorkspaceLink`) asks for
+  the read grants together with `workspace.catalog`. A listing-level grant (a `catalog` grant that lists ids and names without the read grants) is a
   possible later refinement for devices that should see the tree but not read content; it is not defined.
 - No `resume`, or a token the service does not know (another instance, or trimmed), gives `reset: true`: the
   reply replaces everything the client holds. A known token gives what changed after it: records to upsert and
@@ -246,8 +244,8 @@ Rules:
 - A session's `attention` counts its pending requests, plus one when its state is `needs-attention`. The page's
   `attention` counts the whole workspace.
 - A ref with an empty or over-long id, or an empty or over-long `resume`, is `invalid_request` (`validQuery`). A ref the service does not serve is
-  `unknown_workspace`. Until clients learn workspace ids (the editor from suit, devices in Phase 9), a service
-  treats workspace id `"workspace"` on its own machine as itself and replies with its real ref.
+  `unknown_workspace`. A service treats workspace id `"workspace"` on its own machine as itself and replies with its
+  real ref.
 
 | Value | Canonical hex |
 | --- | --- |
@@ -261,10 +259,9 @@ The fixtures also fill a page with worst-case records of every kind (ids and nam
 three-byte characters, folders at 4096 bytes) and check that it fits `PAGE_BYTES` and, in its response envelope,
 the relay's message bound.
 
-## The machine directory and workspace streams (M19 Phase 9)
+## The machine directory and workspace streams
 
-Status: **proposed for the phone-side worker; frozen by `RpcCompatibilityTests.machineDirectoryVectors`.**
-`MachineDirectoryProtocol.hx`. ADR 0005 section 4: a device pairs once with the machine (suit's relay identity), is
+Frozen by `RpcCompatibilityTests.machineDirectoryVectors`; `MachineDirectoryProtocol.hx`. ADR 0005 section 4: a device pairs once with the machine (suit's relay identity), is
 granted workspaces, and reaches them through suit. Pairing itself is unchanged (invitation, Noise XX-style
 handshake, code comparison, approval) but its peer is suit and its `machineId` is the machine's.
 
@@ -340,53 +337,12 @@ suit's control endpoint answers JSON, not MessagePack. `machine`, and every op t
 - `folders` may be empty. `scratch` is null until suit has made the scratch folder.
 - `revision` counts changes to that workspace (rename, folders, scratch). A version 1 file, or a reply without
   it, reads as 0.
-- `service` is the workspace's service, or null when suit does not know one. Phase 0 always reports null. suit
-  fills it in once services are keyed by workspace (Phase 4). `MachineCatalog.decodeService` reads it.
+- `service` is the workspace's running service as it reported itself to suit, or null when none runs.
+  `MachineCatalog.decodeService` reads it.
 - `version` is the reply's own version (`MachineCatalog.REPLY_VERSION`), not machine.json's.
 - Clients ignore fields they do not know. `SuitUnitTests.machineReply` freezes this shape.
 
-### Phase 0 and the mobile app
-
-The paused `mobile-app` branch has two clients. Both pair with one workspace service through the relay.
-
-The Kotlin client (`android/app/.../remote/WorkspaceRpcClient.kt`) It handshakes as `exosuit-editor/1`, offering `workspace.read`, `workspace.identity`
-and `workspace.agents.read`/`control`. It sends `"workspace"` as field 1 of every request, reads the root and
-instance from identity (104), and polls groups (100) and the agent list (120) every second while in the
-foreground. It reads and drives sessions with 121–123 and 127/128. It drops every notification envelope
-(`if (kind == 8) continue` in `call`), and reads only inside a call.
-
-The Haxe client (`android/haxe-remote/src/`) runs the shared Workbench. `RemoteWorkbench.hx` polls QUERY (100)
-every 1000 ms and lists terminals with the terminal catalog (115). `SavedRemoteWorkspace.hx` takes the identity
-root (104) as the workspace's one folder: it scopes files (`fileScope`), source control (`"workspace:" + root`)
-and, through `RpcWorkspaceWorkbenchClient`, the agent delivery state by that root.
-
-Phase 0 changes none of that. To adopt it, the mobile branch would:
-
-1. Offer `workspace.catalog`. When it is negotiated, replace the one-second polls (100 and 120 in Kotlin, 100
-   and 115 in Haxe) with `CATALOG` (`watch: true`), and read again with the last token on `CHANGED`. Keep the
-   polls for services without it. The Kotlin client first needs a receive loop that delivers notifications
-   between calls instead of dropping them; the Haxe client already has one (`RpcConnection`, as terminal watch
-   uses).
-2. Send `WorkspaceRef {machine: the paired machine id, workspace: "workspace"}` until it knows the workspace's
-   id, then the `ref` from the reply.
-3. Build `RemoteWorkspaceSnapshot` from the catalog. Use the workspace's `name` and `folders` instead of a label
-   derived from the identity root (a workspace may have no folders), use `CatalogSession.directory` instead of
-   `AgentRecord.cwd`, and show `attention`.
-4. In the Haxe client, key saved state by the ref instead of the root: delivery state and the source control
-   identity by `ref`, file and source control scope by each of `folders`, and a workspace with no folders shows
-   the empty state with its `scratch` folder as where new sessions start. The identity root stays the folder of
-   the service the connection reaches until Phase 4.
-5. Leave session views, prompts, snapshots and discovery (121–128) as they are.
-
-Open questions for the mobile review:
-
-- Should `CATALOG` also be how a device learns the workspaces on a machine (one connection per machine through
-  suit, Phase 9), or stay one connection per workspace service as now?
-- Do sessions need a last-activity time for sorting, and terminals a source of attention (bell, exit)?
-- Are three removal lists better than one list of `{kind, id}`?
-- Should identity (104) return the ref too? That would change its frozen vector, so for now it does not.
-
-## Several folders in one service (M19 Phase 5)
+## Several folders in one service
 
 A workspace service serves every folder attached to its workspace; the file and source control services already
 addressed folders by root id. These additions are optional fields and one new method. Existing ids are unchanged.
@@ -395,14 +351,13 @@ addressed folders by root id. These additions are optional fields and one new me
   is `{id: r, name: n, capabilities: [stat], path: /p}`.
 - `FileSearchMatch` field 8 `root`: the root a match is under (a search is per root, so it equals the page's root).
   `8801a5612e74787402a466696c6503a372657604020505060607a66e6565646c6508a172` is the existing match with root `r`.
-- `workspace.folders.manage` (same-user local peers only, like the lifecycle capability) and method 153 `SET`:
+- `workspace.folders.manage` (same-user local peers only) and method 153 `SET`:
   request `{folders}` (`810191a22f61` for `["/a"]`), reply `{folders, roots}` (`820191a22f610201`). The service
   serves exactly those folders, starts and stops their file watches, and records them in `workspace.json`.
 - A folder keeps its root id while attached; an id is never reused for another folder, and a folder attached
   again gets a new one. The first root is still `root` while its folder stays.
 
-Compatibility: an older agent does not offer the capability (the editor tells the user to restart the service), and
-an older client ignores the new fields. Two `@:wire` typedefs of the same shape make the compiler fail (see
+Compatibility: an older agent does not offer the capability, and an older client ignores the new fields. Two `@:wire` typedefs of the same shape make the compiler fail (see
 `docs/haxeon-compiler-bugs.md`), so the reply has a second field.
 
 A `FileSearchMatch` with no root now encodes field 8 as nil, so the search page vector in `RpcCompatibilityTests`

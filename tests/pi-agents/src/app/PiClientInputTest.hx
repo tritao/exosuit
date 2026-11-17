@@ -1,5 +1,6 @@
 package app;
 
+import testing.TestEndpoint;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import workspace.service.WorkspaceAgentProtocol;
@@ -21,7 +22,9 @@ class PiClientInputTest {
    require(q.request=="token-"+sequence,"Submission reused a token while history was loading");
    sequence++;ctx.respond(view("token-"+sequence,sequence==1));
   });
-  var client=new workspace.client.RpcWorkspaceWorkbenchClient(new PiClientEndpoint(connection),clock);
+  var endpoint=new TestEndpoint(connection);endpoint.generation="test";endpoint.epoch=null;endpoint.groups=false;endpoint.events=false;
+  endpoint.grants=[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL];
+  var client=new workspace.client.RpcWorkspaceWorkbenchClient(endpoint,clock);
   client.poll();client.agentAction("a","read","",null);server.poll();connection.poll();
   client.agentAction("a","queue","first",null,null,null,function() accepted++);server.poll();connection.poll();server.poll();
   require(pending==null && accepted==1,"First action eagerly loaded older history");
@@ -39,15 +42,3 @@ class PiClientInputTest {
  }
 }
 
-private class PiClientEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final connection:RpcConnection;
- public function new(connection:RpcConnection) this.connection=connection;
- public function rootPath():Null<String> return "/fixture";
- public function serviceGeneration():String return "test";
- public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return null;
- public function rpcConnection():Null<RpcConnection> return connection;
- public function failureReason():Null<String> return null;
- public function supportsWorkspaceGroups():Bool return false;
- public function workspaceEpoch():Null<String> return null;
- public function hasCapability(value:String):Bool return value==WorkspaceAgentProtocol.READ || value==WorkspaceAgentProtocol.CONTROL;
-}

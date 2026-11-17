@@ -2,8 +2,8 @@ package app;
 
 import core.Application;
 import platform.Platform;
-import testing.model.ModelTextMetrics;
-import testing.model.ModelWorkbenchHost;
+import testing.HeadlessWorkbench;
+import ui.UiWorkbenchHost;
 import commandview.CommandView;
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
@@ -21,9 +21,8 @@ class CommandTestMain {
 		require(completion.CompletionItem.matching(suggestions, "").length == 3 && completion.CompletionItem.matching(suggestions, "missing").length == 0,
 			"completion filtering mishandled empty or unmatched prefixes");
 		require(completion.CompletionItem.matching([new completion.CompletionItem("日本語")], "日").length == 1, "completion filtering lost Unicode prefixes");
-		var metrics = new ModelTextMetrics("ignored-headlessly.ttf", 15),
-			application = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 320, 200, settings)),
-			root:ModelWorkbenchHost = cast application.root,
+		var application = new Application(HeadlessWorkbench.create),
+			root:UiWorkbenchHost = cast application.root,
 			registry = application.commands, keymap = application.keymap,
 			context = application.context, performed = 0;
 		application.newDocument();
@@ -137,7 +136,7 @@ class CommandTestMain {
 		}));
 		commandView.setComposition("日😀", 1, 1);
 		require(commandView.query == "" && commandView.compositionText == "日😀"
-			&& commandView.textInputArea(metrics.textWidth, 320).height == 24,
+			&& commandView.textInputArea(text -> text.length * 9, 320).height == 24,
 			"command composition mutated its query or lacked candidate placement");
 
 		commandView.textInput("f");

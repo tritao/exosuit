@@ -1,16 +1,12 @@
-# Pragtical Haxeon
+# Exosuit
 
-An editor implementation with its application core written in Haxeon,
-built on the NativeKit UIKit desktop host and Haxeon manifest builds.
+Exosuit is an editor and agent workbench written in Haxeon. Its parts are the desktop editor (`graphical/`), suit,
+the per-user daemon that owns the machine's workspaces and is the control plane (`suit/`), one workspace service
+process per running workspace with terminal hosts that outlive it (`agent/`), and remote clients on the phone
+(`android/`) and in the browser (`web/`) that reach a machine through a relay (`relay/worker/`). How they fit together:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-The NativeKit `DesktopUiHost` owns the window, GPU context, input devices,
-and main event loop. Application code (`ExosuitApp`) implements the
-reloadable `DesktopUiApplication` interface and manages editor state,
-documents, view trees, and command dispatch. UIKit provides layout,
-text widgets, docking workspace, and platform dialogs; NativeKit provides
-clipboard, file dialogs, and native services.
-
-## Build and test
+## Build and run
 
 Haxeon is pinned as a submodule at `haxeon`, including its UI,
 platform, GPU, and NativeKit dependencies. Initialize the submodules and
@@ -21,10 +17,6 @@ git submodule update --init --recursive
 ./haxeon/scripts/bootstrap-tools.sh
 (cd haxeon && ./scripts/build-native.sh)
 ```
-
-The text model is supplied by `haxeon/packages/editor` (`haxeon.editor`).
-The desktop build uses the Haxeon submodule and its nested native dependencies.
-The browser build still uses Materia’s SceneKit and browser build helpers.
 
 `HAXEON_ROOT` and `HAXEON_BIN` can override the compiler used by scripts;
 package manifests remain pinned to the submodule sources.
@@ -63,21 +55,16 @@ python scripts/build.py
 python scripts/run.py
 ```
 
-Run the editor against the real Haxeon language server without a visible desktop:
+Tests: `./scripts/test.sh` (Linux) or `scripts/test-windows.ps1`. They run against an isolated suit home and state,
+never the user's (see "Tests and isolation" in the architecture page). On Windows, launch programs and tests through
+`docs/benchmarks/perf-harness/run-guarded.ps1` (`CLAUDE.md`).
 
-```sh
-bash scripts/test-real-language-ui.sh
-```
+The graphical application builds from `graphical/haxeon.json` (entry `app.GraphicalMain`). Headless tests build from
+`haxeon.json` (entry `app.Main`). More in [docs/getting-started.md](docs/getting-started.md).
 
-This Xvfb scenario checks diagnostics and Problems clearing, keyboard completion
-and acceptance, go-to-definition, hover and dismissal, rename, undo/redo, and
-saving. It also exercises unsaved overlays against repository sources without
-saving those edits. It also opens `EditorMinimap.hx` with overlapping source folders
-and with only the repository root open, checking imports and navigation to the
-core `Document` dependency and native wrapper sources. It checks F12, Ctrl+click,
-the editor context menu, and back/forward cursor restoration. The runner retains its temporary fixture and logs on failure;
-set `REAL_LANGUAGE_UI_ARTIFACTS=/tmp/lsp-ui-results` to collect artifacts on success
-as well. The scenario is included in `scripts/ci.sh`. Completion popups use theme colors,
+## Editing
+
+The editor uses the real Haxeon language server. Completion popups use theme colors,
 show symbol kinds and provider details/documentation, and support arrow navigation,
 Tab/Enter acceptance, Escape dismissal, and mouse selection. Filtering preserves
 provider order and insertion text. Go to Definition supports F12 and Ctrl+Alt+G,
@@ -94,11 +81,6 @@ progress; editing, moving the cursor, or changing tabs cancels the request. Navi
 outranks background semantic coloring and interrupts diagnostics, which resume afterward.
 With verbose Haxeon logging enabled, navigation logs include readiness and total time,
 and server timing notifications separate queue wait, analysis, and execution time.
-To run focused popup checks headlessly:
-
-```sh
-DECORATION_UI_PHASES='popup-completion popup-completion-long popup-completion-wrap popup-live-completion popup-completion-mouse popup-completion-dismiss' bash scripts/test-decoration-ui.sh
-```
 
 The graphical workbench follows the system light/dark preference on launch.
 Use `python scripts/run.py --theme=dark` or `--theme=light` to override it.
@@ -133,6 +115,14 @@ brackets, and incomplete code uses conservative fallback behavior. Reindent
 Selection and Reindent Document are available in Commands for Haxe files; each
 changes leading indentation as one undoable operation, preserving selections
 and multiline literal/comment contents. Opening a file never rewrites whitespace.
+
+The command palette exposes **Format Document** and **Format Selection** when the
+Haxe language server advertises those capabilities. Formatting uses the resolved
+document indentation settings and is undoable. Replies are discarded if the
+document, selection, active view, or server session changes while waiting. The
+bundled Haxeon server supports explicit formatting, but does not advertise
+on-type formatting; Enter therefore uses the local indentation policy. Reindent
+remains a separate, whitespace-only operation.
 
 ## DevTools
 
@@ -180,19 +170,6 @@ The viewer uses NativeKit's bounded local transport. HLDI decoding runs in a boo
 process, reusing `ProfilerService`; its output worker coalesces live snapshots so a slow viewer does
 not block the decoder. Runtime profiler buffer pressure is still visible through its stall counters.
 
-Focused validation (Linux/X11):
-
-```sh
-./haxeon/scripts/haxeon run --project tests/devtools/haxeon.json
-xvfb-run -a python scripts/test-devtools.py
-xvfb-run -a python scripts/benchmark-devtools.py
-```
-
-The smoke test covers local attachment, selection, deltas, detailed events, reconnect, a slow
-profiler consumer, HLPC recording/export, separate-window rendering and offline inspection loading.
-The synthetic overhead runner compares a continuously rendered 202-node UI with no client, an idle
-client, inspection and detailed tracking, writing results under `build/devtools-overhead`.
-
 ## Local stable build
 
 Save the current host build outside the disposable build directories, then launch
@@ -214,9 +191,7 @@ On Windows, taskbar pins use the promoted launcher and icon under the stable
 directory, so reopening restores the stable environment and follows the current
 snapshot after saves or rollbacks.
 
-The graphical application builds from `graphical/haxeon.json` (entry
-`app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
-`app.Main`); see `scripts/test.sh` for the test suite.
+## Icon
 
 The desktop window icon is embedded in the app and packaged runtime. To update it,
 edit `graphical/assets/icons/exosuit-mark.svg` or the background in
@@ -232,90 +207,22 @@ The generator refreshes `icon.png`, the SVG and PNG assets, and
 `graphical/src/app/ApplicationIcons.hx`. Normal builds use the checked-in embedded
 pixels and do not require the image-generation dependencies.
 
-Haxeon and its nested dependencies are pinned by Git submodule commits.
-Use `git submodule update --init --recursive` after pulling dependency updates.
-
-See [the NativeKit UIKit host architecture](docs/architecture/0002-nativekit-uikit-host.md).
-
-## Architecture
-
-The graphical editor runs on a separate build manifest (`graphical/haxeon.json`)
-to avoid requiring every headless test project to link UIKit's GPU toolkit.
-The headless core (`haxeon.json`) provides the editor's model layer, platform
-ABI, and command infrastructure; the graphical layer adds the UI shell,
-docking workspace, and document rendering.
-
-Text editing is backed by `haxeon.editor.TextDocument`, which the editor's
-`TextBuffer` mirrors to enable plugin/LSP subscriber access to all edits
-regardless of whether they originate from the text widget, buffer API, or
-search/replace operations.
-
 ## Browser build
 
-`./web/build.sh` builds the editor with a session filesystem in the browser.
-`./web/test.sh` checks real keyboard editing and saving through headless Chrome.
-Both Wasm targets are supported; see [web/README.md](web/README.md) for setup,
-capabilities and the opt-in CI stage.
+`./web/build.sh` builds the editor for the browser and `./web/test.sh` checks it through headless Chrome; see
+[web/README.md](web/README.md).
 
-## Known limitations and open gaps
+## Documents
 
-The UIKit shell uses the shared application controllers. The Problems panel
-reads live diagnostics, Build Output streams task output with clickable
-locations, and the palette exposes bridged document, project, build and
-language commands. Hover, completion and signature-help overlays are wired.
-Source plugins use the embedded compiler/runtime; compatible and structural
-hot reloads pass headless and real-window automation. Syntax colors, plugin
-backgrounds, diagnostic wavy underlines and search highlights render through
-retained UIKit text layouts. Bracket matches and full-width current-line
-backgrounds follow the shared primary caret. Multiple selections/carets render,
-and multi-caret insertion, cut/paste and deletion use buffer transactions.
-Keyboard navigation moves all carets through UIKit's shaped layout.
-
-- M9.1's accepted Linux typing runs measured 37.79 ms p95 for small Unicode,
-  39.47 ms for a 1 MiB single line and 30.96 ms for 10 MiB multiline text.
-  Unchanged shaped rows retain their identity; see the execution ledger for scope.
-- Primary caret/selection changes now flow between the widget and model, including
-  command-driven placement. Language popups follow the visible caret and dismiss
-  when scrolling clips it or the active document changes.
-- Files and Search share a sidebar with persisted mode, visibility and separate
-  widths. Search provides virtualized results, navigation and transactional
-  replacement previews, and refreshes after open-document edits.
-- Documents and terminals share editor tab bars across DockWorkspace splits.
-  Pane focus, tab movement and pane closure are available through commands;
-  sessions preserve pane membership, selections, scroll and terminal profiles.
-- Wrapped text shares its shaped geometry with the gutter and selection. Editor,
-  tab and file-tree command menus support right-click, Shift+F10 and the Menu key.
-- Editor wheel scrolling uses configurable time-based smooth motion. Physical
-  IME and non-Linux acceptance remain pending.
-
-Both compiler modes, release packaging and real-window automation pass the
-claimed Linux scope in [M8](docs/roadmap/08-uikit-baseline.md). See the
-[execution ledger](docs/roadmap/STATUS.md) for current verification evidence.
-
-See [docs/architecture/0002-nativekit-uikit-host.md](docs/architecture/0002-nativekit-uikit-host.md)
-for migration notes and implementation details.
-
-## Implementation roadmap
-
-See the [implementation roadmap](docs/roadmap/README.md) for ordered milestones,
-acceptance checks and the core compiler typing policy. The
-[overnight handoff](docs/roadmap/OVERNIGHT.md) provides a launch prompt, and the
-[execution ledger](docs/roadmap/STATUS.md) tracks resumable progress.
-
-The command palette exposes **Format Document** and **Format Selection** when the
-Haxe language server advertises those capabilities. Formatting uses the resolved
-document indentation settings and is undoable. Replies are discarded if the
-document, selection, active view, or server session changes while waiting. The
-bundled Haxeon server supports explicit formatting, but does not advertise
-on-type formatting; Enter therefore uses the local indentation policy. Reindent
-remains a separate, whitespace-only operation.
-
-Paired browser workspaces expose New Terminal in Commands and through
-Ctrl+Shift+` when terminal read and control permissions are granted. The terminal
-runs on the connected workspace, using the selected Workbench group's inherited
-directory or the workspace root. The Terminal toolbar action and Ctrl+` open or
-hide the terminal panel outside Workbench; inside Workbench, new terminals open
-as editor tabs. New sessions claim available input control without taking it
-from another client. Closing a view never terminates the workspace shell;
-Terminate Active Terminal is the explicit stop action. Reconnects reuse the
-same session IDs, and retries cannot create a second shell for the same ID.
+| Document | What |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | suit, the editor, workspace services, terminal hosts, devices, the control plane, tests |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | open work |
+| [docs/architecture/](docs/architecture/) | decision records |
+| [docs/design/](docs/design/) | the Workbench and suitctl designs, terminal hosts, agent sessions, the sessions UI |
+| [docs/RPC-VECTORS.md](docs/RPC-VECTORS.md) | the workspace protocol's frozen wire vectors |
+| [suit/README.md](suit/README.md), [agent/README.md](agent/README.md) | suit and the workspace service |
+| [docs/mobile/](docs/mobile/) | the phone app, its local end-to-end rig, the relay |
+| [docs/getting-started.md](docs/getting-started.md), [docs/configuration.md](docs/configuration.md), [docs/recovery.md](docs/recovery.md), [docs/build-tasks.md](docs/build-tasks.md), [docs/plugin-development.md](docs/plugin-development.md), [docs/plugin-api.md](docs/plugin-api.md) | using and extending the editor |
+| [docs/nativekit.md](docs/nativekit.md), [docs/native-bindings.md](docs/native-bindings.md) | the native layer |
+| [docs/haxeon-compiler-bugs.md](docs/haxeon-compiler-bugs.md), [docs/compiler-typing.md](docs/compiler-typing.md) | compiler bugs met here, and the typing policy |
