@@ -1,7 +1,7 @@
 package ui;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import commandview.CommandView;
 import commandview.CommandViewProvider;
 import completion.CompletionItem;
@@ -182,7 +182,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var problemActivationHandler:Problem->Void = function(problem) {};
 	var buildDiagnosticHandler:BuildDiagnostic->Void = function(diagnostic) {};
 	public var currentBuildTitle(default, null):String = "";
-	public var currentBuildOutput(default, null):Null<BuildOutput>;
+	public var currentBuildOutput(default, null):Null<BuildLog>;
 	var selectedExplorerPath:Null<String>;
 
 	public final commandView:CommandView = new CommandView();
@@ -2055,7 +2055,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function setBuildDiagnosticHandler(handler:BuildDiagnostic->Void):Void buildDiagnosticHandler = handler;
 	public function activateBuildDiagnostic(diagnostic:BuildDiagnostic):Void buildDiagnosticHandler(diagnostic);
 
-	public function showBuildOutput(title:String, output:BuildOutput):Void {
+	public function showBuildOutput(title:String, output:BuildLog):Void {
 		currentBuildTitle = title;
 		currentBuildOutput = output;
 		if (dockActions != null) dockActions.activateBuild();

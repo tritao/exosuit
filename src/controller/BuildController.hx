@@ -1,7 +1,7 @@
 package controller;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import build.BuildTask;
 import build.BuildTaskCodec;
 import command.CommandContext;
@@ -20,7 +20,7 @@ import workspace.Workspace;
 class BuildController {
 	static inline final PROBLEM_OWNER = "build";
 	public final available:Bool;
-	public final output:BuildOutput = new BuildOutput();
+	public final output:BuildLog = new BuildLog();
 	public var active(default, null):Null<OwnedProcess>;
 	/** In live mode, the watcher's rebuilds and patches (LiveBuildFeed); null otherwise. */
 	public var live(default, null):Null<LiveBuildFeed>;

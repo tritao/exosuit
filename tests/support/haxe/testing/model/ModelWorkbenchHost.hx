@@ -4,7 +4,7 @@ import view.View;
 import view.LayoutKind;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import commandview.CommandViewProvider;
 import completion.CompletionItem;
 import core.DocumentManager;
@@ -759,7 +759,7 @@ class ModelWorkbenchHost implements WorkbenchHost {
 	public function setBuildDiagnosticHandler(handler:BuildDiagnostic->Void):Void
 		buildDiagnosticHandler = handler;
 
-	public function showBuildOutput(title:String, output:BuildOutput):Void {
+	public function showBuildOutput(title:String, output:BuildLog):Void {
 		var view = new ModelBuildOutputView(output, metrics, theme, activeLeaf.width, activeLeaf.height, buildDiagnosticHandler);
 		view.setTitle(title);
 		openAuxiliary(view);
