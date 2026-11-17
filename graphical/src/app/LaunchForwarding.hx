@@ -96,11 +96,7 @@ class LaunchForwarding {
 		return {path: sys.FileSystem.absolutePath(argument), line: null, column: null};
 	}
 
-	/** A decimal number; `Std.parseInt` reads a leading 0 as octal in haxeon (docs/haxeon-compiler-bugs.md). */
-	static function decimal(text:String):Null<Int> {
-		if (!~/^[0-9]+$/.match(text)) return null;
-		var result = 0;
-		for (index in 0...text.length) result = result * 10 + (text.charCodeAt(index) - 48);
-		return result;
-	}
+	/** A decimal number written with digits only. */
+	static function decimal(text:String):Null<Int>
+		return ~/^[0-9]+$/.match(text) ? Std.parseInt(text) : null;
 }

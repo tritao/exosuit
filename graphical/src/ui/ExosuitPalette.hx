@@ -1,6 +1,11 @@
 package ui;
 
 import haxeon.ui.Color;
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.style.BackgroundDecoration;
+import haxeon.ui.style.BorderDecoration;
+import haxeon.ui.style.DecorationChain;
 import style.WorkbenchColors;
 import haxeon.ui.theme.Theme;
 import haxeon.ui.style.StyleSelector;
@@ -99,6 +104,23 @@ class ExosuitPalette {
 		sheet.rule(StyleSelector.widget("button").className("chrome-action").state(StyleState.Pressed), [StyleValue.background(tokens.surfaceSunken)]);
 		sheet.rule(StyleSelector.widget("button").className("navigation").className("chrome-action").state(StyleState.Selected), [StyleValue.background(tokens.surfaceHover)]);
 		sheet.rule(StyleSelector.widget("button").className("chrome-action").state(StyleState.Disabled), [StyleValue.background(transparent)]);
+
+		// Menu rows and tooltips keep the look they had before haxeon refined them (rows 8/4 padding, square, focus on
+		// selectionField; tooltips outlined).
+		sheet.rule(StyleSelector.widget("button").className("menu-item"), [
+			StyleValue.height(LayoutAxis.fit()),
+			StyleValue.padding(new Insets(8.0, 4.0, 8.0, 4.0)),
+			StyleValue.radius(StyleProperty.RadiusTopLeft, 0.0),
+			StyleValue.radius(StyleProperty.RadiusTopRight, 0.0),
+			StyleValue.radius(StyleProperty.RadiusBottomRight, 0.0),
+			StyleValue.radius(StyleProperty.RadiusBottomLeft, 0.0)
+		]);
+		sheet.rule(StyleSelector.widget("button").className("menu-item").state(StyleState.Focused),
+			[StyleValue.background(tokens.selectionField)]);
+		sheet.rule(StyleSelector.widget("tooltip"), [
+			StyleValue.borderColor(tokens.border), StyleValue.borderWidth(1.0),
+			StyleValue.decorations(DecorationChain.of([new BackgroundDecoration(), BorderDecoration.deviceHairline()]))
+		]);
 
 		sheet.rule(StyleSelector.widget("selection-popup"), [
 			StyleValue.borderColor(tokens.border),

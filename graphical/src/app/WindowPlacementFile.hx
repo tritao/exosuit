@@ -27,8 +27,7 @@ class WindowPlacementFile {
 			var text = StringTools.trim(File.getContent(path));
 			var parts = text.split(" ");
 			if (parts.length != 5) return null;
-			var numbers = [for (index in 0...4) Std.parseInt(parts[index])];
-			for (number in numbers) if (number == null) return null;
+			var numbers:Array<Int> = [for (index in 0...4) Std.parseInt(parts[index]) ?? 0];
 			if (numbers[2] <= 0 || numbers[3] <= 0) return null;
 			saved = text;
 			return new WindowPlacement(numbers[0], numbers[1], numbers[2], numbers[3], parts[4] == "maximized");

@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiEventPhase;
 import haxeon.ui.core.UiKey;
 import haxeon.ui.core.View;
 import haxeon.ui.semantics.AccessibilityRole;
@@ -24,20 +25,20 @@ class ExplorerTreeInput implements View {
 			if (node.semantics != null && node.semantics.role == AccessibilityRole.TreeItem)
 				node.on(UiEventKind.Focus, function(_) { if (onFocus != null) onFocus(); });
 		});
-		root.on(UiEventKind.PointerDown, function(_) { if (onFocus != null) onFocus(); }, "capture");
+		root.on(UiEventKind.PointerDown, function(_) { if (onFocus != null) onFocus(); }, UiEventPhase.Capture);
 		root.on(UiEventKind.KeyDown, function(event) {
 			var target = root.find(event.target);
 			while (target != null && target != root) {
 				if (target.semantics != null && target.semantics.role == AccessibilityRole.TextField) return;
 				target = target.parent;
 			}
-			if (event.modifiers != 0 || runCommand == null) return;
+			if (!event.modifiers.isEmpty() || runCommand == null) return;
 			var command = event.key == UiKey.Delete ? "file:delete" : event.key == UiKey.F2 ? "file:rename" : null;
 			if (command == null) return;
 			event.preventDefault();
 			event.stopPropagation();
 			runCommand(command);
-		}, "capture");
+		}, UiEventPhase.Capture);
 		return root;
 	}
 }

@@ -70,22 +70,21 @@ class AgentAttachPanel implements View {
 			var selected = thread;
 			var buttonStyle = new LayoutStyle(); buttonStyle.width = LayoutAxis.stretch();
 			var button = new Button(thread.title == "" ? "Untitled thread" : thread.title, buttonStyle,
-				function() attach(selected.id), "attach-thread-" + thread.id);
-			button.enabled = enabled;
+				function() attach(selected.id), "attach-thread-" + thread.id, enabled);
 			results.push(new KeyedView(thread.id, button));
 		}
 		if (results.length == 0) results.push(new KeyedView("empty", new Text(found == null && service.agentError() == null
 			? "Finding threads…" : threads.length == 0 ? "No threads found in this directory." : "No matching threads.")));
 		if (found != null && found.next != null) {
-			var more = new Button("More threads", null, function() service.discoverAgents(group.id, found.next), "codex-more-threads");
-			more.enabled = enabled; results.push(new KeyedView("more", more));
+			var more = new Button("More threads", null, function() service.discoverAgents(group.id, found.next), "codex-more-threads", enabled);
+			results.push(new KeyedView("more", more));
 		}
 		var listStyle = new LayoutStyle(); listStyle.width = LayoutAxis.stretch(); listStyle.childGap = 4;
 		var viewportStyle = new LayoutStyle(); viewportStyle.width = LayoutAxis.stretch(); viewportStyle.height = LayoutAxis.fixed(220);
 		var id = new TextField("workbench-attach-thread", threadId, function(value) { threadId = value; requestFrame(); });
 		id.label = "Existing Codex thread id"; id.placeholder = "Or paste a thread ID";
-		var attachButton = new Button("Attach Codex thread", null, function() attach(StringTools.trim(threadId)), "workbench-attach-codex");
-		attachButton.enabled = enabled && StringTools.trim(threadId) != "";
+		var attachButton = new Button("Attach Codex thread", null, function() attach(StringTools.trim(threadId)), "workbench-attach-codex",
+			enabled && StringTools.trim(threadId) != "");
 		var rows:Array<KeyedView> = [new KeyedView("scope", new Text("Group: " + group.name)),
 			new KeyedView("directory", new Text(cwd, null, context.theme.tokens.textSecondary, null, haxeon.ui.theme.TextRole.Caption)),
 			new KeyedView("search", search), new KeyedView("results", new ScrollView("codex-thread-results",
@@ -93,8 +92,8 @@ class AgentAttachPanel implements View {
 			new KeyedView("id", id), new KeyedView("attach", attachButton)];
 		if (service.agentError() != null) {
 			rows.push(new KeyedView("error", new Text(service.agentError())));
-			var retry = new Button("Retry discovery", null, function() service.discoverAgents(group.id, null), "codex-retry-discovery");
-			retry.enabled = enabled; rows.push(new KeyedView("retry", retry));
+			var retry = new Button("Retry discovery", null, function() service.discoverAgents(group.id, null), "codex-retry-discovery", enabled);
+			rows.push(new KeyedView("retry", retry));
 		}
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 8;
 		return new Column("codex-attach", rows, style).build(context);

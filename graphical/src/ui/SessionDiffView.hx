@@ -37,16 +37,16 @@ class SessionDiffView implements View {
     this.source = source; this.copySource = copySource == null ? source : copySource; this.reportedFiles = reportedFiles;
   }
 
-  static function action(label:String, handler:Void->Void, key:String):Button {
+  static function action(label:String, handler:Void->Void, key:String, ?leadingIcon:IconName, ?iconSize:Float, ?accessibilityLabel:String,
+      ?ellipsizeLabel:Bool):Button {
     var style = new LayoutStyle(); style.height = LayoutAxis.fixed(30); style.padding = new Insets(8, 4, 8, 4);
-    var button = new Button(label, style, handler, key); button.variant = ButtonVariant.Navigation;
-    button.classes.push("viewport-tool"); return button;
+    return new Button(label, style, handler, key, null, ButtonVariant.Navigation, null, ["viewport-tool"], leadingIcon, null, null, null, null,
+      ellipsizeLabel, iconSize, accessibilityLabel);
   }
 
   public function build(context:BuildContext):RenderNode {
     var tokens = context.theme.tokens, rows:Array<KeyedView> = [];
-    var copy = action("", function() context.clipboard.writeText(copySource), "copy-diff");
-    copy.accessibilityLabel = "Copy diff"; copy.leadingIcon = IconName.Copy; copy.iconSize = 16;
+    var copy = action("", function() context.clipboard.writeText(copySource), "copy-diff", IconName.Copy, 16, "Copy diff");
     var top = new LayoutStyle(); top.width = LayoutAxis.grow(); top.childGap = 8;
     var title = new LayoutStyle(); title.width = LayoutAxis.grow();
     rows.push(new KeyedView("heading", new Row("diff-heading", [
@@ -79,8 +79,8 @@ class SessionDiffView implements View {
       var fileHeader = new LayoutStyle(); fileHeader.width = LayoutAxis.grow(); fileHeader.childGap = 6;
       var toggle = action((collapsed.value == true ? "▸ " : "▾ ") + file.title, function() {
         collapsed.update(collapsed.value != true);
-      }, "diff-file-toggle-" + index);
-      toggle.style.width = LayoutAxis.grow(); toggle.ellipsizeLabel = true;
+      }, "diff-file-toggle-" + index, null, null, null, true);
+      toggle.style.width = LayoutAxis.grow();
       var header:Array<KeyedView> = [new KeyedView("toggle", toggle),
         new KeyedView("counts", new Text("+" + additions + "  −" + removals
           + (index < truncations.length && truncations[index] ? " · partial" : ""), null, tokens.textSecondary, TextStyleOverride.text(12)))];

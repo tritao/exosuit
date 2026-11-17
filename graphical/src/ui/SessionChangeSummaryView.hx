@@ -45,9 +45,8 @@ class SessionChangeSummaryView implements View {
         var buttonStyle = new LayoutStyle(); buttonStyle.width = LayoutAxis.grow(); buttonStyle.height = LayoutAxis.fixed(30);
         buttonStyle.padding = new Insets(6, 4, 6, 4);
         var navigate:String->Void = cast openLink;
-        var button = new Button(path, buttonStyle, function() navigate(path), "change-file-" + index);
-        button.variant = ButtonVariant.Navigation; button.classes.push("viewport-tool"); button.ellipsizeLabel = true;
-        pathView = button;
+        pathView = new Button(path, buttonStyle, function() navigate(path), "change-file-" + index, null, ButtonVariant.Navigation, null,
+          ["viewport-tool"], null, null, null, null, null, true);
       } else pathView = new MiddleEllipsisText("change-file-" + index, path, true, TextStyleOverride.text(13));
       var rowStyle = new LayoutStyle(); rowStyle.width = LayoutAxis.grow(); rowStyle.childGap = 8;
       rows.push(new KeyedView("file-" + index, new Row("change-summary-" + index, [

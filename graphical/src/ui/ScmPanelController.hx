@@ -69,9 +69,16 @@ class ScmPanelController {
 			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover each unless a
 			// discovered root already covers it, which would only duplicate that root's polling.
 			if (scope != null) for (root in roots)
-				if (app.application.scm.repositories(root).length == 0) app.application.scm.discover(root, _ -> app.requestFrame());
+				if (app.application.scm.repositories(root).length == 0) app.application.scm.discover(root, discovered);
 		});
 	}
+	/**
+		A frame once a discovery started for a new source has finished. One that fails at once (source control disabled, a
+		folder that is gone) finishes inside the build that asked for the source: that build shows the result, and the
+		frame tick may not be bumped from inside a build.
+	**/
+	function discovered(_:scm.ScmJobResult<Array<scm.ScmRepository>>):Void
+		if (!haxeon.reactive.ReactiveRuntime.isTracking()) app.requestFrame();
 	/**
 		The source behind the editor's change markers and hunk actions. It never narrows to the Agents group's folder: a
 		file opened from anywhere keeps its markers. While the Source Control source narrows, this one covers the active
@@ -102,7 +109,7 @@ class ScmPanelController {
 		if (!controller.SavedWorkspaceController.available(folder)) folder = "";
 		return sessionScm.get(app.application.scm, roots, folder, Sys.time(), function(_) {
 			// A group folder may be any folder; discover it unless a discovered root already covers it.
-			if (folder != "" && app.application.scm.repositories(folder).length == 0) app.application.scm.discover(folder, _ -> app.requestFrame());
+			if (folder != "" && app.application.scm.repositories(folder).length == 0) app.application.scm.discover(folder, discovered);
 		});
 	}
 	/** The session's source (see sessionSourceControlSource); null without a session record. */
@@ -185,6 +192,11 @@ class ScmPanelController {
 		app.host.getPluginStatusItems().removeOwner("scm");
 		scmBranchStatus = null;
 	}
+	/**
+		Writes the source's explorer decorations and status bar items. The root build reads both registries' revisions
+		before it builds, so a host frame is enough when they change; it may also run inside the build that creates the
+		Source Control panel (see sourceControlPanel).
+	**/
 	function syncScmPresentation(source:ScmSource):Void {
 		if (source == null) return;
 		var decorationRegistry = app.host.getResourceDecorations();
@@ -237,7 +249,7 @@ class ScmPanelController {
 		}
 		if (repositories.length == 0) {
 			statusRegistry.removeOwner("scm"); scmBranchStatus = null;
-			if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) app.requestFrame();
+			if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) app.scheduleFrame();
 			return;
 		}
 		var activeRepository = repositories[0], snapshot = source.snapshot(activeRepository.id);
@@ -270,7 +282,7 @@ class ScmPanelController {
 			else registry.update(item, Std.string(count), priority, plugin.PluginStatusSide.Left,
 				icon, description, branchCommand);
 		}
-		if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) app.requestFrame();
+		if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) app.scheduleFrame();
 	}
 	function syncScmDocumentMarkers(now:Float):Void {
 		var source = editorSourceControlSource();

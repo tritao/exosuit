@@ -53,7 +53,7 @@ class RemoteMachinesPanel implements View {
 		for (machine in remote.machines) machineRows(rows, machine, context);
 		if (remote.authenticationCode != null) {
 			rows.push(new KeyedView("code-instruction", new Text("Compare this code with the machine, then confirm.")));
-			rows.push(new KeyedView("code", new Text(remote.authenticationCode, null, tokens.textPrimary, TextStyleOverride.text(28, TextWrap.None))));
+			rows.push(new KeyedView("code", new Text(remote.authenticationCode, null, tokens.textPrimary, new TextStyleOverride(null, 28, null, TextWrap.None))));
 			rows.push(new KeyedView("key-check", remote.machineKeyVerified ? new Text("The machine's key matches the invitation.", null, tokens.textSecondary)
 				: new Text("This invitation carries no machine key (it comes from an older desktop), so comparing the code is the only check.",
 					null, tokens.textSecondary)));
@@ -63,8 +63,7 @@ class RemoteMachinesPanel implements View {
 					+ "Confirming replaces the old pairing.", null, tokens.danger)));
 			if (!remote.codeConfirmed) {
 				var confirm = new Button(remote.machineKeyChanged ? "The code matches: replace the old pairing" : "The code matches", null,
-					remote.confirmCode, "phone-pairing-confirm");
-				confirm.variant = ButtonVariant.Primary;
+					remote.confirmCode, "phone-pairing-confirm", true, ButtonVariant.Primary);
 				rows.push(new KeyedView("confirm", confirm));
 			}
 		} else if (!remote.pairing) {
@@ -92,9 +91,7 @@ class RemoteMachinesPanel implements View {
 			var pair = new Button("Pair", null, function() {
 				if (remote.beginPairing(pairingUrl)) pairingUrl = "";
 				requestFrame();
-			}, "phone-pairing-start");
-			pair.variant = ButtonVariant.Primary;
-			pair.enabled = pairingUrl.length > 0;
+			}, "phone-pairing-start", pairingUrl.length > 0, ButtonVariant.Primary);
 			rows.push(new KeyedView("pair", pair));
 		}
 		if (remote.pairing)
@@ -147,8 +144,7 @@ class RemoteMachinesPanel implements View {
 		var button = new Button(label, null, function() {
 			remote.openWorkspace(machine, entry.workspace);
 			requestFrame();
-		}, "phone-workspace-" + entry.workspace.substr(0, 12));
-		if (isOpen) button.variant = ButtonVariant.Primary;
+		}, "phone-workspace-" + entry.workspace.substr(0, 12), true, isOpen ? ButtonVariant.Primary : null);
 		rows.push(new KeyedView("workspace:" + key, button));
 		if (mirror == null) return;
 		var shown = 0, total = 0;

@@ -87,11 +87,11 @@ class KeyCaptureView implements View {
 			default: Platform.KEY_UNKNOWN;
 		};
 
-	static function translateModifiers(modifiers:Int):Int {
+	static function translateModifiers(modifiers:UiModifier):Int {
 		var result = 0;
-		if ((modifiers & UiModifier.Shift) != 0) result |= Platform.MOD_SHIFT;
-		if ((modifiers & UiModifier.Control) != 0) result |= Platform.MOD_CTRL;
-		if ((modifiers & UiModifier.Alt) != 0) result |= Platform.MOD_ALT;
+		if (modifiers.contains(UiModifier.Shift)) result |= Platform.MOD_SHIFT;
+		if (modifiers.contains(UiModifier.Control)) result |= Platform.MOD_CTRL;
+		if (modifiers.contains(UiModifier.Alt)) result |= Platform.MOD_ALT;
 		// uikit's UiModifier.Super has no Platform.MOD_* counterpart (the
 		// headless key model predates any notion of a Cmd/Super chord); a
 		// Super-modified chord is reported with that bit dropped.

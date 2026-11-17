@@ -115,8 +115,7 @@ class SessionQuestionForm implements View {
    rows.push(new KeyedView("question-"+index,new Column("question-"+index,children,questionLayout)));
   }
   var answer=payload();
-  var button=new Button("Submit answers",null,function() { var current=payload(); if (current != null) submit(current); },key+"-submit");
-  button.enabled=answer != null;
+  var button=new Button("Submit answers",null,function() { var current=payload(); if (current != null) submit(current); },key+"-submit",answer != null);
   rows.push(new KeyedView("submit",button));
   if (enabled && answer == null) rows.push(new KeyedView("hint",new Text(oversized ? "Answers exceed the 8 KiB limit." : commaRestricted ? "Claude multiple-choice answers cannot contain commas." : "Answer each question to continue.",null,tokens.textSecondary,TextStyleOverride.text(12))));
   var layout=new LayoutStyle(); layout.width=LayoutAxis.grow(); layout.childGap=8;

@@ -1,5 +1,6 @@
 package ui;
 
+import config.Settings;
 import haxeon.ui.widgets.overlays.TooltipHoverGroup;
 
 import haxeon.ui.Rect;
@@ -10,7 +11,7 @@ import haxeon.ui.widgets.overlays.TooltipPlacement;
 /** Editor defaults for UIKit's positioned tooltip. */
 class TabTooltip extends Tooltip {
 	public function new(key:String, anchor:View, content:View, boundsProvider:Void->Rect,
-			delaySeconds:Float = config.Settings.DEFAULT_TOOLTIP_DELAY, placement:TooltipPlacement = Below,
+			delaySeconds:Float = Settings.DEFAULT_TOOLTIP_DELAY, placement:TooltipPlacement = Below,
 			?hoverGroup:TooltipHoverGroup, groupVisible:Bool = false) {
 		super(key, anchor, content);
 		this.boundsProvider = boundsProvider;

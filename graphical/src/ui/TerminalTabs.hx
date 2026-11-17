@@ -257,6 +257,7 @@ class TerminalTabs {
 				if (app.pendingTerminalFocus && app.host.activePanelTerminal() == terminal) {
 					app.ui.buildContext.requestFocusAfterLayout(id);
 					app.pendingTerminalFocus = false;
+					app.requestFrame();
 				}
 			}, function(event) {
 				app.host.activePanelTerminalIndex = app.host.panelTerminals.indexOf(terminal);

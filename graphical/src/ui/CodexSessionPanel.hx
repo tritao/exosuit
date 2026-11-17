@@ -132,10 +132,15 @@ class CodexSessionPanel implements View {
       }
     }
   }
+  /**
+    The build starts the load of the latest truncated message, and a frame request there would be a write during the
+    build: the caller asks for the frame, and an answer that arrives before this returns is already in the build.
+  **/
   function loadContent(client:WorkspaceAgentClient, session:String, item:workspace.service.WorkspaceAgentProtocol.AgentActivityItem, key:String):Void {
     if (contentLoading != null || item.contentToken == null) return;
     var token:String = cast item.contentToken;
-    contentLoading = key; contentErrors.remove(key); contentErrorTokens.remove(key); frame();
+    contentLoading = key; contentErrors.remove(key); contentErrorTokens.remove(key);
+    var returned = false;
     client.loadAgentContent(session,item.turn,item.id,token,function(text,partial,error) {
       contentLoading = null;
       var current = client.agentView(session), valid = false;
@@ -145,13 +150,16 @@ class CodexSessionPanel implements View {
         loadedContent.set(key,{token:token,text:text,partial:partial}); contentOrder.remove(key); contentOrder.push(key);
         var bytes=0; for (saved in contentOrder) { var entry=loadedContent.get(saved); if (entry != null) bytes+=haxe.io.Bytes.ofString(entry.text).length; }
         while (contentOrder.length > 16 || bytes > 4*1024*1024) {
-          var oldest=contentOrder.shift(), removed=loadedContent.get(oldest);
+          var oldest=contentOrder.shift();
+          if (oldest == null) break;
+          var removed=loadedContent.get(oldest);
           if (removed != null) bytes-=haxe.io.Bytes.ofString(removed.text).length;
           loadedContent.remove(oldest);
         }
       } else if (valid) { contentErrors.set(key,error == null ? "Message content is unavailable" : error); contentErrorTokens.set(key,token); }
-      frame();
+      if (returned) frame();
     });
+    returned = true;
   }
 
   static function paragraph(value:String):Text {
@@ -170,14 +178,13 @@ class CodexSessionPanel implements View {
     case _: "Unknown";
   }
 
-  static function quietButton(label:String, action:Void->Void, ?key:String):Button {
+  static function quietButton(label:String, action:Void->Void, ?key:String, ?enabled:Bool, ?leadingIcon:IconName, ?iconSize:Float,
+      ?accessibilityLabel:String, ?leadingView:View, ?ellipsizeLabel:Bool, ?onClickEvent:UiEvent->Void):Button {
     var compact = new LayoutStyle();
     compact.height = LayoutAxis.fixed(30);
     compact.padding = new Insets(8, 4, 8, 4);
-    var button = new Button(label, compact, action, key);
-    button.variant = ButtonVariant.Navigation;
-    button.classes.push("viewport-tool");
-    return button;
+    return new Button(label, compact, action, key, enabled, ButtonVariant.Navigation, null, ["viewport-tool"], leadingIcon, null,
+      leadingView, null, null, ellipsizeLabel, iconSize, accessibilityLabel, onClickEvent);
   }
 
   static function withTextContext(prompt:String, files:Array<SessionTextContext>):String {
@@ -374,8 +381,7 @@ class CodexSessionPanel implements View {
     field.placeholder = "Message " + providerName(view.record.provider) + "…";
     field.enabled = client.canControlAgents() && (connectionReady || promptResumes);
     var stop = new Button("Stop", null,
-      function() client.agentAction(id, "stop", "", null), "codex-stop");
-    stop.enabled = control && connectionReady;
+      function() client.agentAction(id, "stop", "", null), "codex-stop", control && connectionReady);
     var headerStyle = new LayoutStyle();
     headerStyle.width = LayoutAxis.grow();
     headerStyle.childGap = 12;
@@ -393,20 +399,17 @@ class CodexSessionPanel implements View {
     if (working || ((view.record.provider == "claude" || usesSupervisedModes(view.record.provider)) && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
     var permissionLabel = usesSupervisedModes(view.record.provider) ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
       view.record.sandboxPolicy, view.record.approvalPolicy);
-    var permissions = new Button("Permissions · " + permissionLabel + "  ▾", headerButtonStyle, null, "codex-permissions");
-    permissions.accessibilityLabel = "Permissions · " + permissionLabel + "  ▾";
-    permissions.leadingView = new SessionLineIcon("lock", tokens.textSecondary);
-    permissions.enabled = control && !working && view.requests.length == 0;
-    permissions.onClickEvent = function(event) {
-      if (permissions.enabled) openPermissionsMenu(client, id, view.record.thread, event);
-    };
+    var permissionsEnabled = control && !working && view.requests.length == 0;
+    var permissions = new Button("Permissions · " + permissionLabel + "  ▾", headerButtonStyle, null, "codex-permissions", permissionsEnabled,
+      ButtonVariant.Navigation, null, ["chrome-action"], null, null, new SessionLineIcon("lock", tokens.textSecondary), null, null, null, null,
+      "Permissions · " + permissionLabel + "  ▾", function(event) {
+        if (permissionsEnabled) openPermissionsMenu(client, id, view.record.thread, event);
+      });
     header.push(new KeyedView("details", quietButton(details ? "Hide session details" : "Session details", function() {
       details = !details;
       frame();
     }, "codex-details")));
     var rows:Array<KeyedView> = [new KeyedView("header", new Row("codex-header", header, headerStyle))];
-    permissions.variant = ButtonVariant.Navigation;
-    permissions.classes.push("chrome-action");
     var workspaceControls:Array<KeyedView> = [];
     var workspaceStrip:Null<KeyedView> = null;
     if (workspaceActions != null) {
@@ -414,10 +417,8 @@ class CodexSessionPanel implements View {
       var stripTrailing:Array<KeyedView> = [];
       var hasBranch = false;
       var groupStyle = new LayoutStyle(); groupStyle.width = LayoutAxis.fit(); groupStyle.childGap = 4;
-      var filesButton = quietButton("Files", workspaceActions.explore, "agent-open-files");
-      filesButton.leadingIcon = IconName.FolderOpen; filesButton.iconSize = 14;
-      var changesButton = quietButton("Review changes", workspaceActions.reviewChanges, "agent-review-changes");
-      changesButton.leadingIcon = IconName.Activity; changesButton.iconSize = 14;
+      var filesButton = quietButton("Files", workspaceActions.explore, "agent-open-files", null, IconName.FolderOpen, 14);
+      var changesButton = quietButton("Review changes", workspaceActions.reviewChanges, "agent-review-changes", null, IconName.Activity, 14);
       var navigation = new KeyedView("navigation", new Row("agent-workspace-navigation", [
         new KeyedView("files", filesButton),
         new KeyedView("changes", changesButton)
@@ -436,9 +437,9 @@ class CodexSessionPanel implements View {
         var label = worktreeLabel();
         var worktreeAction:Void->Void = cast workspaceActions.selectWorktree;
         var worktreeAvailable:Void->Bool = cast workspaceActions.canSelectWorktree;
-        var worktree = quietButton(label + " ▾", function() { if (menuValid() && worktreeAvailable()) worktreeAction(); }, "agent-select-worktree");
-        worktree.accessibilityLabel = "Select worktree"; worktree.leadingView = new SessionLineIcon("worktree", tokens.textSecondary);
-        worktree.ellipsizeLabel = true; worktree.style.width = LayoutAxis.grow(124, 220); worktree.enabled = worktreeAvailable();
+        var worktree = quietButton(label + " ▾", function() { if (menuValid() && worktreeAvailable()) worktreeAction(); }, "agent-select-worktree",
+          worktreeAvailable(), null, null, "Select worktree", new SessionLineIcon("worktree", tokens.textSecondary), true);
+        worktree.style.width = LayoutAxis.grow(124, 220);
         stripItems.push(new KeyedView("worktree", new SessionDirectoryTooltip(worktree, view.record.cwd)));
       } else stripItems.push(new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
         TextStyleOverride.text(12, null, tokens.textSecondary))));
@@ -447,9 +448,9 @@ class CodexSessionPanel implements View {
         var label = branchLabel();
         var branchAction:Void->Void = cast workspaceActions.selectBranch;
         var branchAvailable:Void->Bool = cast workspaceActions.canSelectBranch;
-        var branch = quietButton(label + " ▾", function() { if (menuValid() && branchAvailable()) branchAction(); }, "agent-select-branch");
-        branch.accessibilityLabel = "Select branch"; branch.leadingView = new SessionLineIcon("branch", tokens.textSecondary);
-        branch.ellipsizeLabel = true; branch.style.width = LayoutAxis.grow(112, 180); branch.enabled = branchAvailable();
+        var branch = quietButton(label + " ▾", function() { if (menuValid() && branchAvailable()) branchAction(); }, "agent-select-branch",
+          branchAvailable(), null, null, "Select branch", new SessionLineIcon("branch", tokens.textSecondary), true);
+        branch.style.width = LayoutAxis.grow(112, 180);
         hasBranch = true;
         stripTrailing.push(new KeyedView("branch", new SettingMenuButton(branch, label)));
       }
@@ -465,9 +466,8 @@ class CodexSessionPanel implements View {
       repositoryAction("github", "Open GitHub", workspaceActions.canOpenGithub, workspaceActions.githubRepository);
       repositoryAction("pull-request", "Open pull request page", workspaceActions.canOpenPullRequest, workspaceActions.githubPullRequest);
       if (repositoryItems.length > 0) {
-        var repository = quietButton("Git ▾", function() {}, "agent-repository-actions");
-        repository.accessibilityLabel = "Repository actions";
-        repository.onClickEvent = function(event) { if (menuValid()) showMenu(repositoryItems, event, menuValid); };
+        var repository = quietButton("Git ▾", function() {}, "agent-repository-actions", null, null, null, "Repository actions", null, null,
+          function(event) { if (menuValid()) showMenu(repositoryItems, event, menuValid); });
         stripTrailing.push(new KeyedView("repository-actions", repository));
       }
       if (stripTrailing.length > 0) {
@@ -507,13 +507,11 @@ class CodexSessionPanel implements View {
         : recovery.message))];
       if (view.recoveryReason == "thread-unavailable") {
         var create = new Button("Create new session", null,
-          function() createReplacement(view.record.group), "codex-create-replacement");
-        create.enabled = control;
+          function() createReplacement(view.record.group), "codex-create-replacement", control);
         recoveryControls.push(new KeyedView("create-replacement", create));
       } else if (recovery.retryLabel != null) {
         var retry = new Button(recovery.retryLabel, null,
-          function() client.agentAction(id, "connect", "", null), "codex-retry-connection");
-        retry.enabled = control;
+          function() client.agentAction(id, "connect", "", null), "codex-retry-connection", control);
         recoveryControls.push(new KeyedView("retry", retry));
       }
       rows.push(new KeyedView("recovery-error", new Row("codex-recovery-error", recoveryControls, recoveryStyle)));
@@ -536,12 +534,10 @@ class CodexSessionPanel implements View {
       var controls:Array<KeyedView> = [];
       if (entry.state == "queued" || entry.state == "uncertain" || entry.state == "rejected") {
         var remove = new Button(entry.state == "queued" ? "Remove queued message" : "Dismiss input",null,
-          function() client.agentAction(id,"remove-input","",entry.id),"agent-remove-input-"+entry.id);
-        remove.enabled = control;
+          function() client.agentAction(id,"remove-input","",entry.id),"agent-remove-input-"+entry.id,control);
         controls.push(new KeyedView("remove",remove));
         if (entry.text != "") {
-          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptRevision++;promptFocusRequested=false;frame();});
-          draft.enabled = control;
+          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptRevision++;promptFocusRequested=false;frame();},null,control);
           controls.push(new KeyedView("draft",draft));
         }
       }
@@ -551,8 +547,8 @@ class CodexSessionPanel implements View {
     }
     if (view.supportsQueue == true && queuedCount > 0) {
       var queueControl = new Button(view.queuePaused == true ? "Resume queued messages" : "Pause queued messages",null,
-        function() client.agentAction(id,view.queuePaused == true ? "resume-queue" : "pause-queue","",null),"agent-queue-policy");
-      queueControl.enabled = control && (view.queuePaused != true || connectionReady);
+        function() client.agentAction(id,view.queuePaused == true ? "resume-queue" : "pause-queue","",null),"agent-queue-policy",
+        control && (view.queuePaused != true || connectionReady));
       activity.unshift(new KeyedView("queue-state",new Column("agent-queue-state",[
         new KeyedView("label",paragraph(Std.string(queuedCount)+" queued follow-up(s)"+(view.queuePaused == true ? " · Paused" : ""))),
         new KeyedView("control",queueControl)
@@ -560,8 +556,8 @@ class CodexSessionPanel implements View {
     }
     var nativePending = view.nativePending == null ? [] : view.nativePending;
     if (nativePending.length > 0) {
-      var clear = new Button("Clear Pi pending messages",null,function() client.agentAction(id,"clear-native-queue","",null),"agent-clear-native-inputs");
-      clear.enabled = control && connectionReady && view.inputBusy != true;
+      var clear = new Button("Clear Pi pending messages",null,function() client.agentAction(id,"clear-native-queue","",null),"agent-clear-native-inputs",
+        control && connectionReady && view.inputBusy != true);
       activity.push(new KeyedView("native-clear",clear));
       for (index in 0...nativePending.length) {
         var nativeInput = nativePending[index];
@@ -611,8 +607,7 @@ class CodexSessionPanel implements View {
           retainedQuestions.set(r.id, form);
           requestRows.push(new KeyedView("question-form", form));
           if (r.inputKind != null || view.record.provider == "claude") {
-            var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id));
-            cancel.enabled = control;
+            var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id), null, control);
             requestRows.push(new KeyedView("cancel-" + r.id, cancel));
           }
         } else {
@@ -623,10 +618,9 @@ class CodexSessionPanel implements View {
             var option = options[index];
             var optionStyle = new LayoutStyle(); optionStyle.width = LayoutAxis.grow(); optionStyle.height = LayoutAxis.fixed(36);
             optionStyle.padding = new Insets(10, 0, 10, 0); optionStyle.clipHorizontal = true;
-            var choice = new Button(option, optionStyle, function() client.agentAction(id, "answer", option, r.id), "agent-choice-" + r.id + "-" + index);
-            choice.labelView = new MiddleEllipsisText("choice-label", option, false, TextStyleOverride.text(14));
-            choice.accessibilityLabel = "Choose " + option;
-            choice.enabled = control && r.reviewable;
+            var choice = new Button(option, optionStyle, function() client.agentAction(id, "answer", option, r.id), "agent-choice-" + r.id + "-" + index,
+              control && r.reviewable, null, null, null, null, null, null, null,
+              new MiddleEllipsisText("choice-label", option, false, TextStyleOverride.text(14)), null, null, "Choose " + option);
             requestRows.push(new KeyedView("choice-" + index, choice));
           }
         } else {
@@ -642,17 +636,16 @@ class CodexSessionPanel implements View {
               frame();
             });
           },
-          "codex-answer-" + r.id
+          "codex-answer-" + r.id,
+          control && r.reviewable
         );
-        answer.enabled = control && r.reviewable;
         requestRows.push(new KeyedView(
           "answer-" + r.id,
           answer
         ));
         }
         if (r.inputKind != null || view.record.provider == "claude") {
-          var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id));
-          cancel.enabled = control;
+          var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id), null, control);
           requestRows.push(new KeyedView("cancel-" + r.id, cancel));
         }
         }
@@ -661,16 +654,16 @@ class CodexSessionPanel implements View {
           r.inputKind == "confirm" ? "Confirm" : "Approve once",
           null,
           function() client.agentAction(id, "approve", "", r.id),
-          "codex-approve-" + r.id
+          "codex-approve-" + r.id,
+          control && r.reviewable
         );
-        approve.enabled = control && r.reviewable;
         var decline = new Button(
           r.inputKind == "confirm" ? "Cancel" : "Decline",
           null,
           function() client.agentAction(id, "decline", "", r.id),
-          "codex-decline-" + r.id
+          "codex-decline-" + r.id,
+          control
         );
-        decline.enabled = control;
         requestRows.push(new KeyedView(
           "approval-" + r.id,
           new Row(
@@ -716,8 +709,7 @@ class CodexSessionPanel implements View {
           frame();
         });
         frame();
-      }, "agent-history-earlier");
-      earlier.enabled = !history.loading;
+      }, "agent-history-earlier", !history.loading);
       activity.push(new KeyedView("history-earlier", earlier));
     }
     var items = view.items;
@@ -791,11 +783,9 @@ class CodexSessionPanel implements View {
           commandStyle.width = LayoutAxis.grow();
           commandStyle.childGap = 8;
           commandStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
-          var toggle=quietButton("",function() {expanded.set(key,expanded.get(key)!=true);frame();},"command-toggle-"+key);
+          var toggle=quietButton("",function() {expanded.set(key,expanded.get(key)!=true);frame();},"command-toggle-"+key,null,
+            expanded.get(key)==true ? IconName.ChevronDown : IconName.ChevronRight,16,expanded.get(key)==true ? "Hide details" : "Show details");
           toggle.style.width=LayoutAxis.fixed(30);
-          toggle.accessibilityLabel=expanded.get(key)==true ? "Hide details" : "Show details";
-          toggle.leadingIcon=expanded.get(key)==true ? IconName.ChevronDown : IconName.ChevronRight;
-          toggle.iconSize=16;
           var status=commandStatus(item.state);
           message.push(new KeyedView("command-" + key, new Row("codex-command-" + key, [
             new KeyedView("summary", new MiddleEllipsisText("summary",
@@ -820,10 +810,9 @@ class CodexSessionPanel implements View {
           if ((!tool || item.kind == "plan") && displayText != "") {
             var copyText = displayText;
             var copied = copiedMessages.get(key) == copyText;
-            var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); frame(); }, "agent-copy-" + key);
-            copy.accessibilityLabel = copied ? "Copied" : item.truncated && (full == null || full.partial) ? "Copy preview" : item.kind == "plan" ? "Copy plan" : "Copy message";
-            copy.leadingIcon = copied ? IconName.Check : IconName.Copy;
-            copy.iconSize = 16;
+            var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); frame(); }, "agent-copy-" + key,
+              null, copied ? IconName.Check : IconName.Copy, 16,
+              copied ? "Copied" : item.truncated && (full == null || full.partial) ? "Copy preview" : item.kind == "plan" ? "Copy plan" : "Copy message");
             roleChildren.push(new KeyedView("copy", copy));
           }
           message.push(new KeyedView("title-" + key, new Row("codex-message-heading-" + key, roleChildren, roleStyle)));
@@ -892,8 +881,8 @@ class CodexSessionPanel implements View {
             message.push(new KeyedView("truncated-" + key, paragraph(contentErrors.exists(key) ? contentErrors.get(key) : "This item is truncated in the current view.")));
             if ((item.kind == "agentMessage" || item.kind == "plan") && item.state == "completed" && view.supportsMessageContent == true && item.contentToken != null) {
               var contentLabel = item.kind == "plan" ? "plan" : "response";
-              var load = quietButton(contentLoading == key ? "Loading " + contentLabel + "…" : contentErrors.exists(key) ? "Retry full " + contentLabel : "Load full " + contentLabel, function() loadContent(client,id,item,key));
-              load.enabled = contentLoading == null;
+              var load = quietButton(contentLoading == key ? "Loading " + contentLabel + "…" : contentErrors.exists(key) ? "Retry full " + contentLabel : "Load full " + contentLabel, function() { loadContent(client,id,item,key); frame(); },
+                null, contentLoading == null);
               message.push(new KeyedView("load-content-" + key,load));
             }
           }
@@ -954,8 +943,7 @@ class CodexSessionPanel implements View {
       var reviewReady = client.agentDeliveryReviewReady(id);
       var review = quietButton("I checked the conversation", function() {
         if (client.acknowledgeAgentDelivery(id)) frame();
-      }, "agent-delivery-review");
-      review.enabled = reviewReady;
+      }, "agent-delivery-review", reviewReady);
       var notice = new LayoutStyle(); notice.width = LayoutAxis.grow(); notice.childGap = 8; notice.padding = new Insets(8, 8, 8, 8);
       rows.push(new KeyedView("delivery-uncertain", new Column("agent-delivery-uncertain", [
         new KeyedView("message", paragraph(reviewReady
@@ -991,16 +979,14 @@ class CodexSessionPanel implements View {
     var sendStyle = new LayoutStyle(); sendStyle.width = LayoutAxis.fixed(34); sendStyle.height = LayoutAxis.fixed(34);
     sendStyle.padding = new Insets(9, 9, 9, 9);
     sendStyle.radiusTopLeft = sendStyle.radiusTopRight = sendStyle.radiusBottomLeft = sendStyle.radiusBottomRight = 17;
-    var send = new Button("", sendStyle, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
-    send.accessibilityLabel = piActive ? "Queue message" : "Send";
-    send.leadingIcon = IconName.ArrowUp; send.iconSize = 16;
-    send.variant = ButtonVariant.Primary;
-    send.enabled = (piActive ? canQueue : canSend) && imagesSupported && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
+    var send = new Button("", sendStyle, function() submitAction(piActive ? "queue" : "prompt"), "codex-send",
+      (piActive ? canQueue : canSend) && imagesSupported && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0),
+      ButtonVariant.Primary, null, null, IconName.ArrowUp, null, null, null, null, null, 16, piActive ? "Queue message" : "Send");
     var hint = new Text(deliveryUncertain ? "Sending is paused until you confirm the last message" : (piActive ? (view.requests.length > 0 ? "Answer the request, or use Queue / Steer" : "Enter to queue · Shift+Enter for newline") : "Enter to send · Shift+Enter for newline") + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
     var footerControls:Array<KeyedView> = [];
     if (piActive) {
-      var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer");
-      steer.enabled = canSteer && imagesSupported && !contextLoading && !imageUploading && promptBytes <= 4096 && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
+      var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer",
+        canSteer && imagesSupported && !contextLoading && !imageUploading && promptBytes <= 4096 && (StringTools.trim(prompt) != "" || imageDrafts.length > 0));
       footerControls.push(new KeyedView("steer",steer));
     }
     footerControls.push(new KeyedView("send",send));
@@ -1014,7 +1000,7 @@ class CodexSessionPanel implements View {
       return latest != null && latest.record.thread == settingThread && latest.record.state != "working";
     };
     var modelControls:Array<KeyedView> = [];
-    var moreModels:Button = null;
+    var moreModels:Null<Button> = null;
     if (view.models == null) {
       if ((selectedModel != "" || selectedEffort != "") && !modelCatalogRequested && !client.agentBusy()) {
         modelCatalogRequested = true;
@@ -1023,20 +1009,15 @@ class CodexSessionPanel implements View {
       var load = new Button("Choose model…", null, function() {
         modelCatalogRequested = true;
         client.agentAction(id, "models", "", null);
-      }, "codex-models");
-      load.enabled = control && !working;
+      }, "codex-models", control && !working);
       modelControls.push(new KeyedView("load", load));
     } else {
       var currentModel = findModel(view.models, view.currentModel);
       var currentModelLabel = currentModel != null ? currentModel.name : view.currentModel == null || view.currentModel == "" ? "Current model" : view.currentModel;
       var chosenModel = findModel(view.models, selectedModel);
       var modelLabel = chosenModel != null ? chosenModel.name : selectedModel != "" ? selectedModel : currentModelLabel;
-      var chooser = quietButton(modelLabel + " ▾", function() {}, "codex-model");
-      chooser.accessibilityLabel = "Conversation model"; chooser.ellipsizeLabel = true;
-      chooser.leadingView = new SessionLineIcon("model", tokens.textSecondary);
-      chooser.style.width = LayoutAxis.fixed(145); chooser.style.padding = new Insets(4, 4, 4, 4); chooser.style.childGap = 4;
-      chooser.enabled = control && !working;
-      chooser.onClickEvent = function(event) {
+      var chooser = quietButton(modelLabel + " ▾", function() {}, "codex-model", control && !working, null, null, "Conversation model",
+        new SessionLineIcon("model", tokens.textSecondary), true, function(event) {
         var items:Array<MenuItem> = [];
         items.push(new MenuItem("current", currentModelLabel, function() {
           if (settingValid()) { client.agentAction(id, "model-settings", "", null, null, null); frame(); }
@@ -1048,12 +1029,11 @@ class CodexSessionPanel implements View {
           }));
         }
         showMenu(items, event, settingValid);
-      };
+      });
+      chooser.style.width = LayoutAxis.fixed(145); chooser.style.padding = new Insets(4, 4, 4, 4); chooser.style.childGap = 4;
       modelControls.push(new KeyedView("chooser", new SettingMenuButton(chooser, modelLabel)));
-      if (view.modelsNext != null) {
-        moreModels = new Button("More models", null, function() client.agentAction(id, "models", "", view.modelsNext));
-        moreModels.enabled = control && !working;
-      }
+      if (view.modelsNext != null)
+        moreModels = new Button("More models", null, function() client.agentAction(id, "models", "", view.modelsNext), null, control && !working);
     }
     var defaultEffortLabel = selectedModel == "" && view.currentEffort != null
       ? "Keep current (" + view.currentEffort + ")" : "Model default";
@@ -1062,13 +1042,8 @@ class CodexSessionPanel implements View {
     var effortText = selectedEffort != "" ? effortLabel(selectedEffort)
       : (selectedModel == "" && view.currentEffort != null ? effortLabel(view.currentEffort) : "Model default");
     if (StringTools.endsWith(effortText, " effort")) effortText = effortText.substr(0, effortText.length - 7);
-    var effortChooser = quietButton(effortText + " ▾", function() {}, "codex-effort");
-    effortChooser.accessibilityLabel = "Reasoning effort"; effortChooser.ellipsizeLabel = true;
-    effortChooser.leadingView = new SessionLineIcon("reasoning", tokens.textSecondary);
-    effortChooser.style.width = LayoutAxis.fixed(90);
-    effortChooser.style.padding = new Insets(4, 4, 4, 4); effortChooser.style.childGap = 4;
-    effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
-    effortChooser.onClickEvent = function(event) {
+    var effortChooser = quietButton(effortText + " ▾", function() {}, "codex-effort", control && !working && effortModel != null && availableEfforts.length > 0,
+      null, null, "Reasoning effort", new SessionLineIcon("reasoning", tokens.textSecondary), true, function(event) {
       var expectedModel = selectedModel;
       var expectedCurrentModel = view.currentModel;
       var effortValid = function() {
@@ -1087,13 +1062,14 @@ class CodexSessionPanel implements View {
         }));
       }
       showMenu(items, event, effortValid);
-    };
+    });
+    effortChooser.style.width = LayoutAxis.fixed(90);
+    effortChooser.style.padding = new Insets(4, 4, 4, 4); effortChooser.style.childGap = 4;
     modelControls.push(new KeyedView("effort", new SettingMenuButton(effortChooser, effortText)));
     if (moreModels != null) modelControls.push(new KeyedView("more", moreModels));
     if (view.record.provider == "pi") {
       var refresh = new Button(view.commandsLoading == true ? "Loading commands…" : "Refresh commands",null,
-        function() client.agentAction(id,"commands","",null),"agent-refresh-commands");
-      refresh.enabled = canSend && view.commandsLoading != true;
+        function() client.agentAction(id,"commands","",null),"agent-refresh-commands",canSend && view.commandsLoading != true);
       modelControls.push(new KeyedView("commands",refresh));
     }
     var modelControlsStyle = new LayoutStyle();
@@ -1119,8 +1095,8 @@ class CodexSessionPanel implements View {
       }
     });
     promptNode.on(UiEventKind.KeyDown, function(event) {
-      if (event.key == UiKey.V && (event.modifiers & (UiModifier.Control | UiModifier.Super)) != 0
-          && (event.modifiers & UiModifier.Alt) == 0 && workspaceActions != null && workspaceActions.pasteImage != null
+      if (event.key == UiKey.V && !(event.modifiers & (UiModifier.Control | UiModifier.Super)).isEmpty()
+          && !event.modifiers.contains(UiModifier.Alt) && workspaceActions != null && workspaceActions.pasteImage != null
           && view.supportsImageUpload == true && control && connectionReady) {
         var readClipboard:Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>} = cast workspaceActions.pasteImage;
         var pasted = readClipboard();
@@ -1137,7 +1113,7 @@ class CodexSessionPanel implements View {
           frame(); return;
         }
       }
-      if (suggestions.length > 0 && (event.modifiers & (UiModifier.Shift | UiModifier.Control | UiModifier.Alt)) == 0) {
+      if (suggestions.length > 0 && (event.modifiers & (UiModifier.Shift | UiModifier.Control | UiModifier.Alt)).isEmpty()) {
         if (event.key == UiKey.Down || event.key == UiKey.Up) {
           event.preventDefault();event.stopImmediatePropagation();
           suggestionIndex = (suggestionIndex + (event.key == UiKey.Down ? 1 : suggestions.length-1)) % suggestions.length;
@@ -1150,12 +1126,12 @@ class CodexSessionPanel implements View {
           event.preventDefault();event.stopImmediatePropagation();dismissSuggestions = true;frame();return;
         }
       }
-      if (event.key == UiKey.Enter && (event.modifiers & UiModifier.Shift) == 0) {
+      if (event.key == UiKey.Enter && !event.modifiers.contains(UiModifier.Shift)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         submit();
       }
-    }, "capture");
+    }, haxeon.ui.core.UiEventPhase.Capture);
     var composerFrame = new LayoutStyle();
     composerFrame.width = LayoutAxis.grow(0, 880);
     composerFrame.padding = new Insets(1, 1, 1, 1);
@@ -1178,13 +1154,12 @@ class CodexSessionPanel implements View {
           }
           uploadImage(client,id,imageThread,name,bytes,generation);
         });
-      }, "agent-add-image");
-      imageAction.accessibilityLabel = imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again";
-      if (imageUploading) imageAction.leadingIcon = IconName.Close;
-      else imageAction.leadingView = new SessionLineIcon("attachment", tokens.textSecondary);
-      imageAction.iconSize = 16; imageAction.style.width = LayoutAxis.fixed(34);
+      }, "agent-add-image", control && connectionReady && (imageUploading || imageDrafts.length < 2),
+        imageUploading ? IconName.Close : null, 16,
+        imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again",
+        imageUploading ? null : new SessionLineIcon("attachment", tokens.textSecondary));
+      imageAction.style.width = LayoutAxis.fixed(34);
       imageAction.style.height = LayoutAxis.fixed(34); imageAction.style.padding = new Insets(9, 9, 9, 9);
-      imageAction.enabled = control && connectionReady && (imageUploading || imageDrafts.length < 2);
       contextActions.push(new KeyedView("image-action", imageAction));
     }
     for (index in 0...imageDrafts.length) {
@@ -1195,9 +1170,7 @@ class CodexSessionPanel implements View {
         TextStyleOverride.text(12, null, tokens.textSecondary));
       var removeImage = quietButton("", function() {
         imageDrafts.splice(imageIndex, 1); contextRevision++; client.removeAgentImage(id, image.id); frame();
-      }, "agent-remove-image-" + index);
-      removeImage.accessibilityLabel = "Remove image";
-      removeImage.leadingIcon = IconName.Close; removeImage.iconSize = 14;
+      }, "agent-remove-image-" + index, null, IconName.Close, 14, "Remove image");
       removeImage.style.width = LayoutAxis.fixed(30);
       contextRows.push(new KeyedView("image-" + image.key, new Row("agent-image-" + image.key, [
         new KeyedView("thumbnail", new SessionDraftThumbnail("draft-preview-" + image.key, image.name, image.bytes)),
@@ -1211,11 +1184,9 @@ class CodexSessionPanel implements View {
       var readContext:(String, (Null<String>, Null<String>)->Void)->Void = cast workspaceActions.readContext;
       var addContext = quietButton("", function() {
         addingContext = !addingContext; contextGeneration++; contextLoading = false; contextError = null; frame();
-      }, "agent-add-context");
-      addContext.accessibilityLabel = addingContext ? "Cancel adding text" : "Add workspace text";
-      addContext.leadingIcon = IconName.NewFile; addContext.iconSize = 16; addContext.style.width = LayoutAxis.fixed(34);
+      }, "agent-add-context", control && connectionReady, IconName.NewFile, 16, addingContext ? "Cancel adding text" : "Add workspace text");
+      addContext.style.width = LayoutAxis.fixed(34);
       addContext.style.height = LayoutAxis.fixed(34); addContext.style.padding = new Insets(9, 9, 9, 9);
-      addContext.enabled = control && connectionReady;
       contextActions.push(new KeyedView("add", addContext));
       if (addingContext) {
         var pathStyle = new LayoutStyle(); pathStyle.width = LayoutAxis.grow(); pathStyle.height = LayoutAxis.fixed(32);
@@ -1241,8 +1212,7 @@ class CodexSessionPanel implements View {
             }
             frame();
           });
-        }, "agent-include-context");
-        load.enabled = !contextLoading && StringTools.trim(contextPath) != "" && textContext.length < 2;
+        }, "agent-include-context", !contextLoading && StringTools.trim(contextPath) != "" && textContext.length < 2);
         contextRows.push(new KeyedView("load", load));
       }
     }
@@ -1254,9 +1224,7 @@ class CodexSessionPanel implements View {
         TextStyleOverride.text(12, null, tokens.textSecondary));
       var removeText = quietButton("", function() {
         textContext.splice(fileIndex, 1); contextRevision++; frame();
-      }, "agent-remove-context-" + index);
-      removeText.accessibilityLabel = "Remove";
-      removeText.leadingIcon = IconName.Close; removeText.iconSize = 14;
+      }, "agent-remove-context-" + index, null, IconName.Close, 14, "Remove");
       removeText.style.width = LayoutAxis.fixed(30);
       contextRows.push(new KeyedView("file-" + index, new Row("agent-context-file-" + index, [
         new KeyedView("path", pathLabel), new KeyedView("remove", removeText)
@@ -1343,9 +1311,10 @@ private class SettingMenuButton implements View {
   public function new(button:Button, value:String) { this.button = button; this.value = value; }
   public function build(context:BuildContext):RenderNode {
     var node = button.build(context);
-    if (node.semantics != null) {
-      node.semantics.value = value;
-      node.semantics.states |= haxeon.ui.semantics.AccessibilityState.HasPopup;
+    var semantics = node.semantics;
+    if (semantics != null) {
+      semantics.value = value;
+      semantics.states |= haxeon.ui.semantics.AccessibilityState.HasPopup;
     }
     return node;
   }

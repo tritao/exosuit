@@ -223,7 +223,7 @@ class ExosuitDiagnostics {
 				localSearchResult: target("workspace-search-result-0"),
 				remoteSearchQuery: targetByLabel("Search in projects"),
 				remoteSearchQueryFocused: searchQueryNode != null && searchQueryNode.semantics != null
-					&& (searchQueryNode.semantics.states & AccessibilityState.Focused) != 0,
+					&& searchQueryNode.semantics.states.contains(AccessibilityState.Focused),
 				remoteSearchMode: target("workspace-search-remote-mode"),
 				remoteSearchResult: target("workspace-remote-search-result-0"),
 				remoteSearchResult1: target("workspace-remote-search-result-1"),
