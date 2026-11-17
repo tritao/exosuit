@@ -65,8 +65,7 @@ class BuildOutputPanel implements View {
 			style.width = LayoutAxis.grow();
 			return new Text(line.text, style, foreground, TextStyleOverride.text(12.0));
 		}
-		var button = new Button(line.text, null, function() host.activateBuildDiagnostic(diagnostic), "build-line" + index);
-		button.variant = ButtonVariant.Secondary;
-		return button;
+		return new Button(line.text, null, function() host.activateBuildDiagnostic(diagnostic), "build-line" + index, null,
+			ButtonVariant.Secondary);
 	}
 }
