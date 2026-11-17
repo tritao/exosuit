@@ -4,7 +4,7 @@ import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 import platform.Platform;
 import process.ProcessManager;
-import workspace.client.LocalWorkspaceClient;
+import workspace.client.WorkspaceLink;
 import workspace.client.RpcTerminalBackend;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
@@ -28,8 +28,29 @@ class TerminalRpcTestMain {
     }
     return "";
   }
+  static function contracts(root:String, runtime:Runtime, processes:ProcessManager):Void {
+    TerminalCapabilitiesTests.run();
+    TerminalSnapshotTests.run();
+    TerminalSnapshotTests.service(root);
+    TerminalReplayTests.run();
+    TerminalResizeTests.run(root);
+    TerminalThemeTests.run(root);
+    TerminalAgentTests.run(root);
+    TerminalHistoryTests.run(root);
+    TerminalServiceTests.run(root);
+    TerminalControlTests.run(root);
+    TerminalCatalogTests.run(root);
+    ServesRootTests.run(root, runtime);
+    WorkspaceLinksTests.run(runtime);
+    TerminalCloseServiceTests.run(root);
+    WorkspaceGroupTests.run(root);
+    WorkspaceFileTests.run(root);
+  }
   static function main():Void {
-    var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
+    var args = Sys.args();
+    var mode = args[0], root = args[1], launcher = args[2];
+    // The tests' hosts run the terminal host program built beside the agent `launcher` names, as the service's do.
+    TestTerminals.agentProgram = launcher;
 
     if (mode == "files-only") {
       var fileRuntime = Runtime.start();
@@ -40,38 +61,27 @@ class TerminalRpcTestMain {
     }
 
     var runtime = Runtime.start(), processes = new ProcessManager();
+    TestTerminals.events = runtime.events;
     if (mode == "host-steal") {
       TerminalHostTests.steal(runtime, args[3]);
       processes.shutdown(); runtime.dispose(); return;
     }
     if (mode == "flow") {
-      TerminalFlowTests.run(root);
+      try TerminalFlowTests.run(root) catch (failure:Dynamic) { TestTerminals.endAll(); throw failure; }
+      TestTerminals.endAll();
       processes.shutdown(); runtime.dispose(); return;
     }
     if (mode == "contracts") {
-      TerminalCapabilitiesTests.run();
-      TerminalSnapshotTests.run();
-      TerminalSnapshotTests.service(root);
-      TerminalReplayTests.run();
-      TerminalResizeTests.run(root);
-      TerminalThemeTests.run(root);
-      TerminalAgentTests.run(root);
-      TerminalHistoryTests.run(root);
-      TerminalServiceTests.run(root);
-      TerminalControlTests.run(root);
-      TerminalCatalogTests.run(root);
-      ServesRootTests.run(root, runtime, processes);
-      TerminalCloseServiceTests.run(root);
-      WorkspaceGroupTests.run(root);
-      WorkspaceFileTests.run(root);
+      try contracts(root, runtime, processes) catch (failure:Dynamic) { TestTerminals.endAll(); throw failure; }
+      TestTerminals.endAll();
       processes.shutdown();
       runtime.dispose();
-
       return;
     }
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
-    var client = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
-    client.select(root);
+    // The service of the root's test workspace, started the way suit starts it (or the one already running).
+    var direct = new testing.DirectService(launcher);
+    var client = new WorkspaceLink(runtime.events, clock, direct.open, direct.forRoot(root));
     if (mode == "history-create" || mode == "history-restore") {
       TerminalHistoryTests.process(client,runtime,root,mode == "history-create");
       client.dispose(); processes.shutdown(); runtime.dispose(); return;

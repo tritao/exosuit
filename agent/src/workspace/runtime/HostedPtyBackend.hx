@@ -5,21 +5,20 @@ import haxe.io.BytesOutput;
 import haxeon.rpc.MessageTransport;
 import haxeon.rpc.RpcConnectAttempt;
 import sys.io.ChildProcess;
-import terminalsession.TerminalBackend;
 import terminalsession.TerminalEvent;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
 /**
-	A terminal whose PTY lives in a terminal host (app.TerminalHostMain), seen by the service as a backend like the
-	in-process one. Closing it while its program runs only detaches: the host keeps the program, and the next service
-	generation adopts it (TerminalHosts.adopt).
+	The service's connection to one terminal host (app.TerminalHostMain). Closing it while its program runs only
+	detaches: the host keeps the program, and the next service adopts it (TerminalHosts.adopt).
 
-	On attach the host sends the terminal's size, its rendered history and its exact screen before any new output, so the
-	service's own emulator and replay log start from what the program has drawn so far. They arrive here as ordinary
-	events: geometry, output, then one screen snapshot.
+	It reports what the host sends as events (`pollEvents`): output, the host's size (geometry), the end of the program
+	(status), and the host's screen: a history event with the rendered scrollback, then a snapshot event with the exact
+	screen. The screen comes on every attach (on a connection opened again, preceded by a reset event: the output stream
+	starts again there), and after each `requestSnapshot`, in order with the output.
 **/
-class HostedPtyBackend implements TerminalBackend {
+class HostedPtyBackend {
 	static var nextId:Int = 1;
 
 	final idValue:String;
@@ -27,16 +26,14 @@ class HostedPtyBackend implements TerminalBackend {
 	final pipe:String;
 	final token:String;
 	final hosts:TerminalHosts;
+	/** The host's protocol (TerminalHostProtocol.VERSION); a version 1 host knows no SNAPSHOT or THEME. */
+	final protocol:Int;
 	/** True for a host found running at service start; false for one this service started. */
 	public final adopted:Bool;
-	/** An adopted host's `host.json`: removed when its pipe never opened, so later services do not try the host again. */
-	final record:Null<String>;
-	/** The host's folder: where an end request goes when the host cannot be told over its pipe. */
+	/** The host's folder: its spec is removed when a host this service started never became ready. */
 	final folder:Null<String>;
 	/** An adopted host's process, as its `host.json` names it (0: unknown). */
 	final hostPid:Int;
-	/** The final file this backend reads instead of a host; removed once its exit code was delivered. */
-	final finalPath:Null<String>;
 	final hostExecutable:Null<String>;
 	var child:Null<ChildProcess>;
 	var transport:Null<MessageTransport>;
@@ -60,29 +57,21 @@ class HostedPtyBackend implements TerminalBackend {
 	var wantedRows:Int = 0;
 	var hostColumns:Int = 0;
 	var hostRows:Int = 0;
+	var history:Null<BytesOutput>;
 	var screen:Null<BytesOutput>;
 	var offset:haxe.Int64 = 0;
 	var live:Bool = false;
+	/** The host was live on an earlier connection of this backend. */
+	var wasLive:Bool = false;
+	/** The screen that comes next answers a request, not an attach: the output stream goes on. */
+	var requested:Bool = false;
 	var ended:Bool = false;
 	var exitSeen:Bool = false;
-	/**
-		True from the first HISTORY chunk of a connection until its LIVE. The history starts by clearing the screen and the
-		scrollback, so in between the service's emulator holds only part of the terminal's history: it must not be saved
-		over the whole one the store has (a connection that broke there and was given up left it truncated).
-	**/
-	var replaying:Bool = false;
 	var killed:Bool = false;
 	var closed:Bool = false;
 
-	public function new(hosts:TerminalHosts, hub:NativeRpcHub, pipe:String, token:String, child:Null<ChildProcess>, adopted:Bool,
-			?record:String, ?folder:String, hostPid:Int = 0, ?hostExecutable:String, ?recorded:MessageTransport, ?finalPath:String) {
-		this.finalPath = finalPath;
-		if (recorded != null) {
-			// A host's final file instead of a host: there is nothing to connect to.
-			transport = recorded;
-			openedAt = Sys.time();
-		}
-		this.record = record;
+	public function new(hosts:TerminalHosts, hub:NativeRpcHub, pipe:String, token:String, protocol:Int, child:Null<ChildProcess>,
+			adopted:Bool, ?folder:String, hostPid:Int = 0, ?hostExecutable:String) {
 		this.folder = folder;
 		this.hostPid = hostPid;
 		this.hostExecutable = hostExecutable;
@@ -90,6 +79,7 @@ class HostedPtyBackend implements TerminalBackend {
 		this.hub = hub;
 		this.pipe = pipe;
 		this.token = token;
+		this.protocol = protocol;
 		this.child = child;
 		this.adopted = adopted;
 		idValue = "hosted-" + nextId++;
@@ -101,13 +91,8 @@ class HostedPtyBackend implements TerminalBackend {
 		outgoing.push(TerminalHostProtocol.number(TerminalHostProtocol.CREDIT, 0));
 	}
 
-	public function id():String return idValue;
-
-	/** True while the host owns a program this service can no longer reach or has not reached yet. */
+	/** True once the host's screen arrived on the current connection; output then follows it. */
 	public function isLive():Bool return live;
-
-	/** True while the emulator fed by this backend holds a history the host has not finished sending (see `replaying`). */
-	public function midReplay():Bool return replaying;
 
 	function connect():Void {
 		connecting = true;
@@ -173,7 +158,6 @@ class HostedPtyBackend implements TerminalBackend {
 
 	public function resize(columns:Int, rows:Int):Void {
 		ensureOpen();
-		// The host ignores a size outside these bounds; refusing it here keeps this service's emulator at the host's size.
 		if (columns < 1 || columns > TerminalHostProtocol.MAX_COLUMNS || rows < 1 || rows > TerminalHostProtocol.MAX_ROWS)
 			throw "Terminal size is outside the terminal host's limits";
 		queue(TerminalHostProtocol.pair(TerminalHostProtocol.RESIZE, columns, rows));
@@ -181,10 +165,28 @@ class HostedPtyBackend implements TerminalBackend {
 		wantedRows = rows;
 	}
 
+	/** The terminal's default colours (0xRRGGBB): the host's emulator takes them and tells a program that asked. */
+	public function theme(foreground:Int, background:Int):Void {
+		ensureOpen();
+		if (!ended && protocol >= 2) queue(TerminalHostProtocol.numbers(TerminalHostProtocol.THEME, foreground, background));
+	}
+
+	/**
+		Asks the host for its screen: it arrives as history and snapshot events, in order with the output. Before the
+		screen of the current connection arrived nothing is asked: that one comes anyway. A version 1 host is attached
+		to again, which sends it.
+	**/
+	public function requestSnapshot():Void {
+		ensureOpen();
+		if (ended || !live || requested) return;
+		requested = true;
+		if (protocol >= 2) queue(TerminalHostProtocol.message(TerminalHostProtocol.SNAPSHOT));
+		else reopen(Sys.time(), "a version 1 host sends its screen on attach");
+	}
+
 	/**
 		Geometry events here are only the host's: the size its screen had when this service attached, and, once the screen
 		has arrived, the size this service asked for meanwhile (the host applies that request after sending its screen).
-		The service resizes its own emulator to follow them; its own later resizes need no event.
 	**/
 	public function pollEvents(emit:TerminalEvent->Void):Void {
 		ensureOpen();
@@ -202,14 +204,11 @@ class HostedPtyBackend implements TerminalBackend {
 				else if (reconnectUntil > 0) {
 					if (now >= reconnectUntil) fail(emit, "lost", "the connection to the host closed and could not be opened again");
 				} else if (now >= deadline) {
-					// The record goes only with the process: a host that runs but did not answer in time (a busy machine, a
-					// suspended process) keeps it, so a later service can take the terminal back.
-					var stale = record;
-					var gone = hostPid > 0 && !app.AgentManagerNative.processAlive(hostPid, hostExecutable);
-					if (stale != null && gone) try sys.FileSystem.deleteFile(stale) catch (_:Dynamic) {}
+					// A host that runs but did not answer in time (a busy machine, a suspended process) is lost for now: the
+					// service tries it again (WorkspaceTerminalManager.readopt).
 					fail(emit, adopted ? "lost" : "failed", !adopted ? "the host did not become ready"
-						: gone ? "the host left by an earlier service is gone"
-						: "the host left by an earlier service runs but did not answer; a later service will try it again");
+						: !hostRuns() ? "the host left by an earlier service is gone"
+						: "the host left by an earlier service runs but did not answer; it is tried again later");
 				}
 				return;
 			}
@@ -227,8 +226,14 @@ class HostedPtyBackend implements TerminalBackend {
 					hostRows = rows;
 					emit(TerminalEvent.geometry(columns, rows));
 				}
-			} else if (kind == TerminalHostProtocol.HISTORY || kind == TerminalHostProtocol.OUTPUT) {
-				if (kind == TerminalHostProtocol.HISTORY && !live) replaying = true;
+			} else if (kind == TerminalHostProtocol.HISTORY) {
+				var buffer = history;
+				if (buffer == null) {
+					buffer = new BytesOutput();
+					history = buffer;
+				}
+				if (message.length > 1) buffer.writeBytes(message, 1, message.length - 1);
+			} else if (kind == TerminalHostProtocol.OUTPUT) {
 				if (message.length > 1) {
 					var data = message.sub(1, message.length - 1);
 					emit(TerminalEvent.output(offset, data, data.length));
@@ -242,18 +247,20 @@ class HostedPtyBackend implements TerminalBackend {
 				}
 				if (message.length > 1) buffer.writeBytes(message, 1, message.length - 1);
 			} else if (kind == TerminalHostProtocol.LIVE) {
+				if (!live && !requested && wasLive) emit(TerminalEvent.resetReplay());
 				live = true;
-				replaying = false;
+				wasLive = true;
+				requested = false;
 				if (reconnectUntil > 0) {
 					reconnectUntil = 0;
 					ServiceLog.note("terminal host " + idValue + ": connected again; the screen was taken from the host anew");
 				}
-				var buffer = screen;
+				var rendered = history == null ? null : history.getBytes();
+				var exact = screen == null ? null : screen.getBytes();
+				history = null;
 				screen = null;
-				if (buffer != null) {
-					var snapshot = buffer.getBytes();
-					if (snapshot.length > 0) emit(TerminalEvent.screenSnapshot(offset, snapshot));
-				}
+				if (rendered != null && rendered.length > 0) emit(TerminalEvent.history(rendered));
+				if (exact != null && exact.length > 0) emit(TerminalEvent.screenSnapshot(offset, exact));
 				if (wantedColumns > 0 && (wantedColumns != hostColumns || wantedRows != hostRows))
 					emit(TerminalEvent.geometry(wantedColumns, wantedRows));
 			} else if (kind == TerminalHostProtocol.EXITED) {
@@ -263,14 +270,14 @@ class HostedPtyBackend implements TerminalBackend {
 				return;
 			}
 		}
-		if (taken > 0 && finalPath == null && link.isOpen()) {
+		if (taken > 0 && link.isOpen()) {
 			queue(TerminalHostProtocol.number(TerminalHostProtocol.CREDIT, taken));
 			taken = 0;
 		}
 		if (!link.isOpen() && !ended) {
 			// Whatever broke the connection, a host that still runs keeps the program: this service takes it back, also
 			// when the break came before the host's screen did (on the first attach or during a reconnect).
-			if (finalPath == null && hostRuns()) {
+			if (hostRuns()) {
 				reconnect(now);
 				return;
 			}
@@ -288,7 +295,7 @@ class HostedPtyBackend implements TerminalBackend {
 	function hostRuns():Bool {
 		var process = child;
 		if (process != null) return process.pollExit() < 0;
-		return hostPid <= 0 || app.AgentManagerNative.processAlive(hostPid, hostExecutable);
+		return hostPid <= 0 || app.AgentNative.processAlive(hostPid, hostExecutable);
 	}
 
 	/**
@@ -298,20 +305,29 @@ class HostedPtyBackend implements TerminalBackend {
 		connection that keeps breaking is opened again more slowly, ten seconds apart after five breaks in a minute, but
 		not given up on: given up, the terminal would be shown ended while its host kept the program running with nothing
 		attached. It is given up only when the host ends, or does not take a connection for RECONNECT_SECONDS (lost: the
-		host keeps its record and the next service tries it again).
+		service tries it again later).
 	**/
 	function reconnect(now:Float):Void {
 		while (reconnects.length > 0 && now - reconnects[0] > 60) reconnects.shift();
 		reconnects.push(now);
+		reopen(now + (reconnects.length > 5 ? 10.0 : 0.2 * reconnects.length), "the connection closed while the program runs" + why(transport));
+		requested = false;
+		reconnectUntil = connectAt + RECONNECT_SECONDS;
+	}
+
+	/** Drops the current connection and opens another at `at`, which the host answers with its screen as on any attach. */
+	function reopen(at:Float, reason:String):Void {
 		var link = transport;
 		transport = null;
 		if (link != null) link.close();
 		live = false;
+		history = null;
 		screen = null;
 		connecting = false;
+		var started = attempt;
 		attempt = null;
-		connectAt = now + (reconnects.length > 5 ? 10.0 : 0.2 * reconnects.length);
-		reconnectUntil = connectAt + RECONNECT_SECONDS;
+		if (started != null) try started.cancel() catch (_:Dynamic) {}
+		connectAt = at;
 		// Input and resizes that did not leave before the break follow the new ATTACH; the size asked for last is sent
 		// again in case its message was lost with the connection.
 		// Acknowledgements belong to the connection that broke: the host counts afresh from the new ATTACH. An ATTACH
@@ -326,7 +342,7 @@ class HostedPtyBackend implements TerminalBackend {
 		outgoing.unshift(TerminalHostProtocol.number(TerminalHostProtocol.CREDIT, 0));
 		outgoing.unshift(TerminalHostProtocol.message(TerminalHostProtocol.ATTACH, Bytes.ofString(token)));
 		if (wantedColumns > 0) outgoing.push(TerminalHostProtocol.pair(TerminalHostProtocol.RESIZE, wantedColumns, wantedRows));
-		ServiceLog.note("terminal host " + idValue + ": the connection closed while the program runs" + why(link) + "; connecting again");
+		ServiceLog.note("terminal host " + idValue + ": " + reason + "; connecting again");
 	}
 
 	/** Why `link` closed, as " (reason)" for a log line, or nothing when that is not known. */
@@ -335,20 +351,13 @@ class HostedPtyBackend implements TerminalBackend {
 		return reason == null ? "" : " (" + reason + ")";
 	}
 
-	public function requestReplay(offset:haxe.Int64):Void {
-		throw "Hosted PTY output cannot replay";
-	}
-
-	public function terminate(force:Bool):Void {
+	/** Ends the program; the host reports its exit code. */
+	public function kill():Void {
 		ensureOpen();
 		if (ended) return;
-		if (force) {
-			killed = true;
-			queue(TerminalHostProtocol.message(TerminalHostProtocol.KILL));
-		} else write(Bytes.ofString("\x03"));
+		killed = true;
+		queue(TerminalHostProtocol.message(TerminalHostProtocol.KILL));
 	}
-
-	public function detach():Void { ensureOpen(); }
 
 	/**
 		Lets go of the host. A host whose program ended, or was told to end, is told to end too; any other keeps its program
@@ -360,26 +369,23 @@ class HostedPtyBackend implements TerminalBackend {
 		var started = attempt;
 		attempt = null;
 		if (started != null) try started.cancel() catch (_:Dynamic) {}
-		var consumed = finalPath;
-		if (consumed != null && exitSeen) try sys.FileSystem.deleteFile(consumed) catch (_:Dynamic) {}
 		var link = transport;
 		transport = null;
+		var ending = killed || exitSeen;
 		if (link != null) {
-			if (consumed != null) link.close();
-			else if (killed || exitSeen) {
+			if (ending && live) {
 				outgoing.push(TerminalHostProtocol.message(TerminalHostProtocol.END));
 				hosts.drain(link, outgoing.copy());
 			} else link.close();
 		}
-		// Closed for good before the host answered (or after its pipe was lost): the pipe cannot carry the END, and the
-		// host would keep the program running with nothing left that knows it. Its folder can.
-		if (killed && (link == null || !live) && folder != null)
-			try suit.TerminalHostFolder.requestEnd(folder, "the terminal was closed before its host was attached", hostPid > 0 ? hostPid : null,
-				TerminalHostProtocol.instanceOf(token)) catch (_:Dynamic) {}
 		outgoing.resize(0);
 		var process = child;
 		child = null;
 		if (process != null) try process.close() catch (_:Dynamic) {}
+		// Told to end before the host was attached (or after its pipe was lost): this connection cannot carry the END, and
+		// the host would keep the program running with nothing left that knows it.
+		var directory = folder;
+		if (killed && !live && directory != null) hosts.endFolder(directory, "the terminal was closed before its host was attached");
 	}
 
 	function ensureOpen():Void {

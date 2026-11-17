@@ -9,12 +9,12 @@ import haxeon.rpc.MessageTransport;
 import sys.FileSystem;
 import sys.io.AtomicFile;
 import sys.io.File;
-import terminalsession.TerminalBackend;
 import terminalsession.TerminalProfile;
 import workspace.transport.NativeRpcHub;
 
 /**
-	A private copy of the running program and its libraries, outside any build tree: what terminal hosts run from.
+	A private copy of the terminal host program, HashLink and the libraries, outside any build tree: what terminal hosts run
+	from.
 
 	A host lives as long as its terminal, across rebuilds of the tree the service runs from. Run from that tree it would
 	keep `hl.exe` and the libraries locked (a build could not replace them) and would have to be stopped for every
@@ -87,7 +87,7 @@ class TerminalHostRuntime {
 			var path = Path.join([copy, name]);
 			var executable:Null<String> = null;
 			try executable = StringTools.trim(File.getContent(path)) catch (_:Dynamic) {}
-			if (pid != null && pid > 0 && app.AgentManagerNative.processAlive(pid, executable == null || executable.length == 0 ? null : executable))
+			if (pid != null && pid > 0 && app.AgentNative.processAlive(pid, executable == null || executable.length == 0 ? null : executable))
 				held = true;
 			else try FileSystem.deleteFile(path) catch (_:Dynamic) {}
 		}
@@ -130,8 +130,8 @@ class TerminalHostRuntime {
 		return removed;
 	}
 
-	public static function prepare(base:String):TerminalHostRuntime {
-		var made = make(base, true);
+	public static function prepare(base:String, agentProgram:String):TerminalHostRuntime {
+		var made = make(base, agentProgram, true);
 		if (made == null) throw "Terminal host runtime copy was not made";
 		return made;
 	}
@@ -140,10 +140,23 @@ class TerminalHostRuntime {
 		What a service does at its start instead of copying (the copy waits for its first terminal): removes the older
 		builds' copies that no host runs from, keeping this build's. Reads only file sizes and times.
 	**/
-	public static function sweep(base:String):Void
-		make(base, false);
+	public static function sweep(base:String, agentProgram:String):Void
+		make(base, agentProgram, false);
 
-	static function make(base:String, copy:Bool):Null<TerminalHostRuntime> {
+	/**
+		The bytecode hosts run: the terminal host built on its own beside the agent program `agentProgram` (a source
+		build's agent/build/terminal-host, a bundle's `exosuit-terminal-host.hl`). It is a small program that starts
+		quickly, so a new terminal's shell starts sooner.
+	**/
+	static function hostProgram(agentProgram:String):String {
+		var agentDirectory = Path.directory(FileSystem.fullPath(agentProgram));
+		for (candidate in [Path.join([Path.directory(agentDirectory), "terminal-host", "host", "main.hl"]),
+			Path.join([agentDirectory, "exosuit-terminal-host.hl"])])
+			if (FileSystem.exists(candidate)) return FileSystem.fullPath(candidate);
+		throw "The terminal host program is missing beside " + agentProgram + " (build agent/terminal-host)";
+	}
+
+	static function make(base:String, agentProgram:String, copy:Bool):Null<TerminalHostRuntime> {
 		var windows = Sys.systemName() == "Windows";
 		var executable = FileSystem.fullPath(Sys.executablePath());
 		var program = FileSystem.fullPath(Sys.programPath());
@@ -166,7 +179,7 @@ class TerminalHostRuntime {
 		var executableName = Path.withoutDirectory(executable);
 		add(executableName, executable);
 		// Not `main.hl`: suit recognizes services by that name and would stop a host with them.
-		add("terminal-host.hl", program);
+		add("terminal-host.hl", hostProgram(agentProgram));
 		addLibraries(executableDirectory, "");
 		// A source build keeps each package's libraries in native/<package> beside the program; an installed one in ../lib.
 		var nativeRoot = Path.join([programDirectory, "native"]);
@@ -240,165 +253,167 @@ class TerminalHostRuntime {
 	}
 }
 
-/** The messages of a host's final file, read as if the host sent them. */
-class RecordedHostTransport implements MessageTransport {
-	final messages:Array<Bytes>;
-
-	public function new(messages:Array<Bytes>) this.messages = messages;
-
-	public function isOpen():Bool return messages.length > 0;
-
-	public function send(message:Bytes):Bool return true;
-
-	public function receive():Null<Bytes> return messages.shift();
-
-	public function close():Void messages.resize(0);
-}
-
 /**
-	Starts and finds terminal hosts for one workspace's service (docs/design/terminal-host-status.md). Each terminal's
-	host has a folder under `<state>/terminal-hosts/` with `host.json` (written by the host: its pipe and token) and
-	`host.log`.
+	Starts, finds and ends the terminal hosts of one workspace's service (docs/design/terminal-host-status.md). Each
+	terminal's host has a folder under `<state>/terminal-hosts/` with `host.json` (written by the host: its pid, pipe and
+	token), `host.log` and the terminal's last screen (TerminalHostProtocol.SCREEN_FILE).
 **/
 class TerminalHosts {
-	final stateDirectory:String;
+	/** The service's state folder, which holds the hosts' folders. */
+	public final stateDirectory:String;
 	final hub:NativeRpcHub;
 	/** Made when the first terminal starts, not with the service: the copy (about 15 MB after each build) is off the start. */
 	var runtime:Null<TerminalHostRuntime> = null;
 	/** Where runtime copies live; the copy is made again when another build's service removed it as unused. */
 	final runtimeBase:String;
+	/** The agent program this service runs: the terminal host program is the one built beside it. */
+	final agentProgram:String;
 	final draining:Array<{transport:MessageTransport, messages:Array<Bytes>, until:Float}> = [];
-	/** Earlier hosts of restarted terminals, held until they end or are killed (`endExisting`). */
-	final retiring:Array<{handle:app.AgentManagerNative.AgentProcessIdentityHandle, pid:Int, until:Float}> = [];
+	/** Hosts told to end (`end`), held until they have or are killed. */
+	final ending:Array<{handle:app.AgentNative.AgentProcessIdentityHandle, pid:Int, until:Float}> = [];
 	/** The folder the service started in and the workspace's id (null for a folder's service): written beside each host for suit. */
 	final root:Null<String>;
 	final workspace:Null<String>;
 
-	function new(events:EventPump, stateDirectory:String, runtimeBase:String, root:Null<String>, workspace:Null<String>) {
+	/**
+		The hosts of the service whose state is `stateDirectory`. The runtime copy hosts run from is made when the first
+		terminal starts (`spawn`); older builds' copies that no host runs from are removed now.
+	**/
+	public function new(events:EventPump, stateDirectory:String, runtimeBase:String, agentProgram:String, ?root:String, ?workspace:String) {
 		this.stateDirectory = stateDirectory;
 		this.runtimeBase = runtimeBase;
+		this.agentProgram = agentProgram;
 		this.root = root;
 		this.workspace = workspace;
 		// Its own hub: a hub carries a bounded number of streams, and the service's is for its clients.
 		hub = new NativeRpcHub(events);
-	}
-
-	/**
-		Whether this service keeps its terminals in hosts. `EXOSUIT_TERMINAL_HOST` decides when set (`1` on, anything else
-		off). Unset, hosts are on for a Windows service on the user's own state.
-	**/
-	public static function enabled():Bool {
-		var asked = Sys.getEnv("EXOSUIT_TERMINAL_HOST");
-		if (asked != null && asked.length > 0) return asked == "1";
-		if (Sys.systemName() != "Windows") return false;
-		// A test or a worktree run keeps its state apart; hosts it left behind would outlive it unseen.
-		for (variable in ["EXOSUIT_AGENT_STATE_HOME", "PRAGTICAL_PORTABLE", "XDG_STATE_HOME"]) {
-			var value = Sys.getEnv(variable);
-			if (value != null && value.length > 0) return false;
-		}
-		return true;
-	}
-
-	/**
-		The hosts of the service whose state is `stateDirectory`, or null when hosts are off; terminals then live inside the
-		service, as before. The runtime copy hosts run from is made when the first terminal starts (`spawn`).
-	**/
-	public static function create(events:EventPump, stateDirectory:String, runtimeBase:String, ?root:String, ?workspace:String):Null<TerminalHosts> {
-		if (!enabled()) return null;
 		try {
-			ServiceLog.note("terminal hosts on: new terminals outlive this service; runtime copies under " + runtimeBase);
-			if (FileSystem.exists(runtimeBase)) TerminalHostRuntime.sweep(runtimeBase);
-			return new TerminalHosts(events, stateDirectory, runtimeBase, root, workspace);
-		} catch (failure:Dynamic) {
-			ServiceLog.note("terminal hosts unavailable, terminals will end with this service: " + Std.string(failure));
-			return null;
-		}
+			if (FileSystem.exists(runtimeBase)) TerminalHostRuntime.sweep(runtimeBase, agentProgram);
+		} catch (failure:Dynamic) ServiceLog.note("unused terminal host runtime copies could not be removed: " + Std.string(failure));
 	}
 
+	function folder(terminal:String):String
+		return TerminalHostProtocol.directory(stateDirectory, terminal);
+
+	/** Whether the host `host.json` names in `directory` runs. */
+	static function runs(directory:String):Bool {
+		var pid = hostNumber(directory, "pid");
+		return pid > 0 && app.AgentNative.processAlive(pid, hostField(directory, "executable"));
+	}
+
+	/** Whether a host of `terminal` runs, whether this service is attached to it or not. */
+	public function hostRuns(terminal:String):Bool
+		return runs(folder(terminal));
+
+	/** How long a host told to end has before it is killed. */
+	static inline final END_SECONDS = 5.0;
+
 	/**
-		Asks the host of `terminal` to end, through its folder: for a terminal whose record is being removed by a service
-		that is not attached to the host (it runs without hosts, lost the host, or the host has not answered yet). Works
-		with hosts off, so it is static. Nothing happens when the terminal never had a host.
+		Ends the host of `terminal` and its program, for a terminal that is closed while this service is not attached to
+		its host (it was lost, or has not answered yet): over its pipe (KILL, END), and by killing its process after
+		END_SECONDS if it still runs. A host that has not started yet finds no spec. Nothing happens when there is none.
 	**/
-	public static function endHostOf(stateDirectory:String, terminal:String, reason:String):Void {
-		var directory = TerminalHostProtocol.directory(stateDirectory, terminal);
-		if (!FileSystem.exists(directory)) return;
+	public function end(terminal:String, reason:String):Void
+		endFolder(folder(terminal), reason);
+
+	/** `end` for the host whose folder is `directory`. */
+	public function endFolder(directory:String, reason:String):Void {
+		removeSpec(directory);
+		var pipe = hostField(directory, "pipe"), token = hostField(directory, "token");
+		var pid = hostNumber(directory, "pid"), executable = hostField(directory, "executable");
+		if (pid <= 0 || executable == null || !app.AgentNative.processAlive(pid, executable)) return;
+		ServiceLog.note("terminal host " + Path.withoutDirectory(directory) + " (pid " + pid + ") told to end: " + reason);
+		// Held from now on: the handle cannot reach another process that reuses the pid.
 		try {
-			// To the host that `host.json` names; with none written yet, to whichever host reads it.
-			var pid = hostNumber(directory, "pid"), token = hostField(directory, "token");
-			suit.TerminalHostFolder.requestEnd(directory, reason, pid > 0 ? pid : null, token == null ? null : TerminalHostProtocol.instanceOf(token));
-			ServiceLog.note("terminal host asked to end for " + terminal + ": " + reason);
+			var held = app.AgentNative.openProcessIdentity(pid, executable);
+			if (held != null) ending.push({handle: held, pid: pid, until: Sys.time() + END_SECONDS});
 		} catch (_:Dynamic) {}
+		if (pipe == null || token == null) return;
+		try hub.connect(NativeRpcHub.local(pipe), function(result) {
+			switch result {
+				case Opened(opened):
+					drain(opened, [TerminalHostProtocol.message(TerminalHostProtocol.ATTACH, Bytes.ofString(token)),
+						TerminalHostProtocol.message(TerminalHostProtocol.KILL), TerminalHostProtocol.message(TerminalHostProtocol.END)]);
+				case Failed(_, _):
+					// Not answering: killed after END_SECONDS.
+			}
+		}) catch (_:Dynamic) {}
 	}
 
-	/** How old a folder with no running host and nothing to collect must be before a service start removes it. */
+	/** Kills the hosts told to end whose time has passed (all of them with `all`), and lets go of them. */
+	function reap(all:Bool):Void {
+		var now = Sys.time();
+		for (entry in ending.copy()) {
+			if (!all && now < entry.until) continue;
+			ending.remove(entry);
+			try {
+				if (app.AgentNative.terminateProcess(entry.handle))
+					ServiceLog.note("the terminal host (pid " + entry.pid + ") did not end when told; it was killed");
+			} catch (failure:Dynamic) ServiceLog.note("the terminal host (pid " + entry.pid + ") could not be killed: " + Std.string(failure));
+			try app.AgentNative.closeProcessIdentity(entry.handle) catch (_:Dynamic) {}
+		}
+	}
+
+	/** How old a folder with no running host and nothing to show must be before a service start removes it. */
 	static inline final DEAD_FOLDER_SECONDS = 60.0;
 
 	/**
-		Run once when a service starts, with hosts on or off. Ends nothing: a host whose terminal has no record here (the
-		record was removed while no service with hosts ran, or the workspace's catalog was replaced or recreated) keeps
-		its program and is logged; suit lists it under its workspace, and the user ends it there. A missing record is
-		weak evidence: a replaced database lacks every record at once.
+		Run once when a service starts. Ends nothing: a host whose terminal has no record here (the record was removed
+		while the host did not answer, or the workspace's catalog was replaced or recreated) keeps its program and is
+		logged; suit lists it under its workspace, and the user ends it there. A missing record is weak evidence: a
+		replaced database lacks every record at once.
 
 		`recorded` are the ids of the terminals the service loaded. The folder of a terminal with no record, no running
-		host and no last screen to collect (`final.bin`) is removed once it is a minute old; while `recorded` is empty
-		nothing is removed. Returns how many recorded terminals have a host that runs now.
+		host and no last screen is removed once it is a minute old; while `recorded` is empty nothing is removed.
 	**/
-	public static function sweep(stateDirectory:String, recorded:Array<String>):Int {
+	public function sweep(recorded:Array<String>):Void {
 		var base = Path.join([stateDirectory, "terminal-hosts"]);
-		if (!FileSystem.exists(base) || !FileSystem.isDirectory(base)) return 0;
+		if (!FileSystem.exists(base) || !FileSystem.isDirectory(base)) return;
 		var known:Map<String, Bool> = [];
-		for (terminal in recorded) known.set(Path.withoutDirectory(TerminalHostProtocol.directory(stateDirectory, terminal)), true);
-		var running = 0;
+		for (terminal in recorded) known.set(Path.withoutDirectory(folder(terminal)), true);
 		for (name in FileSystem.readDirectory(base)) {
 			var directory = Path.join([base, name]);
-			if (!FileSystem.isDirectory(directory)) continue;
-			var pid = hostNumber(directory, "pid");
-			var alive = pid > 0 && app.AgentManagerNative.processAlive(pid, hostField(directory, "executable"));
-			if (known.exists(name)) {
-				if (alive) running++;
-				continue;
-			}
-			if (alive) {
-				ServiceLog.note("terminal host folder " + name + " (host pid " + pid + ") has no terminal record in this workspace: left running;"
+			if (known.exists(name) || !FileSystem.isDirectory(directory)) continue;
+			if (runs(directory)) {
+				ServiceLog.note("terminal host folder " + name + " (host pid " + hostNumber(directory, "pid") + ") has no terminal record in this workspace: left running;"
 					+ " `suit terminals` lists it and `suit terminals end` ends it");
 				continue;
 			}
 			if (recorded.length == 0) continue;
 			try {
 				var names = FileSystem.readDirectory(directory);
-				if (names.indexOf(TerminalHostProtocol.FINAL_FILE) >= 0 || TerminalHostRuntime.age(directory) < DEAD_FOLDER_SECONDS) continue;
+				if (names.indexOf(TerminalHostProtocol.SCREEN_FILE) >= 0 || TerminalHostRuntime.age(directory) < DEAD_FOLDER_SECONDS) continue;
 				for (file in names) FileSystem.deleteFile(Path.join([directory, file]));
 				FileSystem.deleteDirectory(directory);
 				ServiceLog.note("removed the folder of a terminal host that is gone: " + name);
 			} catch (_:Dynamic) {}
 		}
-		return running;
 	}
 
-	/** Starts a host running `profile`'s program; `name` is the terminal's, for suit's list. Throws when the host cannot be started. */
-	public function spawn(terminal:String, profile:TerminalProfile, columns:Int, rows:Int, ?name:String):TerminalBackend {
-		var directory = TerminalHostProtocol.directory(stateDirectory, terminal);
+	/**
+		Starts a host running `profile`'s program; `name` is the terminal's, for suit's list, and `prelude` what its
+		emulator shows before the program starts. Throws when the host cannot be started, and when a host of this terminal
+		still runs: that one is never replaced unasked.
+	**/
+	public function spawn(terminal:String, profile:TerminalProfile, columns:Int, rows:Int, ?name:String, ?prelude:Bytes):HostedPtyBackend {
+		var directory = folder(terminal);
 		TerminalHostRuntime.ensureDirectory(Path.directory(directory));
-		// Private to this user, as LocalServiceDescriptor wants a descriptor's folder: `spec.bin` holds the program's whole
+		// Private to this user, as the service's state folder is: `spec.bin` holds the program's whole
 		// environment and the pipe's token, and on Windows a file takes its folder's access list.
-		if (!app.AgentManagerNative.prepareDirectory(directory)) throw "The terminal host folder is not private to this user: " + directory;
-		// An unaddressed request was for whichever host was here before; the new one must not take it.
-		var pending = suit.TerminalHostFolder.endRequest(directory);
-		if (pending != null && pending.pid == null && pending.instance == null) suit.TerminalHostFolder.clearEndRequest(directory);
-		// A host left for this terminal (its shell is being restarted) must not stay behind unseen.
-		endExisting(directory);
+		if (!app.AgentNative.prepareDirectory(directory)) throw "The terminal host folder is not private to this user: " + directory;
+		if (runs(directory)) throw "A terminal host of this terminal still runs";
+		try FileSystem.deleteFile(Path.join([directory, "host.json"])) catch (_:Dynamic) {}
 		// Which terminal of which workspace this host keeps: suit lists it by this, with no service running.
 		suit.TerminalHostFolder.writeTerminal(directory, terminal, name, workspace, root);
 		// Made with the first terminal; and a service of another build may have removed this one's copy while no host ran from it.
 		var runtime = this.runtime;
 		if (runtime == null || !FileSystem.exists(runtime.executable) || !FileSystem.exists(runtime.program)) {
-			runtime = TerminalHostRuntime.prepare(runtimeBase);
+			runtime = TerminalHostRuntime.prepare(runtimeBase, agentProgram);
 			this.runtime = runtime;
 			ServiceLog.note("terminal host runtime copy " + Path.directory(runtime.executable));
 		}
-		var token = app.AgentManagerNative.randomToken();
-		var pipe = Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-term-" + app.AgentManagerNative.randomToken().substr(0, 32)
+		var token = app.AgentNative.randomToken();
+		var pipe = Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-term-" + app.AgentNative.randomToken().substr(0, 32)
 			: Path.join([directory, "host.sock"]);
 		var specPath = Path.join([directory, "spec.bin"]);
 		AtomicFile.writeBytes(specPath, TerminalHostProtocol.encodeSpec({
@@ -409,22 +424,42 @@ class TerminalHosts {
 			program: profile.program,
 			cwd: profile.cwd == null ? "" : profile.cwd,
 			arguments: profile.arguments,
-			environment: profile.childEnvironment()
+			environment: profile.childEnvironment(),
+			prelude: prelude == null ? Bytes.alloc(0) : prelude
 		}));
-		if (!app.AgentManagerNative.privateFile(specPath)) {
+		if (!app.AgentNative.privateFile(specPath)) {
 			removeSpec(directory);
 			throw "The terminal host's spec file is not private to this user: " + specPath;
 		}
 		var variable = Sys.systemName() == "Windows" ? "PATH" : Sys.systemName() == "Mac" ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH";
 		// Detached: outside the service's job, so stopping or killing the service leaves the host running. Its own folder is
-		// its working directory, so it does not pin the workspace's; the manager's lock is not passed on.
+		// its working directory, so it does not pin the workspace's.
 		var child = try sys.io.Process.spawn(runtime.executable, [runtime.program, "--terminal-host", directory], directory,
-			[variable, "EXOSUIT_AGENT_LOCK_FD"], [runtime.libraryPath, ""], true) catch (failure:Dynamic) {
+			[variable], [runtime.libraryPath], true) catch (failure:Dynamic) {
 				removeSpec(directory);
 				throw failure;
 			}
 		ServiceLog.note("terminal host starting for " + terminal + " in " + directory);
-		return new HostedPtyBackend(this, hub, pipe, token, child, false, null, directory);
+		return new HostedPtyBackend(this, hub, pipe, token, TerminalHostProtocol.VERSION, child, false, directory);
+	}
+
+	/**
+		Kills the host of `terminal` once its program has ended and its last screen is written: it keeps nothing more, and
+		a Restart must not wait for it to go on its own. Waits up to a second for it to be gone.
+	**/
+	public function endExited(terminal:String):Void {
+		var directory = folder(terminal);
+		if (!FileSystem.exists(Path.join([directory, TerminalHostProtocol.SCREEN_FILE]))) return;
+		var pid = hostNumber(directory, "pid"), executable = hostField(directory, "executable");
+		if (pid <= 0 || executable == null) return;
+		try {
+			var held = app.AgentNative.openProcessIdentity(pid, executable);
+			if (held == null) return;
+			app.AgentNative.terminateProcess(held);
+			app.AgentNative.closeProcessIdentity(held);
+		} catch (_:Dynamic) {}
+		var until = Sys.time() + 1;
+		while (runs(directory) && Sys.time() < until) Sys.sleep(0.02);
 	}
 
 	/**
@@ -446,96 +481,6 @@ class TerminalHosts {
 		}
 	}
 
-	/** How long an earlier host of a restarted terminal has to end when asked before it is killed. */
-	static inline final RETIRE_SECONDS = 5.0;
-
-	/**
-		Ends the host `directory`'s `host.json` names, for Restart Terminal: over its pipe (KILL, END) and with an end
-		request addressed to it, which the new host leaves alone. That host may run without answering (the reason its
-		terminal showed as lost), so its process is held from now on and killed after RETIRE_SECONDS if it still runs: the
-		held handle cannot reach another process that reused its id.
-	**/
-	function endExisting(directory:String):Void {
-		var pipe = hostField(directory, "pipe"), token = hostField(directory, "token");
-		var pid = hostNumber(directory, "pid"), executable = hostField(directory, "executable");
-		var held:Null<app.AgentManagerNative.AgentProcessIdentityHandle> = null;
-		if (pid > 0 && executable != null) try held = app.AgentManagerNative.openProcessIdentity(pid, executable) catch (_:Dynamic) {}
-		try FileSystem.deleteFile(Path.join([directory, "host.json"])) catch (_:Dynamic) {}
-		try FileSystem.deleteFile(Path.join([directory, TerminalHostProtocol.FINAL_FILE])) catch (_:Dynamic) {}
-		if (pid > 0)
-			try suit.TerminalHostFolder.requestEnd(directory, "the terminal was restarted", pid, token == null ? null : TerminalHostProtocol.instanceOf(token))
-			catch (_:Dynamic) {}
-		if (held != null) retiring.push({handle: held, pid: pid, until: Sys.time() + RETIRE_SECONDS});
-		if (pipe == null || token == null) return;
-		try hub.connect(NativeRpcHub.local(pipe), function(result) {
-			switch result {
-				case Opened(opened):
-					drain(opened, [TerminalHostProtocol.message(TerminalHostProtocol.ATTACH, Bytes.ofString(token)),
-						TerminalHostProtocol.message(TerminalHostProtocol.KILL), TerminalHostProtocol.message(TerminalHostProtocol.END)]);
-				case Failed(_, _):
-					// Not answering: the addressed request, and the kill after RETIRE_SECONDS, end it.
-			}
-		}) catch (_:Dynamic) {}
-	}
-
-	/** Kills the earlier hosts whose time to end has passed (all of them with `all`), and lets go of them. */
-	function retire(all:Bool):Void {
-		var now = Sys.time();
-		for (entry in retiring.copy()) {
-			if (!all && now < entry.until) continue;
-			retiring.remove(entry);
-			try {
-				if (app.AgentManagerNative.terminateProcess(entry.handle))
-					ServiceLog.note("the earlier terminal host (pid " + entry.pid + ") of a restarted terminal did not end when asked; it was killed");
-			} catch (failure:Dynamic) ServiceLog.note("the earlier terminal host (pid " + entry.pid + ") could not be killed: " + Std.string(failure));
-			try app.AgentManagerNative.closeProcessIdentity(entry.handle) catch (_:Dynamic) {}
-		}
-	}
-
-	/**
-		The host an earlier service generation left running for `terminal`, or null when there is none: no `host.json`, or
-		one whose process is gone (a restart of the machine, a host ended by hand), which is then removed. A host that runs
-		but does not answer in time reports the terminal lost when the backend is polled, and is tried again by the next
-		service.
-	**/
-	public function adopt(terminal:String):Null<TerminalBackend> {
-		var directory = TerminalHostProtocol.directory(stateDirectory, terminal);
-		var pipe = hostField(directory, "pipe"), token = hostField(directory, "token");
-		if (pipe == null || token == null || pipe.length == 0 || token.length == 0) return ended(terminal, directory);
-		// A host started by a newer build may speak messages this service does not know. It is left alone, with its
-		// record: the terminal shows as lost with its saved history, and a service of that build takes it back.
-		var protocol = hostNumber(directory, "protocol");
-		if (protocol > TerminalHostProtocol.VERSION) {
-			ServiceLog.note('terminal host for ${terminal} speaks protocol ${protocol}, this service ${TerminalHostProtocol.VERSION}: left to a newer service');
-			return null;
-		}
-		var pid = hostNumber(directory, "pid");
-		if (pid > 0 && !app.AgentManagerNative.processAlive(pid, hostField(directory, "executable"))) {
-			try FileSystem.deleteFile(Path.join([directory, "host.json"])) catch (_:Dynamic) {}
-			return ended(terminal, directory);
-		}
-		return new HostedPtyBackend(this, hub, pipe, token, null, true, Path.join([directory, "host.json"]), directory, pid,
-			hostField(directory, "executable"));
-	}
-
-	/**
-		The last state of a terminal whose program ended while no service ran, from the file its host left: a backend that
-		delivers the history, the screen and the exit code, then is done. Null when there is no such file.
-	**/
-	function ended(terminal:String, directory:String):Null<TerminalBackend> {
-		var path = Path.join([directory, TerminalHostProtocol.FINAL_FILE]);
-		if (!FileSystem.exists(path)) return null;
-		try {
-			var messages = TerminalHostProtocol.decodeFinal(File.getBytes(path));
-			ServiceLog.note("terminal " + terminal + " ended while no service ran: its host left the last screen and exit code");
-			// No folder: there is no host an end request could reach.
-			return new HostedPtyBackend(this, hub, "", "", null, true, null, null, 0, null, new RecordedHostTransport(messages), path);
-		} catch (failure:Dynamic) {
-			ServiceLog.note("terminal " + terminal + ": the last screen its host left could not be read (" + Std.string(failure) + ")");
-			return null;
-		}
-	}
-
 	static function hostNumber(directory:String, field:String):Int {
 		try {
 			var parsed:Dynamic = Json.parse(File.getContent(Path.join([directory, "host.json"])));
@@ -546,12 +491,62 @@ class TerminalHosts {
 		}
 	}
 
+	/**
+		The running host of `terminal` that this service is not attached to (an earlier service started it, or this one
+		lost its connection), or null when none runs: no `host.json`, or one whose process is gone (a restart of the
+		machine, a host ended by hand), which is then removed.
+	**/
+	public function adopt(terminal:String):Null<HostedPtyBackend> {
+		var directory = folder(terminal);
+		var pipe = hostField(directory, "pipe"), token = hostField(directory, "token");
+		if (pipe == null || token == null || pipe.length == 0 || token.length == 0) return null;
+		// A host started by a newer build may speak messages this service does not know. It is left alone, with its
+		// record: the terminal shows as lost with its last screen, and a service of that build takes it back.
+		var protocol = hostNumber(directory, "protocol");
+		if (protocol > TerminalHostProtocol.VERSION) {
+			ServiceLog.note('terminal host for ${terminal} speaks protocol ${protocol}, this service ${TerminalHostProtocol.VERSION}: left to a newer service');
+			return null;
+		}
+		if (!runs(directory)) {
+			try FileSystem.deleteFile(Path.join([directory, "host.json"])) catch (_:Dynamic) {}
+			return null;
+		}
+		return new HostedPtyBackend(this, hub, pipe, token, protocol, null, true, directory, hostNumber(directory, "pid"),
+			hostField(directory, "executable"));
+	}
+
+	/** The last screen a host of `terminal` kept (TerminalHostProtocol.SCREEN_FILE), or null when there is none to read. */
+	public function lastScreen(terminal:String):Null<TerminalHostProtocol.TerminalScreen> {
+		var path = Path.join([folder(terminal), TerminalHostProtocol.SCREEN_FILE]);
+		if (!FileSystem.exists(path)) return null;
+		try {
+			return TerminalHostProtocol.screenOf(TerminalHostProtocol.decodeScreen(File.getBytes(path)));
+		} catch (failure:Dynamic) {
+			ServiceLog.note("terminal " + terminal + ": its last screen could not be read (" + Std.string(failure) + ")");
+			return null;
+		}
+	}
+
+	public function hasLastScreen(terminal:String):Bool
+		return FileSystem.exists(Path.join([folder(terminal), TerminalHostProtocol.SCREEN_FILE]));
+
+	/** Removes what is left of `terminal`'s host when the terminal is removed: its last screen and, once no host runs there, its folder. */
+	public function forget(terminal:String):Void {
+		var directory = folder(terminal);
+		try FileSystem.deleteFile(Path.join([directory, TerminalHostProtocol.SCREEN_FILE])) catch (_:Dynamic) {}
+		if (runs(directory)) return;
+		try {
+			for (file in FileSystem.readDirectory(directory)) FileSystem.deleteFile(Path.join([directory, file]));
+			FileSystem.deleteDirectory(directory);
+		} catch (_:Dynamic) {}
+	}
+
 	/** Sends `messages` on `transport`, then closes it: a host being told to end must get the message first. */
 	public function drain(transport:MessageTransport, messages:Array<Bytes>):Void
 		draining.push({transport: transport, messages: messages, until: Sys.time() + 2});
 
 	public function poll():Void {
-		if (retiring.length > 0) retire(false);
+		if (ending.length > 0) reap(false);
 		if (draining.length == 0) return;
 		var now = Sys.time();
 		for (entry in draining.copy()) {
@@ -566,9 +561,9 @@ class TerminalHosts {
 		}
 	}
 
-	/** Detaches from every host; their programs keep running. Earlier hosts of restarted terminals that still run are killed. */
+	/** Detaches from every host; their programs keep running. Hosts told to end that still run are killed. */
 	public function dispose():Void {
-		retire(true);
+		reap(true);
 		for (entry in draining) {
 			while (entry.messages.length > 0 && entry.transport.send(entry.messages[0])) entry.messages.shift();
 			entry.transport.close();

@@ -115,7 +115,7 @@ class TerminalSnapshotTests {
 	/** The service at production message limits: a 277x65 terminal's snapshot only arrives in pages. */
 	public static function service(root:String):Void {
 		var clock = function() return Sys.time() * 1000;
-		var manager = new workspace.runtime.WorkspaceTerminalManager("w", "instance", root, 65536);
+		var manager = TestTerminals.manager("w", "instance", root, 65536);
 		var pair = MemoryTransport.pair();
 		var client = new RpcConnection(pair.client, clock, 262144, 32, 1048576);
 		var server = new RpcConnection(pair.server, clock, 262144, 32, 1048576);

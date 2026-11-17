@@ -9,6 +9,65 @@ and the status.
 
 ## Open
 
+### An edit to AutomationProbe.hx makes its hlNative extern "not return on every path"
+
+- **Symptom:** seen 2026-11-16 on haxeon fa128931e (exosuit main a457e3dc): adding one line to
+  `AutomationProbe.poll()` (`if (sys.FileSystem.exists(directory + "/pause")) return;`) and running
+  `scripts/build-windows.ps1 -SkipBootstrap` fails with `devtools/AutomationProbe.hx:21:8: E1006: Function
+  devtools.AutomationProbe.preparePrivateDirectory does not return on every path`. Line 21 is an untouched
+  `@:hlNative("haxeon_runtime", "__host_prepare_private_directory") extern function ...:Bool;` with no body.
+  The unedited file builds.
+- **Cause:** not known. The return-path check seems to run on a bodiless native extern once the module is typed again.
+- **Workaround:** the same check in the caller (GraphicalMain) instead of the probe. Not tried on a later haxeon.
+- **Status:** open, no minimal repro.
+
+### The browser build stops before type checking: noisekit has no wasm32 provider
+
+- **Symptom:** `scripts/haxeon_cli.py build --project web/haxeon.json` (also with `--compiler-only`) ends at once with
+  `haxeon: Package noisekit cannot be built for wasm32: noisekit -> native dependency noisekit / no wasm32 provider is
+  available`. Nothing in the browser sources is type-checked.
+- **Cause:** native-packages/noise declares only native providers. The browser client needs Noise (pairing and every
+  machine channel go through `NoiseSession`), so it needs a wasm32 provider of noisekit (an Emscripten build of
+  noise-c, like the other kits' wasm32 builds) or a haxeon option to type-check a project without resolving native
+  providers.
+- **Workaround:** none in exosuit. The browser client (web/src/app: `WebMain`, `BrowserPairedMachines`) is written
+  against the shared device client (`DevicePairing`, `RemoteMachines`, `RemoteMachine`, `WorkspaceLink`), which the
+  phone build compiles; the browser-only files are checked by reading only.
+- **Found:** 2026-11-16, entropy Step 8 (browser rebuilt on suit). Also needs Emscripten in the worktree to link.
+
+### An empty `package;` declaration is a parse error
+
+- **Symptom:** `PhoneSnapshotFile.hx:1:8: E0002: Expected name, got Semicolon` for a file starting with `package;`.
+  Stock Haxe accepts an empty package declaration.
+- **Workaround:** leave the line out (the root package is the default).
+- **Found:** 2026-11-16, entropy Step 8 (the Android module had stopped compiling).
+
+### A field's type is not inferred from an inline static constant
+
+- **Symptom:** `var ownStatus = NOT_PAIRED;` (with `static inline final NOT_PAIRED = "..."`) gives
+  `E1002: Cannot infer type of field "ownStatus" from this initializer`. Stock Haxe infers String.
+- **Workaround:** write the type: `var ownStatus:String = NOT_PAIRED;`.
+- **Found:** 2026-11-16, entropy Step 8 (`RemoteMachines`).
+
+### NativeKit's local listener stops when a client connects and closes before it accepts (runtime, not the compiler)
+
+- **Symptom:** after `pragtical-ctl list` (whose health check opens a pipe and closes it at once) every later
+  connection to that pipe waits forever in `WaitNamedPipe`.
+- **Cause:** `ListenerResource::run` (haxeon/vendor/nativekit/src/transport/transport.cpp) treats every
+  `ConnectNamedPipe` error other than `ERROR_PIPE_CONNECTED` and `ERROR_PIPE_LISTENING` as fatal. A client that
+  connected and closed before the call gives `ERROR_NO_DATA`; the listener emits a failure and its thread returns, so
+  no new pipe instance is created. That case should disconnect the instance and listen again.
+- **Found:** 2026-11-15, entropy Step 9 (suit's Pragtical pipes).
+- **Why it is hit every time:** the pipe is PIPE_NOWAIT and the listener polls `ConnectNamedPipe` every 5 ms, while
+  pragtical-ctl's health check connects and closes in well under a millisecond.
+- **Workaround (partial):** suit starts a stopped listener again (PragticalPipes.listen, SuitDaemon.listen use the
+  `failed` callback of NativeRpcHub.listen/listenBytes), so the pipe does not stay dead. It cannot close the gap: the
+  new listener's first instance is made with FILE_FLAG_FIRST_PIPE_INSTANCE, so it can start only after the stopped
+  listener's handle is closed, and pragtical-ctl connects again at once, into that gap ("failed to connect to local
+  transport named pipe"). Only `pragtical-ctl list` works; every command that connects after its health check fails.
+- **Fix (in NativeKit):** on `ERROR_NO_DATA`, `DisconnectNamedPipe(current)` and keep listening on the same instance.
+- **Status:** open.
+
 ### A small edit "retypes ~15000 functions" (investigated, not an invalidation bug)
 
 - **Symptom:** `build-windows.ps1` (and a cold Android build) report `15087 functions retyped` and a 40 to 70 s compile after a
@@ -169,6 +228,16 @@ and the status.
 - **Status:** open, **unconfirmed**: no minimal reproduction yet, so it may have been a mistake in the store that the
   rewrite happened to remove. Worth a small test of nested map values (`map.get(a).set(b, array)`) before relying on it.
 
+### `Map<String, T>.get(null)` is an access violation, not a null-access error
+
+- **Symptom:** `exosuit: frame: Access violation`, with the stack only at the outermost `BuildContext.withScopeUnder`
+  rethrow; the real site was `sources.get(view.openWorkspace)` in `WorkbenchPanel.syncState` with `openWorkspace`
+  null (a window on no workspace yet, with other workspaces' rows in the map). The `Null<String>` key type-checks.
+- **Found:** 2026-11-16, ws_open GUI scenario on entropy-1115.
+- **Workaround:** check the key for null before `get`/`exists`.
+- **Status:** open. The typer could reject a `Null<String>` key, or the map raise a catchable null error. The
+  rethrow in `withScopeUnder` (`throw error`) also drops the original stack, which made this hard to find.
+
 ### A conditional over two `Null<Color>` values reports "Type mismatch for conditional branch"
 
 - **Symptom:** `E1003: Type mismatch for conditional branch` at `label.layout.setColor(highlighted ? activeColor : color)`
@@ -249,8 +318,9 @@ and the status.
 - **Cause:** the runtime's `__std_parse_int` (`native/runtime/strings.c`) is `strtol(text, NULL, 0)`, base 0, which
   takes a leading `0` as octal; the wasm `stdParseInt` in `stdlib/Std.hx` copies that on purpose. HashLink's own
   `hl_parse_int` reads decimal unless the text starts with `0x`.
-- **Workaround:** strip leading zeros before `Std.parseInt` (`AgentTerminalResume.matchedTime`). Other exosuit callers
-  that parse zero-padded fields are still exposed.
+- **Workaround:** strip leading zeros before `Std.parseInt` (was `AgentTerminalResume.matchedTime`; that code went on
+  2026-11-15, when provider terminals began to report their conversation instead of being matched by time). Other
+  exosuit callers that parse zero-padded fields are still exposed.
 - **Status:** open. Fix in haxeon: base 10 unless a `0x` prefix, in both the native and the wasm version.
 
 ## Building haxeon's own tools with haxeon (2026-11-11)
@@ -339,6 +409,35 @@ after a fix or a throwaway stub. Result on `exosuit-m19` (9e0a4259) plus the fix
 - **Status:** open, not diagnosed further (no minidump taken). If it recurs on a passing run, capture a dump with
   WER LocalDumps for `hl.exe` and look at which native library's `/GS` cookie check fails during teardown.
 
+## Runtime: a Windows pipe listener stops after a client left before it was accepted
+
+- **Seen:** a terminal host that was suspended while a workspace service connected to its pipe and gave up never
+  accepted another connection after it was resumed; every later service found it "running but not answering".
+- **Cause:** NativeKit's local listener (`vendor/nativekit/src/transport/transport.cpp`, the `ConnectNamedPipe` loop)
+  accepts `ERROR_PIPE_CONNECTED` and `ERROR_PIPE_LISTENING` but treats `ERROR_NO_DATA` (the client connected and closed
+  before the server called `ConnectNamedPipe`) as a failure: it emits `TransportFailed` for the listener and stops.
+- **Workaround:** `NativeRpcHub.listen` takes a `failed` callback for the listener's failure, and the host listens
+  again (`TerminalHostMain`, "the pipe stopped accepting connections; it listens again").
+- **Status:** open in haxeon; the fix would `DisconnectNamedPipe` on `ERROR_NO_DATA` and loop.
+
+### Calling an optional function field of a structure: "Cannot call non-function field"
+
+- **Symptom:** `E1007: Cannot call non-function field "failed"` for `if (entry.failed != null) entry.failed();` where
+  `entry` is `{..., ?failed:Void->Void}` (`NativeRpcHub.onEvent`).
+- **Workaround:** read it into a local first: `var failed = entry.failed; if (failed != null) failed();`.
+- **Status:** open; stock Haxe accepts the direct call.
+
+## Runtime: the collector does not count large native byte exports
+
+- **Seen:** a process that repeatedly exports a long terminal history (`Emulator.historySnapshot`, up to 16 MiB, and
+  its encoded copy) grows by gigabytes: HashLink's heap counters stay under 70 MiB while the process holds 2.7 GiB, so
+  no collection starts until other allocation reaches the 64 MB trigger, about a minute later. Measured 2026-11-12 in
+  the workspace service (its periodic SQLite history save, since removed).
+- **Workaround:** the terminal host, which now writes its last screen (`screen.bin`) every 30 s or more while the
+  screen changes, calls `hl.Gc.major()` after a save of 4 MiB or more (`TerminalHostMain.saveScreen`).
+- **Status:** open; not reduced to a small repro. A fix would have the runtime count the bytes of large buffers
+  towards its collection trigger.
+
 ## Standard library gaps
 
 Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
@@ -347,7 +446,7 @@ Standard Haxe APIs haxeon's standard library does not have yet. Each one forced 
   on non-object" naming the receiver, even when it is a local typed `Bytes` (seen 2026-11-06 in
   tests/haxeon-rpc RpcCompatibilityTests). Workaround: `[for (i in 0...b.length) StringTools.hex(b.get(i), 2)].join("")`.
 - **`Date` has only `now()` and `getTime()`:** no `getFullYear`, `getMonth`, `getDate`, `getHours` and so on.
-  `AgentWorkspaceMigration.timestamp` computes the calendar date from the epoch time by hand.
+  The workspace migration (removed 2026-11-15) computed the calendar date from the epoch time by hand.
 - **No `DateTools`** (`DateTools.format` and the rest).
 - **`Bytes` has no `toHex`:** a hex
   fingerprint is a hand-written loop (`WorkspaceCatalogService.hex`).
@@ -385,6 +484,9 @@ These are stricter than stock Haxe. Each needs a decision, and a better message 
   2026-11-12 in `RpcTerminalBackend`): `var total:Int = snapshot.total;` with `total:Null<Int>` in a typedef is
   accepted by stock Haxe on HashLink. Workaround: `var total:Int = snapshot.total == null ? 0 : snapshot.total;`.
   The message does not say that nullability is what differs.
+- **An `if` with no `else` cannot be a closure's whole body inside a call** ("E0002: Expected Else, got RightParen",
+  seen 2026-11-15 in `ExosuitApp` and `WorkbenchPanel`): `f(function(name) if (ok) title = name);` is accepted by
+  stock Haxe. Workaround: braces, `f(function(name) { if (ok) title = name; });`.
 
 ## Generated helper code names an enum abstract value without its type
 
@@ -393,3 +495,15 @@ compiles the haxeon compiler (the editor does) declares another enum abstract wi
 did), the build fails with E1005 "Ambiguous enum abstract value "Helper"". An abstract in another package should not make
 an unqualified value inside the compiler's own package ambiguous. Workaround in exosuit: the suit kind is `HelperProcess`.
 Fix in haxeon: qualify the value (`FunctionOriginKind.Helper`), or prefer the abstract of the expected type.
+
+## UIKit: TreeView.focusItem on a restored context
+
+Seen 2026-11-16 with driven input (`m19_group_entry`): a click on a Workbench row that takes the window back to a
+context it showed before (a group entered a second time, or the root after a group) leaves no widget with the
+keyboard, so Down and Enter do nothing until the next click. The first entry into a context keeps the row focused, and
+`exosuit.ui.focus` on the same row afterwards succeeds, so the row is focusable; the request of `TreeView.focusItem` is
+dropped. Likely cause: the row build checks `interactionStates` for `Focused` to decide that the request is met, and a
+restored context's retained row node still carries that state from when the context was last shown, so the request is
+cleared without focusing (`haxeon/packages/ui/haxe/haxeon/ui/widgets/collections/TreeView.hx`, the row build
+callback). Fix in haxeon: treat the request as met only when `focus.focusedId` is the row's id. No workaround in
+exosuit; the scenario clicks the root's row once more before using the keyboard.

@@ -13,7 +13,7 @@ class TerminalControlTests {
 
   public static function run(root:String):Void {
     var clock = function() return Sys.time() * 1000;
-    var manager = new WorkspaceTerminalManager("w", "instance", root, 65536);
+    var manager = TestTerminals.manager("w", "instance", root, 65536);
     var grants = [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL];
     var peers:Array<{client:RpcConnection, server:RpcConnection}> = [];
     var pump = function() {

@@ -4,7 +4,6 @@ import haxe.Int64;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import workspace.runtime.WorkspaceTerminalManager;
-import workspace.service.TerminalHistory;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalPersistence;
 import workspace.service.WorkspaceTerminalProtocol;
@@ -17,7 +16,10 @@ class TerminalOrderTest {
   var store=new OrderTerminalStore({id:"term",name:"Shell",group:"work",cwd:root,instance:"before",state:"exited",
    exitCode:0,available:false,revision:Int64.ofInt(1),workspaceRoot:root});
   var groups:Array<WorkspaceProtocol.WorkspaceGroup>=[{id:"work",name:"Work",cwd:null,revision:1},{id:"other",name:"Other",cwd:null,revision:1}];
-  var manager=new WorkspaceTerminalManager("w","owner",root,65536,store,function() { return groups; });
+  // No terminal is started here: the hosts' folder is never written.
+  var runtime=haxeon.platform.Runtime.start();
+  var hosts=function() return new workspace.runtime.TerminalHosts(runtime.events,root+"/terminal-state",root+"/terminal-host-runtime",Sys.programPath());
+  var manager=new WorkspaceTerminalManager("w","owner",root,hosts(),65536,store,function() { return groups; });
   var clock=function() { return Sys.time()*1000; };
   var pair=MemoryTransport.pair();
   var client=new RpcConnection(pair.client,clock), server=new RpcConnection(pair.server,clock);
@@ -41,9 +43,10 @@ class TerminalOrderTest {
   rename("work",WorkspaceProtocol.MAX_ORDER);require(answered!=null && store.record.order==WorkspaceProtocol.MAX_ORDER,"terminal order at the limit refused");
   rename("work",2);
   client.close();server.close();manager.dispose();
-  manager=new WorkspaceTerminalManager("w","restarted",root,65536,store,function() { return groups; });
+  manager=new WorkspaceTerminalManager("w","restarted",root,hosts(),65536,store,function() { return groups; });
   require(manager.snapshot().terminals[0].order==2 && manager.snapshot().terminals[0].group=="work","terminal position lost across a restart");
   manager.dispose();
+  runtime.dispose();
   trace("PASS: terminal service saves, bounds and keeps a terminal's position among its siblings");
  }
 }
@@ -54,7 +57,4 @@ private class OrderTerminalStore implements WorkspaceTerminalPersistence {
  public function loadTerminals():Array<TerminalRecord> return [record];
  public function saveTerminal(value:TerminalRecord):Void record=value;
  public function removeTerminal(id:String):Void throw "unexpected removal";
- public function hasTerminalHistory(id:String):Bool return false;
- public function loadTerminalHistory(id:String):Null<TerminalHistory> return null;
- public function saveTerminalHistory(id:String,history:TerminalHistory):Void {}
 }

@@ -6,7 +6,6 @@ import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceService;
-import sqlitekit.Database;
 
 private class FaultyTerminalStore implements workspace.service.WorkspaceTerminalPersistence {
   public final records:Array<TerminalRecord> = [];
@@ -21,9 +20,6 @@ private class FaultyTerminalStore implements workspace.service.WorkspaceTerminal
     else records[0] = r;
   }
   public function removeTerminal(id:String):Void records.resize(0);
-  public function hasTerminalHistory(id:String):Bool return false;
-  public function loadTerminalHistory(id:String):Null<workspace.service.TerminalHistory> return null;
-  public function saveTerminalHistory(id:String, history:workspace.service.TerminalHistory):Void {}
 }
 class TerminalCatalogTests {
   static function require(v:Bool, message:String):Void {
@@ -33,7 +29,7 @@ class TerminalCatalogTests {
     for (failAt in[1, 2]) {
       var clock = function() return Sys.time() * 1000;
       var store = new FaultyTerminalStore(failAt);
-      var manager = new WorkspaceTerminalManager("w", "fault", root, 65536, store);
+      var manager = TestTerminals.manager("w", "fault", root, 65536, store);
       var pair = MemoryTransport.pair(), client = new RpcConnection(pair.client, clock), server = new RpcConnection(
         pair.server,
         clock
@@ -91,21 +87,15 @@ class TerminalCatalogTests {
     var seed:WorkspaceSnapshot = {epoch: "catalog", cursor: 0, groups: groups};
     var path = root + "/terminal-catalog.sqlite";
     var store = new WorkspaceSqliteStore(path, "w", seed);
-    // Exercise migration of an existing v1 catalog without modifying its group data.
-    store.close();
-    var admin = Database.open(path);
-    admin.exec("DROP TABLE workspace_terminals");
-    admin.exec("DROP TABLE workspace_agents; DROP TABLE workspace_devices; ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=1");
-    admin.close();
-    store = new WorkspaceSqliteStore(path, "w", seed);
-    var service = new WorkspaceService("w", "ignored", groups, 32, 256, 16, store);
-    var manager = new WorkspaceTerminalManager(
+    var service = new WorkspaceService("w", "ignored", groups, 256, 16, store);
+    var manager = TestTerminals.manager(
       "w",
       "first",
       root,
       65536,
       store,
-      function() return service.snapshot().groups
+      function() return service.snapshot().groups,
+      "catalog"
     );
     var pair = MemoryTransport.pair(), client = new RpcConnection(pair.client, clock), server = new RpcConnection(
       pair.server,
@@ -230,17 +220,24 @@ class TerminalCatalogTests {
     step();
     step();
     require(error == "unauthorized", "Forget grant ignored");
+    var startedBy = Sys.time() + 15;
+    while (!TestTerminals.started(root, "catalog")) {
+      require(Sys.time() < startedBy, "The catalog shell's host did not start");
+      manager.poll();
+      Sys.sleep(0.01);
+    }
     client.close();
     server.close();
     manager.dispose();
     store.close();
-    // A new daemon has metadata, not the old shell. Never silently recreate it.
+    // A new daemon takes back the shell its host kept, with the record's name and group.
     store = new WorkspaceSqliteStore(path, "w", seed);
-    manager = new WorkspaceTerminalManager("w", "second", root, 65536, store, function() return groups);
+    manager = TestTerminals.manager("w", "second", root, 65536, store, function() return groups, "catalog");
     record = manager.snapshot().terminals[0];
     require(
-      record.name == "Build shell" && record.group == "other" && record.state == "lost" && manager.activeCount() == 0,
-      "Restart falsely resurrected shell or lost metadata"
+      record.name == "Build shell" && record.group == "other" && record.state == "running" && record.instance == "second"
+        && manager.activeCount() == 1,
+      "The next service did not take back the shell its host kept, or lost its metadata"
     );
     pair = MemoryTransport.pair();
     client = new RpcConnection(pair.client, clock);
@@ -255,20 +252,22 @@ class TerminalCatalogTests {
       ]
     );
     open.instance = "second";
-    error = "";
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) {
-      throw "Lost record silently restarted";
-    }, function(e) error = e.code);
+    done = false;
+    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+      require(info.state == "running", "The kept shell did not open as running");
+      done = true;
+    }, function(e) throw e.code);
     step();
     step();
-    require(error == "terminal_unavailable", "Lost resource was recreated");
+    require(done, "The kept shell did not reattach");
     done = false;
     client.call(WorkspaceTerminalProtocol.FORGET, {
       workspace: "w",
       instance: "second",
       id: record.id,
       resourceInstance: record.instance,
-      expectedRevision: record.revision
+      expectedRevision: record.revision,
+      terminate: true
     }, 1000, function(_) done = true, function(e) {
       throw e.code;
     }
@@ -312,7 +311,7 @@ class TerminalCatalogTests {
       revision: 1
     }
     );
-    manager = new WorkspaceTerminalManager("w", "third", root, 65536, store, function() return groups);
+    manager = TestTerminals.manager("w", "third", root, 65536, store, function() return groups, "catalog");
     pair = MemoryTransport.pair();
     client = new RpcConnection(pair.client, clock);
     server = new RpcConnection(pair.server, clock);
@@ -341,6 +340,6 @@ class TerminalCatalogTests {
     manager.dispose();
     store.close();
     Sys
-      .println("PASS: terminal catalog discovery after detach, rename/group CAS, permissions, v1 migration, restart loss reconciliation and idempotent forget");
+      .println("PASS: terminal catalog discovery after detach, rename/group CAS, permissions, adoption by the next service and idempotent forget");
   }
 }

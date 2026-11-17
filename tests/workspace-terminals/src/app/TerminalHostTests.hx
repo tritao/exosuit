@@ -5,7 +5,7 @@ import haxe.io.Bytes;
 import haxeon.platform.Runtime;
 import terminalkit.Emulator;
 import terminalsession.TerminalSession;
-import workspace.client.LocalWorkspaceClient;
+import workspace.client.WorkspaceLink;
 import workspace.client.RpcTerminalBackend;
 import workspace.runtime.TerminalHostProtocol;
 import workspace.transport.NativeRpcHub;
@@ -18,14 +18,12 @@ import workspace.transport.NativeRpcHub;
 	- `host-dump ROOT LAUNCHER ID FILE [TEXT]`: attaches to terminal ID, waits until TEXT is on its screen or in its
 	  scrollback (or until it is synchronized), and writes what the view holds to FILE as JSON: state, exit code, size,
 	  scrollback length, modes, and every line from the top of the scrollback to the bottom of the screen.
-	- `host-restart ROOT LAUNCHER ID COMMAND TEXT`: attaches to terminal ID, waits until the service gives its host up
-	  (the view offers Restart Terminal), restarts it, types COMMAND and waits until TEXT is on its screen.
 	- `host-steal ROOT LAUNCHER DIRECTORY`: connects to the terminal host in DIRECTORY with its token, as a second
 	  service would, and leaves again: the service that was attached loses its connection.
 **/
 class TerminalHostTests {
 	public static function handles(mode:String):Bool
-		return mode == "host-type" || mode == "host-dump" || mode == "host-steal" || mode == "host-restart";
+		return mode == "host-type" || mode == "host-dump" || mode == "host-steal";
 
 	static function lines(emulator:Emulator):{total:Int, lines:Array<String>} {
 		var total = emulator.scrollback(-1).total, rows = emulator.rows();
@@ -88,7 +86,7 @@ class TerminalHostTests {
 		Sys.println("PASS: took the terminal host in " + directory + " over and left");
 	}
 
-	public static function run(mode:String, args:Array<String>, runtime:Runtime, client:LocalWorkspaceClient, clock:Void->Float):Void {
+	public static function run(mode:String, args:Array<String>, runtime:Runtime, client:WorkspaceLink, clock:Void->Float):Void {
 		var root = args[1], id = args[3];
 		var create = mode == "host-type" && args[4] == "create";
 		var backend = new RpcTerminalBackend(function() return client, id, root, create);
@@ -111,27 +109,7 @@ class TerminalHostTests {
 		}
 		Sys.println("ATTACHED " + id + " in " + Math.round((Sys.time() - attachStarted) * 1000) + " ms with "
 			+ session.emulator.scrollback(-1).total + " lines above the screen");
-		if (mode == "host-restart") {
-			// The terminal's host does not answer: wait until the service gives it up, then restart it and type into the new one.
-			deadline = clock() + 90000;
-			while (backend.controlAction() != "Restart Terminal") {
-				if (clock() >= deadline) throw "Terminal " + id + " was not given up: " + session.status + ", " + backend.controlStatus();
-				step();
-			}
-			backend.activateControl();
-			while (!backend.canControl() || session.status != "running") {
-				if (clock() >= deadline) throw "Terminal " + id + " did not restart: " + session.status + ", " + backend.controlStatus();
-				step();
-			}
-			session.write(TestShell.line(args[4]));
-			while (!shows(session.emulator, args[5], false)) {
-				if (clock() >= deadline) throw "The restarted terminal " + id + " did not show " + args[5];
-				step();
-			}
-			var settle = clock() + 300;
-			while (clock() < settle) step();
-			Sys.println("PASS: restarted terminal " + id + " (" + session.status + ")");
-		} else if (mode == "host-type") {
+		if (mode == "host-type") {
 			while (!backend.canControl()) {
 				if (clock() >= deadline) throw "Terminal " + id + " gave no control: " + backend.controlStatus();
 				step();

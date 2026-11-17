@@ -19,7 +19,7 @@ class WorkspaceTerminalRestart {
     failed({code:"terminal_running",message:"This terminal is already running",ambiguous:false});return;
    }
    if (info.restartable != true) {
-    failed({code:"unsupported",message:"Update the workspace service in Remote Access to restart this terminal",ambiguous:false});return;
+    failed({code:"unsupported",message:"This workspace service cannot restart this terminal",ambiguous:false});return;
    }
    connection.call(WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:instance,id:id,theme:theme},5000,done,failed);
   },failed);
@@ -27,7 +27,7 @@ class WorkspaceTerminalRestart {
  public static function message(error:RpcError):String {
   if (error.ambiguous || error.code == "timeout") return "The restart could not be confirmed. Refresh before trying again; saved history is retained.";
   return switch(error.code) {
-   case "unsupported", "unknown_method": "Update the workspace service in Remote Access to restart this terminal.";
+   case "unsupported", "unknown_method": "This workspace service cannot restart this terminal.";
    case "unauthorized": "Restarting this terminal requires terminal read and control permissions.";
    case "terminal_running": "This terminal is already running.";
    case "disconnected": "The workspace connection changed. Reconnect before restarting this terminal.";
