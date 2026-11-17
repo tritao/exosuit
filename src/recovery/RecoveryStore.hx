@@ -194,7 +194,8 @@ class RecoveryStore {
 				fields.push(content.substring(offset, separator));
 				offset = separator + 1;
 			}
-			var idLength = Std.parseInt(fields[0]), titleLength = Std.parseInt(fields[1]), pathLength = Std.parseInt(fields[2]), textLength = Std.parseInt(fields[3]);
+			var idLength = Std.parseInt(fields[0]) ?? 0, titleLength = Std.parseInt(fields[1]) ?? 0, pathLength = Std.parseInt(fields[2]) ?? 0,
+				textLength = Std.parseInt(fields[3]) ?? 0;
 			if (Std.string(idLength) != fields[0] || Std.string(titleLength) != fields[1] || Std.string(pathLength) != fields[2]
 				|| Std.string(textLength) != fields[3] || (fields[4] != "0" && fields[4] != "1")) throw "corrupt recovery lengths";
 			if (idLength < 1 || titleLength < 0 || pathLength < 0 || textLength < 0
@@ -240,8 +241,7 @@ class RecoveryStore {
 		if (separator <= 0) return true;
 		var parent = path.substring(0, separator);
 		if (FileSystem.exists(parent)) return FileSystem.isDirectory(parent);
-		if (!ensureParent(parent)) return false;
-		FileSystem.createDirectory(parent);
+		try FileSystem.createDirectory(parent) catch (_:Dynamic) return false;
 		return FileSystem.exists(parent) && FileSystem.isDirectory(parent);
 	}
 }

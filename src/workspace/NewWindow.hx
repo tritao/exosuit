@@ -44,7 +44,7 @@ class NewWindow {
 		try {
 			var program = Sys.programPath();
 			var keys:Array<String> = ["EXOSUIT_TERMINAL_CLIENT_KEY"], values:Array<String> = [""];
-			var child = sys.io.Process.spawn(Sys.executablePath(), arguments(program, key, Sys.getEnv(LIVE_MODULE_VARIABLE), Sys.getEnv(LIVE_ENTRY_VARIABLE), paths),
+			var child = sys.io.ChildProcess.spawn(Sys.executablePath(), arguments(program, key, Sys.getEnv(LIVE_MODULE_VARIABLE), Sys.getEnv(LIVE_ENTRY_VARIABLE), paths),
 				Sys.getCwd(), keys, values, true);
 			child.close();
 			slowestOpen = Math.max(slowestOpen, Sys.time() - began);

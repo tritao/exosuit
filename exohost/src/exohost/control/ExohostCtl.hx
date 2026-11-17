@@ -5,6 +5,7 @@ import haxe.io.Bytes;
 import haxe.io.Path;
 import haxeon.platform.Runtime;
 import haxeon.rpc.RpcConnectResult;
+import exohost.ExohostControl;
 import sys.FileSystem;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
@@ -84,7 +85,7 @@ class ExohostCtl {
 			}
 			if (words.length == 0)
 				throw new Usage("no command");
-			var command = words.shift();
+			var command = words.shift() ?? throw new Usage("no command");
 			switch command {
 				case "list":
 					var result = call("exosuit.instances", {}, null);

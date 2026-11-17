@@ -315,7 +315,7 @@ class WorkspaceCatalogService {
 				changed = true;
 			}
 		while (removals.length > REMOVAL_LIMIT) {
-			var dropped = removals.shift();
+			var dropped = removals.shift() ?? throw "No removal to drop";
 			removed.remove(dropped.key);
 			removalFloor = dropped.at;
 		}

@@ -1,7 +1,7 @@
 package controller;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import core.WorkbenchHost;
 import feedback.NotificationAction;
 import feedback.NotificationKind;
@@ -73,7 +73,7 @@ class LiveBuildFeed {
 	static inline final POLL_SECONDS = 0.25;
 
 	public final path:String;
-	public final output:BuildOutput = new BuildOutput();
+	public final output:BuildLog = new BuildLog();
 	/** The directory the compiler's relative paths are relative to: the project the watcher builds, where the app runs. */
 	public final projectRoot:String;
 

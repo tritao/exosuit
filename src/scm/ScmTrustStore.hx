@@ -51,15 +51,8 @@ class ScmTrustStore {
 		var roots = [for (root in trusted.keys()) root];
 		roots.sort(Reflect.compare);
 		var separator = path.lastIndexOf("/");
-		if (separator > 0) createParents(path.substring(0, separator));
+		if (separator > 0) FileSystem.createDirectory(path.substring(0, separator));
 		AtomicFile.write(path, Json.stringify({version: 1, roots: roots}));
-	}
-
-	static function createParents(path:String):Void {
-		if (FileSystem.exists(path)) return;
-		var separator = path.lastIndexOf("/");
-		if (separator > 2) createParents(path.substring(0, separator));
-		FileSystem.createDirectory(path);
 	}
 
 	/** Drops the remembered path resolutions, for when a path may lead somewhere else now. */

@@ -600,7 +600,7 @@ class LanguageServiceClient {
 				to = range == null ? null : LspPositionCodec.decode(state.document.buffer, Reflect.field(range, "end"));
 			if (from == null || to == null) continue;
 			var message:Dynamic = Reflect.field(item, "message"), severity:Dynamic = Reflect.field(item, "severity");
-			values.push(new LanguageDiagnostic(from, to, message == null ? "Language service diagnostic" : Std.string(message), severity == null ? 1 : Std.parseInt(Std.string(severity))));
+			values.push(new LanguageDiagnostic(from, to, message == null ? "Language service diagnostic" : Std.string(message), severity == null ? 1 : Std.parseInt(Std.string(severity)) ?? 0));
 		}
 		diagnostics.set(documentUri, values);
 	}
@@ -703,7 +703,7 @@ class LanguageServiceClient {
 
 	static function integer(value:Dynamic, field:String, fallback:Int):Int {
 		var raw:Dynamic = value == null ? null : Reflect.field(value, field);
-		return raw == null ? fallback : Std.parseInt(Std.string(raw));
+		return raw == null ? fallback : Std.parseInt(Std.string(raw)) ?? 0;
 	}
 
 	static function text(value:Dynamic):String {
@@ -717,7 +717,7 @@ class LanguageServiceClient {
 		if (Std.isOfType(value, Array)) {
 			var range:Array<Dynamic> = cast value;
 			if (range.length == 2) {
-				var from = Std.parseInt(Std.string(range[0])), to = Std.parseInt(Std.string(range[1]));
+				var from = Std.parseInt(Std.string(range[0])) ?? 0, to = Std.parseInt(Std.string(range[1])) ?? 0;
 				if (from >= 0 && to >= from && to <= signature.length) return signature.substring(from, to);
 			}
 			return "";

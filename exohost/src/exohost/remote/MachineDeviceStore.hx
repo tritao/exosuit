@@ -85,7 +85,7 @@ class MachineDeviceStore implements WorkspaceDevicePersistence {
 			throw "invalid device key";
 		var result = Bytes.alloc(Std.int(value.length / 2));
 		for (index in 0...result.length)
-			result.set(index, Std.parseInt("0x" + value.substr(index * 2, 2)));
+			result.set(index, Std.parseInt("0x" + value.substr(index * 2, 2)) ?? 0);
 		return result;
 	}
 

@@ -320,7 +320,7 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
    else ctx.respond(copy(previous.record));
    return;
   }
-  var cwd=directories.forAgent(groups(),q.group,q.directory,ctx.fail);
+  var cwd=directories.forAgent(groups(),q.group,q.directory,error->ctx.fail(error));
   if(cwd == null) return;
   var selected=q.permissionProfile == null ? "default" : q.permissionProfile;
   if(!mode(selected)) {ctx.fail({code:"invalid_permissions",message:"Choose default, acceptEdits or plan",ambiguous:false});return;}

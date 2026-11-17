@@ -1,9 +1,9 @@
 package build;
 
-class BuildOutput {
+class BuildLog {
 	public static inline final MAX_BYTES = 1024 * 1024;
 	public static inline final MAX_LINES = 10000;
-	public final lines:Array<BuildOutputLine> = [];
+	public final lines:Array<BuildLogLine> = [];
 	public var byteCount(default, null):Int = 0;
 	var pending:String = "";
 	public var cwd(default, null):String = "";
@@ -36,7 +36,7 @@ class BuildOutput {
 
 	function appendLine(text:String):Void {
 		if (text.length + 1 > MAX_BYTES) text = text.substring(text.length - MAX_BYTES + 1);
-		var line = new BuildOutputLine(text, parseDiagnostic(text));
+		var line = new BuildLogLine(text, parseDiagnostic(text));
 		lines.push(line);
 		byteCount += text.length + 1;
 		while (lines.length > MAX_LINES || byteCount > MAX_BYTES && lines.length > 1) {

@@ -1,7 +1,7 @@
 package core;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import commandview.CommandViewProvider;
 import completion.CompletionItem;
 import config.Settings;
@@ -83,7 +83,7 @@ interface WorkbenchHost {
 	// -- Problem / build-output publishing --
 	function showProblems():Void;
 	function setProblemActivationHandler(handler:Problem->Void):Void;
-	function showBuildOutput(title:String, output:BuildOutput):Void;
+	function showBuildOutput(title:String, output:BuildLog):Void;
 	function setBuildDiagnosticHandler(handler:BuildDiagnostic->Void):Void;
 
 	// -- Language popups (hover / completion / signature help) --

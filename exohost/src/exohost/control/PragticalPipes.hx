@@ -133,7 +133,7 @@ class PragticalPipes {
 			return;
 		pipe.roots = key;
 		try {
-			createDirectory(directory());
+			FileSystem.createDirectory(directory());
 			var path = descriptor(pipe.editor.window), content = PragticalCodec.encode({
 				version: 1, instance_id: pipe.editor.window, pid: pipe.editor.pid, endpoint: endpoint(pipe.editor.window),
 				started_at: Std.int(pipe.editor.started), project_roots: roots, protocol_version: 1
@@ -143,13 +143,6 @@ class PragticalPipes {
 			else
 				sys.io.AtomicFile.createBytes(path, content);
 		} catch (_:Dynamic) {}
-	}
-
-	static function createDirectory(path:String):Void {
-		if (FileSystem.exists(path))
-			return;
-		createDirectory(Path.directory(path));
-		FileSystem.createDirectory(path);
 	}
 
 	/** A window's event: Pragtical's two events go to that window's pipe clients. */

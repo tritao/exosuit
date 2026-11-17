@@ -66,7 +66,7 @@ enum abstract ExohostKind(String) to String {
 	var Exohost = "exohost";
 	/** An agent provider a workspace daemon runs: claude, codex (app-server, its proxy bridge), pi, the Claude name bridge. */
 	var AgentProvider = "agent-provider";
-	/** The Haxeon language server an editor runs (`haxeon-lsp.hl`). */
+	/** The Haxeon language server an editor runs (`haxeon-lsp.hl` in a bundle, `out/tools/LspMain-<key>.hl` from `haxeon lsp`). */
 	var LanguageServer = "language-server";
 	/** An editor's helper process: the DevTools panel (`scripts/devtools.py`). */
 	var HelperProcess = "helper";
