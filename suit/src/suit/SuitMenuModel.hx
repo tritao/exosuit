@@ -21,8 +21,9 @@ typedef SuitMenuHandlers = {
 	var quit:Void->Void;
 	/** The polite quit: ends everything but terminal hosts. */
 	@:optional var quitKeepingTerminals:Void->Void;
-	/** Relay hosting and Start at login; where the menu is only printed, suit's published state is shown. */
-	@:optional var hosting:suit.relay.SuitRelayMenu.SuitHostingActions;
+	/** Start at login: whether it is on (the daemon's cached state, so opening the menu never waits for reg.exe), and its toggle. */
+	@:optional var loginEnabled:Void->Bool;
+	@:optional var toggleLogin:Void->Void;
 	/** What is connected from outside (paired devices, remote access); only the daemon has it. */
 	@:optional var remote:SuitRemoteActions;
 }
@@ -46,19 +47,6 @@ typedef SuitRemoteActions = {
 class SuitMenuModel {
 	static inline var GROUP_LIMIT:Int = 30;
 
-	/** For `suit menu`: hosting as the running daemon published it; the commands do nothing. */
-	static function printedHosting():suit.relay.SuitRelayMenu.SuitHostingActions
-		return {
-			hosts: suit.relay.SuitRelayHosting.readViews,
-			stopHosting: function(_) {},
-			resumeHosting: function(_) {},
-			disconnect: function(_) {},
-			retry: function(_) {},
-			dismiss: function(_) {},
-			loginEnabled: SuitLogin.enabled,
-			toggleLogin: function() {}
-		};
-
 	public static function build(menu:SuitMenuSink, inventory:SuitInventory, handlers:SuitMenuHandlers):Void {
 		menu.item(inventory.summary(), null, 0);
 		var group:Null<SuitGroup> = null, shown = 0;
@@ -76,16 +64,11 @@ class SuitMenuModel {
 			}
 			var target = process;
 			var entry = menu.submenu("    " + SuitReport.label(process), 0);
-			var relay = SuitReport.relayState(process);
-			if (relay.length > 0)
-				menu.item("Remote access: " + relay, null, entry);
 			var source = SuitReport.sourceNote(process);
 			if (source.length > 0)
 				menu.item(source, null, entry);
 			menu.item(SuitKind.SuitKinds.stopVerb(process.kind), function() handlers.terminate([target]), entry);
 		}
-		var hosting = handlers.hosting != null ? handlers.hosting : printedHosting();
-		suit.relay.SuitRelayMenu.build(menu, inventory, hosting, handlers.openViewer);
 		if (handlers.remote != null)
 			remoteSection(menu, handlers.remote);
 		menu.separator(0);
@@ -107,7 +90,11 @@ class SuitMenuModel {
 					function() handlers.terminate(SuitActions.terminals(inventory, key)), 0);
 			}
 		menu.item("Open process viewer…", function() handlers.openViewer(["watch"]), 0);
-		suit.relay.SuitRelayMenu.login(menu, hosting);
+		if (SuitLogin.supported()) {
+			var enabled = false;
+			try enabled = (handlers.loginEnabled != null ? handlers.loginEnabled : SuitLogin.enabled)() catch (_:Dynamic) {}
+			menu.check("Start at login", enabled, handlers.toggleLogin != null ? handlers.toggleLogin : function() {}, 0);
+		}
 		menu.separator(0);
 		menu.item(terminals.length == 0 ? "Quit Exosuit and end everything" : "Quit Exosuit and end everything (" + terminals.length
 			+ (terminals.length == 1 ? " terminal)" : " terminals)"), handlers.quit, 0);

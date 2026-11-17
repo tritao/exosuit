@@ -72,7 +72,7 @@ class WorkspaceScmTestMain {
 		var processes = new ProcessManager(), now = function() return Sys.time() * 1000;
 		var workspaces = new WorkspaceService("workspace", "test-epoch", [{id: "work", name: "Work", cwd: root, revision: 1}]);
 		var scm = new WorkspaceScmService("workspace", [root], processes, gitPath(), null, trustPath);
-		var server = new WorkspaceRpcServer(workspaces, now, null, null, null, null, null, null, scm);
+		var server = new WorkspaceRpcServer(workspaces, now, null, null, null, null, null, scm);
 		var connections:Array<RpcConnection> = [];
 		var readGrants = [WorkspaceScmProtocol.READ];
 		var readLink = connect(server, readGrants, false, now);
@@ -304,7 +304,7 @@ class WorkspaceScmTestMain {
 		var processes = new ProcessManager(), now = function() return Sys.time() * 1000;
 		var workspaces = new WorkspaceService("workspace", "fake-epoch", [{id: "work", name: "Work", cwd: root, revision: 1}]);
 		var scm = new WorkspaceScmService("workspace", [root], processes, null, fake, trustPath, scheduler);
-		var server = new WorkspaceRpcServer(workspaces, now, null, null, null, null, null, null, scm);
+		var server = new WorkspaceRpcServer(workspaces, now, null, null, null, null, null, scm);
 		var grants = [WorkspaceScmProtocol.READ, WorkspaceScmProtocol.WRITE];
 		var link = connect(server, grants, false, now), connections = [link.connection];
 		var client = new WorkspaceScmClient(link.connection), source = new RpcScmSource(function() return client,
@@ -394,7 +394,7 @@ class WorkspaceScmTestMain {
 		var nested = folders[0] + "/nested";
 		sys.FileSystem.createDirectory(nested);
 		var state = parent + "/state";
-		require(AgentManagerNative.prepareDirectory(state), "the state folder is private");
+		require(AgentNative.prepareDirectory(state), "the state folder is private");
 		var identityPath = haxe.io.Path.join([sys.FileSystem.fullPath(state), "workspace.json"]);
 		AgentStateIdentity.forWorkspace("workspace-id", [folders[0], folders[1]], null).write(identityPath);
 		var processes = new ProcessManager();
@@ -433,7 +433,9 @@ class WorkspaceScmTestMain {
 
 	static function connect(server:WorkspaceRpcServer, grants:Array<String>, local:Bool, clock:Void->Float):ClientLink {
 		var pair = MemoryTransport.pair(1024 * 1024, 64);
-		if (local) server.acceptTestLocal(pair.server) else server.acceptRemote(pair.server, grants);
+		// A device's stream reaches the service as suit forwards it: its first message is suit's intro with the device's grants.
+		if (!local) pair.client.send(workspace.transport.ForwardedStream.intro("device", grants));
+		server.acceptTestLocal(pair.server);
 		var options = new RpcPeerOptions("exosuit-agent/1", grants, [], 5000, 262144, 32, 1048576);
 		var handshake = RpcHandshake.client(pair.client, clock, options, grants), deadline = Sys.time() + 5;
 		while (!handshake.isFinished() && Sys.time() < deadline) {

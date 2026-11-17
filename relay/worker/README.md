@@ -100,13 +100,9 @@ controlled workspace use; it is not a generally available public relay service.
 - There is no per-IP/global admission control or measured Cloudflare quota
   policy yet. Per-machine state and frame limits are local bounds, not a claim
   of protection from public abuse or arbitrary usage costs.
-- Exosuit has a NativeKit machine connector. Its local Wrangler test keeps the
-  machine socket live while a device connects, then verifies bounded binary
-  channel data in both directions. An earlier `machine_offline` result came
-  from closing the machine socket before attempting the device connection. The
-  connector is not yet part of workspace-service lifecycle.
-- Noise integration, device-grant lifecycle, browser persistence and
-  cross-network deployment are still open.
+- suit holds the machine socket (`WorkspaceRelayHost`, under `MachineRemote`); no
+  workspace service connects to the relay.
+- Cross-network deployment is not qualified yet.
 
 ## Deployment
 
@@ -129,14 +125,7 @@ restrictions, ticket exchange, machine/device WebSockets, bidirectional binary
 forwarding, invitation creation, pairing WebSockets and device revocation passed. Desktop approval,
 Noise and full browser editor pairing still need live end-to-end qualification.
 
-Native hosted qualification is explicitly opt-in:
-
-```sh
-python3 scripts/test-hosted-relay.py https://exosuit-relay.joao-9f7.workers.dev
-```
-
-Run from the editor repository root. This creates an isolated workspace and
-relay machine, connects through the native HTTPS/WSS stack, creates a short-lived
-invitation, then stops the fixture and removes its local OS credentials.
+The native side is qualified against a local Worker by `scripts/test-machine-remote.py` (suit holds the
+machine socket; no workspace service dials the relay).
 Native clients omit the browser `Origin` header; browser origin restrictions
 remain enforced. This check passed against the hosted deployment on 2026-10-07.

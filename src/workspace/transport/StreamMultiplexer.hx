@@ -78,10 +78,10 @@ class MuxStream implements MessageTransport {
 }
 
 /**
-	The device's end of the stream frames a paired Noise channel carries (`MachineStreamFrame`, ADR 0005 section 4).
-	`machineStream()` is stream 0, always open; `open(id)` registers a stream the machine made for an OPEN. Each stream is
-	a `MessageTransport` for an ordinary RPC connection, so the machine directory client and every workspace client run
-	over one channel. Shared by every host that pairs with a machine.
+	Either end of the stream frames a paired Noise channel carries (`MachineStreamFrame`, ADR 0005 section 4): the
+	device's, and suit's (`MachineDeviceSession`). `machineStream()` is stream 0, always open; `open(id)` registers a
+	stream the machine made for an OPEN. Each stream is a `MessageTransport` for an ordinary RPC connection, so the
+	machine directory and every workspace connection run over one channel.
 
 	Pumping is lazy: any stream's `receive`, or `poll`, reads up to PUMP_FRAMES frames from the channel and files each
 	under its stream. A frame for a stream that is not open is dropped and answered with a close frame (once per id). A
@@ -140,9 +140,6 @@ class StreamMultiplexer {
 		streams.set(id, stream);
 		return stream;
 	}
-
-	public function streamOf(id:Int):Null<MuxStream>
-		return streams.get(id);
 
 	/** Moves frames both ways: retries a refused outgoing frame, then reads what arrived. */
 	public function poll():Void {

@@ -15,13 +15,6 @@ class RelaySocketLink {
 
 	public var onChannel:Null<RelayChannel->Void>;
 
-	/**
-		Raw mode, for suit, which forwards frames without opening them: when set, every decoded frame
-		(resets included) goes here instead of to a channel. Returning false fails the link as a slow
-		consumer. Send with `sendRouted`.
-	**/
-	public var onFrame:Null<RelayFrame->Bool>;
-
 	public var failure(default, null):Null<String>;
 
 	final stream:RelayByteStream;
@@ -104,13 +97,7 @@ class RelaySocketLink {
 		var frame = reader.take();
 		while (frame != null) {
 			var current = frame;
-			var raw = onFrame;
-			if (raw != null) {
-				if (!raw(current)) {
-					fail("relay_slow_consumer");
-					return;
-				}
-			} else if (current.reset) {
+			if (current.reset) {
 				var channel = channels.get(current.channelId);
 				if (channel != null) {
 					channel.linkClosed("relay_device_reconnected");
@@ -147,20 +134,6 @@ class RelaySocketLink {
 		if (!channels.exists(channelId) || rejected.exists(channelId))
 			return false;
 		return sendPacket(RelayFrameCodec.encode(channelId, message, MAX_MESSAGE_BYTES));
-	}
-
-	/** Raw mode: sends a payload on any channel; the peer that owns the channels decides which exist. */
-	public function sendRouted(channelId:String, message:Bytes):Bool {
-		if (!isOpen() || onFrame == null)
-			return false;
-		return sendPacket(RelayFrameCodec.encode(channelId, message, MAX_MESSAGE_BYTES));
-	}
-
-	/** Raw mode: asks the Worker to close a channel's client socket (see RelayFrameCodec.encodeClose). */
-	public function closeRouted(channelId:String):Bool {
-		if (!isOpen() || onFrame == null)
-			return false;
-		return sendPacket(RelayFrameCodec.encodeClose(channelId));
 	}
 
 	/**

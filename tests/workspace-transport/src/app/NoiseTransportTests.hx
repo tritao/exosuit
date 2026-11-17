@@ -7,6 +7,7 @@ import haxeon.rpc.RpcPeerOptions;
 import noisekit.NoiseSession;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceService;
+import workspace.transport.ForwardedStream;
 import workspace.transport.NoiseMessageTransport;
 import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoisePrologue;
@@ -70,7 +71,7 @@ class NoiseTransportTests {
         require(equal(securedClient.receive(), second), "second RPC payload decrypts after retry");
         securedClient.close();
 
-        // The real RPC handshake and service binding inherit the device grant subset.
+        // The real RPC handshake and service binding inherit the device grant subset of a forwarded stream.
         var rpcMachine = NoiseSession.generateKeypair(), rpcDevice = NoiseSession.generateKeypair();
         var rpcPair = handshake(rpcMachine.privateKey, rpcMachine.publicKey, rpcDevice.publicKey, rpcDevice.privateKey,
             prologue, prologue, 64);
@@ -81,7 +82,9 @@ class NoiseTransportTests {
             {id: "work", name: "Work", cwd: "/workspace", revision: 1}
         ]);
         var rpcServer = new WorkspaceRpcServer(service, rpcClock);
-        rpcServer.acceptRemote(cast rpcPair.server, [WorkspaceProtocol.READ]);
+        // suit forwards the device's stream with its grants in an intro message (ForwardedStream).
+        rpcClientTransport.send(ForwardedStream.intro("device", [WorkspaceProtocol.READ]));
+        rpcServer.acceptTestLocal(cast rpcPair.server);
         var clientOptions = new RpcPeerOptions("exosuit-agent/1",
             [WorkspaceProtocol.READ, WorkspaceProtocol.WRITE], [], 1000, 262144, 32, 1048576);
         var rpcHandshake = RpcHandshake.client(rpcClientTransport, rpcClock, clientOptions, clientOptions.offered());
@@ -95,9 +98,9 @@ class NoiseTransportTests {
             "RPC capability negotiation cannot widen device grants");
         var rpcConnection = rpcHandshake.connection;
         var denied = "";
-        rpcConnection.call(WorkspaceProtocol.RENAME, {
+        rpcConnection.call(WorkspaceProtocol.GROUP, {
             workspace: "workspace", epoch: "epoch", operation: "remote-write",
-            group: "work", expectedRevision: 1, name: "Denied"
+            group: "work", expectedRevision: 1, name: "Denied", action: "update"
         }, 1000, function(_) throw "Remote write exceeded the device grant",
             function(error) denied = error.code);
         for (_ in 0...8) {

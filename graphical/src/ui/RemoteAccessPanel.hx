@@ -24,22 +24,17 @@ import workspace.client.MachineRemoteAccess.MachineInvitation;
 import workspace.client.MachineRemoteAccess.MachinePairedDevice;
 import workspace.client.MachineRemoteAccess.MachineRemoteView;
 import workspace.client.MachineRemoteAccess.MachineWorkspacePick;
-import workspace.client.WorkspacePairingClient;
-import workspace.service.WorkspaceAgentProtocol;
-import workspace.service.WorkspacePairingProtocol.PairingDevice;
-import workspace.service.WorkspacePairingProtocol.PairingInvitation;
-import workspace.service.WorkspaceProtocol;
-import workspace.service.WorkspaceTerminalProtocol;
 
-/** Same-user desktop controls for approving and revoking remote workspace devices. */
+/**
+	Remote access for the whole machine (ADR 0005 section 4), from suit: the relay, pairing, and the devices with the
+	workspaces each may use.
+**/
 class RemoteAccessPanel implements View {
-	final client:WorkspacePairingClient;
+	final machine:MachineRemoteView;
 	final requestFrame:Void->Void;
 	final copyText:String->Bool;
-	var invitation:Null<PairingInvitation>;
 	var invitationError:Null<String>;
 	var actionError:Null<String>;
-	var selections:Map<String, Map<String, Bool>> = [];
 	var confirmed:Map<String, Bool> = [];
 	var editing:Map<String, Bool> = [];
 	var relayOrigin:String = config.RelayUrl.DEFAULT;
@@ -49,160 +44,33 @@ class RemoteAccessPanel implements View {
 	/** The saved `remote/access/relay_url` setting (empty or null: the default), and how to save a new one. */
 	public var relayUrlSetting:Null<Void->String>;
 	public var saveRelayUrl:Null<String->Void>;
-	var confirmRestart:Bool = false;
-	/**
-		Remote access for the whole machine (ADR 0005 section 4), when suit is on: the relay, pairing and the devices
-		with the workspaces each may use come from it. Null means suit is off, and the panel pairs with the open
-		workspace's service as before.
-	**/
-	public var machine:Null<MachineRemoteView>;
 	var machineInvitation:Null<MachineInvitation>;
 	/** The preset picked per device and workspace: `none`, `read`, `edit`, `all`, or `custom` for grants set elsewhere. */
 	var workspacePicks:Map<String, Map<String, String>> = [];
 
-	static final grantOptions:Array<{id:String, label:String, grant:String, defaultValue:Bool}> = [
-		{id: "files", label: "Read project files", grant: WorkspaceProtocol.READ, defaultValue: true},
-		{id: "events", label: "Receive updates", grant: WorkspaceProtocol.EVENTS, defaultValue: true},
-		{id: "edit", label: "Edit and save files", grant: WorkspaceProtocol.WRITE, defaultValue: false},
-		{id: "tree", label: "Browse project folders", grant: WorkspaceProtocol.TREE, defaultValue: true},
-		{id: "terminal-read", label: "Read terminals", grant: WorkspaceTerminalProtocol.READ, defaultValue: true},
-		{id: "terminal-catalog", label: "List terminals", grant: WorkspaceTerminalProtocol.CATALOG, defaultValue: true},
-		{id: "terminal-control", label: "Control terminals", grant: WorkspaceTerminalProtocol.CONTROL, defaultValue: false},
-		{id: "agent-read", label: "Read Codex sessions", grant: WorkspaceAgentProtocol.READ, defaultValue: true},
-		{id: "agent-control", label: "Control Codex sessions", grant: WorkspaceAgentProtocol.CONTROL, defaultValue: false},
-		{id: "scm-read", label: "Review source control", grant: workspace.service.WorkspaceScmProtocol.READ, defaultValue: true},
-		{id: "scm-write", label: "Change source control", grant: workspace.service.WorkspaceScmProtocol.WRITE, defaultValue: false},
-		{id: "scm-remote", label: "Fetch and push Git remotes", grant: workspace.service.WorkspaceScmProtocol.REMOTE, defaultValue: false},
-		{id: "catalog", label: "List workspaces and sessions", grant: workspace.service.WorkspaceCatalogProtocol.CAPABILITY, defaultValue: false}
-	];
-
 	/**
-		What a test driver (EXOSUIT_AUTOMATION_DIR, see devtools.AutomationProbe) may read: the relay status, the invitation
-		on screen (including its one-time URL, which is a secret: the automation folder is owner-only and exists only in
-		a test run) and the requests waiting for approval. Nothing here changes the panel.
+		What a program that drives the window may read (`exosuit.state.get`): the relay status, the invitation on screen
+		(including its one-time URL, a secret that the control plane gives only to processes of this user, the same
+		boundary as the screen it is on) and the requests waiting for approval. Nothing here changes the panel.
 	**/
 	public function automationState():Dynamic {
-		var view = machine;
-		if (view != null) {
-			var machineStatus = view.status(), machineList = view.devices();
-			return {
-				machine: true,
-				relayUrl: currentRelayText(),
-				relay: machineStatus == null ? null : {configured: machineStatus.enabled, connected: machineStatus.connected, origin: machineStatus.origin, error: machineStatus.error},
-				canManage: true, canConfigure: true, connected: machineStatus != null,
-				invitationUrl: machineInvitation == null ? null : machineInvitation.invitationUrl, invitationError: invitationError,
-				pending: machineList == null ? [] : [for (item in machineList.pending) {deviceId: item.deviceId, code: item.authenticationCode}],
-				devices: machineList == null ? [] : [for (device in machineList.devices) {deviceId: device.deviceId, connected: device.connected, revoked: device.revoked,
-					workspaces: [for (entry in device.workspaces) {workspace: entry.workspace, preset: entry.preset}]}],
-				workspaces: machineList == null ? [] : [for (entry in machineList.workspaces) {id: entry.id, name: entry.name}]
-			};
-		}
-		var status = client.remoteAccessStatus(), list = client.pairingList();
+		var machineStatus = machine.status(), machineList = machine.devices();
 		return {
-			relay: status == null ? null : {configured: status.configured, connected: status.connected, origin: status.origin, error: status.error},
-			canManage: client.canManagePairings(), canConfigure: client.canConfigureRelay(), connected: client.workspaceConnected(),
-			invitationUrl: invitation == null ? null : invitation.pairingSocketUrl, invitationError: invitationError,
-			pending: list == null ? [] : [for (item in list.pending) {deviceId: item.deviceId, code: item.authenticationCode}],
-			devices: list == null ? [] : [for (device in list.devices) {deviceId: device.deviceId, connected: device.connected, revoked: device.revoked, grants: device.grants.length}]
+			relayUrl: currentRelayText(),
+			relay: machineStatus == null ? null : {configured: machineStatus.enabled, connected: machineStatus.connected, origin: machineStatus.origin, error: machineStatus.error},
+			connected: machineStatus != null,
+			invitationUrl: machineInvitation == null ? null : machineInvitation.invitationUrl, invitationError: invitationError,
+			pending: machineList == null ? [] : [for (item in machineList.pending) {deviceId: item.deviceId, code: item.authenticationCode}],
+			devices: machineList == null ? [] : [for (device in machineList.devices) {deviceId: device.deviceId, connected: device.connected, revoked: device.revoked,
+				workspaces: [for (entry in device.workspaces) {workspace: entry.workspace, preset: entry.preset}]}],
+			workspaces: machineList == null ? [] : [for (entry in machineList.workspaces) {id: entry.id, name: entry.name}]
 		};
 	}
 
-	public function new(client:WorkspacePairingClient, requestFrame:Void->Void, copyText:String->Bool) {
-		this.client = client;
+	public function new(machine:MachineRemoteView, requestFrame:Void->Void, copyText:String->Bool) {
+		this.machine = machine;
 		this.requestFrame = requestFrame;
 		this.copyText = copyText;
-	}
-
-	function selection(id:String, ?initialGrants:Array<String>):Map<String, Bool> {
-		var selected = selections.get(id);
-		if (selected == null) {
-			selected = [];
-			for (option in grantOptions) selected.set(option.id, option.defaultValue);
-			selections.set(id, selected);
-		}
-		if (initialGrants != null && editing.get(id) != true)
-			for (option in grantOptions) selected.set(option.id, initialGrants.indexOf(option.grant) >= 0);
-		return selected;
-	}
-
-	function grants(id:String):Array<String> {
-		var selected = selection(id);
-		var result:Array<String> = [WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceProtocol.ORDER];
-		for (option in grantOptions) if (selected.get(option.id) == true) result.push(option.grant);
-		if (selected.get("files") == true) result.push(workspace.service.WorkspaceFileProtocol.READ);
-		return result;
-	}
-
-	function createInvitation():Void {
-		invitation = null;
-		invitationError = null;
-		client.createPairing(300, function(value, error) {
-			invitation = value;
-			invitationError = error;
-			requestFrame();
-		});
-		requestFrame();
-	}
-
-	function deviceLabel(device:PairingDevice):String {
-		var label = device.deviceId.substr(0, 8);
-		label += device.connected ? " · connected" : device.revoked ? " · revoked" : " · offline";
-		if (device.grants.length > 0) {
-			var names = [for (grant in device.grants) grantName(grant)];
-			label += " · " + names.join(", ");
-		}
-		return label;
-	}
-
-	function grantName(grant:String):String {
-		if (grant == WorkspaceProtocol.READ) return "files";
-		if (grant == workspace.service.WorkspaceFileProtocol.READ) return "saved files";
-		if (grant == WorkspaceProtocol.EVENTS) return "updates";
-		if (grant == WorkspaceProtocol.WRITE) return "editing";
-		if (grant == WorkspaceProtocol.TREE) return "folder browsing";
-		if (grant == WorkspaceTerminalProtocol.READ) return "terminal output";
-		if (grant == WorkspaceTerminalProtocol.CATALOG) return "terminal list";
-		if (grant == WorkspaceTerminalProtocol.CONTROL) return "terminal control";
-		if (grant == WorkspaceAgentProtocol.READ) return "Codex sessions";
-		if (grant == WorkspaceAgentProtocol.CONTROL) return "Codex control";
-		if (grant == workspace.service.WorkspaceScmProtocol.READ) return "source control review";
-		if (grant == workspace.service.WorkspaceScmProtocol.WRITE) return "source control changes";
-		if (grant == workspace.service.WorkspaceScmProtocol.REMOTE) return "Git remotes";
-		if (grant == WorkspaceProtocol.IDENTITY_CAPABILITY) return "workspace identity";
-		if (grant == workspace.service.WorkspaceCatalogProtocol.CAPABILITY) return "workspace list";
-		return grant;
-	}
-
-	function grantCheckboxes(id:String):Array<KeyedView> {
-		var selected = selection(id);
-		var result:Array<KeyedView> = [];
-		for (option in grantOptions) {
-			var checkbox = new Checkbox("pairing-grant-" + id + "-" + option.id, option.label,
-				selected.get(option.id) == true, function(value) {
-					selected.set(option.id, value);
-					requestFrame();
-				}, permissionStyle());
-			result.push(new KeyedView(option.id, checkbox));
-		}
-		return result;
-	}
-
-	function preset(id:String):String {
-		var selected = selection(id), all = true, read = true, edit = true;
-		for (option in grantOptions) {
-			var checked = selected.get(option.id) == true;
-			var reading = option.defaultValue;
-			if (!checked) all = false;
-			if (checked != reading) read = false;
-			if (checked != (reading || option.id == "edit")) edit = false;
-		}
-		return all ? "all" : read ? "read" : edit ? "edit" : "custom";
-	}
-
-	function setPreset(id:String, preset:String):Void {
-		var selected = selection(id);
-		for (option in grantOptions) selected.set(option.id, preset == "all"
-			|| option.defaultValue || preset == "edit" && option.id == "edit");
 	}
 
 	function paragraph(value:String, context:BuildContext, secondary:Bool = false):Text {
@@ -446,187 +314,10 @@ class RemoteAccessPanel implements View {
 		}
 	}
 
-	/** What "Restart now" costs: terminals in terminal hosts are picked up again by the restarted service, the rest end. */
-	public static function restartWarning(terminals:Int, kept:Int):String {
-		if (kept <= 0) return "Restarting ends active terminal and Codex sessions. Continue?";
-		if (kept >= terminals) return "Restarting ends active Codex sessions. Terminals stay running and reconnect. Continue?";
-		return "Restarting ends active Codex sessions and " + (terminals - kept) + " of " + terminals + " terminals; the others stay running and reconnect. Continue?";
-	}
-
 	public function build(context:BuildContext):RenderNode {
-		var list = client.pairingList();
-		var hasPending = list != null && list.pending.length > 0;
 		var rows:Array<KeyedView> = [];
-		var service = client.serviceStatus();
-		if (client.serviceUpdateAvailable() || client.serviceUpdateBusy() || service != null && service.updatePending) {
-			rows.push(new KeyedView("update-title", paragraph("Workspace service update available", context)));
-			var kept = service == null || service.keptTerminals == null ? 0 : service.keptTerminals;
-			if (service != null) rows.push(new KeyedView("update-sessions", paragraph(
-				service.terminals + " terminal sessions · " + service.agents + " Codex sessions active"
-				+ (kept > 0 ? " · " + (kept >= service.terminals ? "all" : Std.string(kept)) + " terminals stay running through a restart" : ""), context, true)));
-			else rows.push(new KeyedView("update-legacy", paragraph("This older service cannot check session activity safely. A one-time restart is required.", context, true)));
-			if (client.serviceUpdateBusy()) rows.push(new KeyedView("update-preparing", paragraph("Preparing update. Existing sessions remain available.", context, true)));
-			else if (service != null && service.updatePending) {
-				rows.push(new KeyedView("update-waiting", paragraph("Update scheduled. Waiting for terminal and Codex sessions to finish.", context, true)));
-				rows.push(new KeyedView("update-cancel", new Button("Cancel scheduled update", null, function() { client.requestServiceUpdate("cancel"); requestFrame(); }, "service-update-cancel")));
-			} else if (service != null) {
-				rows.push(new KeyedView("update-idle", new Button("Update when idle", null, function() { client.requestServiceUpdate("idle"); requestFrame(); }, "service-update-idle")));
-			}
-			if (!client.serviceUpdateBusy()) {
-				if (!confirmRestart) rows.push(new KeyedView("update-now", new Button("Restart now…", null, function() { confirmRestart = true; requestFrame(); }, "service-update-now")));
-				else {
-					rows.push(new KeyedView("update-warning", paragraph(restartWarning(service == null ? 0 : service.terminals, kept), context)));
-					rows.push(new KeyedView("update-confirm", new Button("Restart workspace service", null, function() { confirmRestart = false; client.requestServiceUpdate("now"); requestFrame(); }, "service-update-confirm")));
-					rows.push(new KeyedView("update-keep", new Button("Keep sessions running", null, function() { confirmRestart = false; requestFrame(); }, "service-update-keep")));
-				}
-			}
-		}
-		if (client.serviceUpdateError() != null) rows.push(new KeyedView("update-error", paragraph(client.serviceUpdateError(), context)));
-		var view = machine;
-		if (view != null) addMachineRows(view, rows, context);
-		else {
-		var status = client.remoteAccessStatus();
-		var connected = client.workspaceConnected();
-		var statusLabel = !connected ? "Local workspace disconnected"
-			: status == null ? (client.canManagePairings() ? "Local workspace connected · Remote access ready"
-				: client.canConfigureRelay() ? "Local workspace connected · Checking remote access…"
-				: "Local workspace connected · Remote access status unavailable")
-			: !status.configured ? "Local workspace connected · Remote access not configured"
-			: status.connected ? "Local workspace connected · Remote access ready"
-			: status.error != null ? "Local workspace connected · Relay unavailable"
-			: "Local workspace connected · Relay connecting";
-		rows.push(new KeyedView("status", paragraph(statusLabel, context)));
-		if (!hasPending) rows.push(new KeyedView("intro", paragraph("Pair a browser or another device with this workspace. Files and sessions stay on this machine; relay traffic is encrypted end to end.", context, true)));
-		if (connected && status != null && !status.configured && client.canConfigureRelay()) {
-			var address = relayField();
-			rows.push(new KeyedView("relay-label", paragraph("Relay URL", context)));
-			rows.push(new KeyedView("relay-url", address));
-			rows.push(new KeyedView("relay-hint", paragraph("Use the Exosuit relay, or enter your own HTTPS relay (docs/mobile/own-relay.md). Saved in Settings as Remote access / Relay URL.", context, true)));
-			var enable = new Button("Enable remote access", null, function() {
-				var origin = chosenRelay();
-				if (origin != null) client.configureRelay(origin);
-				requestFrame();
-			}, "remote-access-enable");
-			enable.variant = ButtonVariant.Primary;
-			enable.enabled = StringTools.trim(relayOrigin).length > 0;
-			rows.push(new KeyedView("enable", enable));
-		} else if (connected && status == null && !client.canConfigureRelay() && !client.canManagePairings()) {
-			rows.push(new KeyedView("upgrade", paragraph("This workspace daemon needs an update to configure remote access here. Existing sessions are still available.", context, true)));
-		}
-		if (status != null && status.origin != null) rows.push(new KeyedView("relay", paragraph("Relay: " + status.origin, context, true)));
-		if (status != null && status.error != null) rows.push(new KeyedView("relay-error", paragraph("Relay connection: " + status.error, context)));
-		if (client.canManagePairings() && !hasPending) {
-			var create = new Button(client.pairingBusy() ? "Creating invitation…" : "Create pairing invitation", null,
-				createInvitation, "remote-access-create");
-			create.variant = ButtonVariant.Primary;
-			create.enabled = !client.pairingBusy();
-			rows.push(new KeyedView("create", create));
-		}
-		var currentInvitation = invitation;
-		if (currentInvitation != null && !hasPending) {
-			rows.push(new KeyedView("invitation-title", new Text("One-time invitation · expires in " + currentInvitation.expiresInSeconds + " seconds")));
-			rows.push(new KeyedView("invitation-target", new Text("Device " + currentInvitation.deviceId.substr(0, 8) + " · one-time pairing URL")));
-			rows.push(new KeyedView("invitation-warning", paragraph("Treat this URL like a password. Access starts only after code confirmation and your approval.", context, true)));
-			var copy = new Button("Copy one-time pairing URL", null, function() {
-				if (copyText == null || !copyText(currentInvitation.pairingSocketUrl)) actionError = "Could not copy the pairing address";
-				else actionError = "Pairing address copied";
-				requestFrame();
-			}, "remote-access-copy");
-			copy.enabled = copyText != null;
-			rows.push(new KeyedView("copy", copy));
-		}
-		if (invitationError != null) rows.push(new KeyedView("invitation-error", paragraph("Could not create invitation: " + invitationError, context)));
-		if (client.canManagePairings() && (list == null || list.pending.length == 0))
-			rows.push(new KeyedView("pending-empty", paragraph("No device is waiting to pair.", context, true)));
-		if (list != null && list.pending.length > 0) {
-			rows.push(new KeyedView("pending-title", new Text("Requests waiting for approval")));
-			for (pending in list.pending) {
-				var approve = new Button("Approve", null, function() {
-					var id = pending.deviceId;
-					client.approvePairing(id, grants(id), function(error) { actionError = error; requestFrame(); });
-					requestFrame();
-				}, "pairing-approve-" + pending.deviceId);
-				approve.enabled = !client.pairingBusy() && confirmed.get(pending.deviceId) == true;
-				var reject = new Button("Reject", null, function() {
-					var id = pending.deviceId;
-					client.rejectPairing(id, function(error) { actionError = error; requestFrame(); });
-					requestFrame();
-				}, "pairing-reject-" + pending.deviceId);
-				reject.enabled = !client.pairingBusy();
-				var id = pending.deviceId;
-				var permissions:Array<KeyedView> = [
-					new KeyedView("code-heading", paragraph("Compare this code on both devices", context)),
-					new KeyedView("code", new Text(pending.authenticationCode, null, context.theme.tokens.textPrimary, new TextStyleOverride(null, 24, 0, TextWrap.None))),
-					new KeyedView("id", paragraph("Device " + id.substr(0, 16) + " · expires in " + pending.expiresInSeconds + " seconds", context, true)),
-					new KeyedView("confirmed", new Checkbox("pairing-confirm-" + id, "I checked both codes", confirmed.get(id) == true,
-						function(value) { confirmed.set(id, value); requestFrame(); })),
-					new KeyedView("permissions-title", paragraph("Permissions to approve", context)),
-					new KeyedView("permissions-hint", paragraph("Read-only access is selected by default. Review write and control access before approving.", context, true))
-				];
-				var presets = new Select<String>("pairing-presets-" + id, [
-					new SelectOption("all", "All permissions", "all"),
-					new SelectOption("read", "Read only", "read"),
-					new SelectOption("edit", "Edit files", "edit"),
-					new SelectOption("custom", "Custom", "custom")
-				], preset(id), function(value) { if (value != "custom") setPreset(id, value); requestFrame(); }, sectionStyle());
-				presets.accessibilityLabel = "Permission preset";
-				permissions.push(new KeyedView("presets", presets));
-				for (entry in grantCheckboxes(id)) permissions.push(entry);
-				permissions.push(new KeyedView("actions", new Row("pairing-actions-" + id,
-					[new KeyedView("approve", approve), new KeyedView("reject", reject)], sectionStyle())));
-				var details = new Column("pairing-request-" + id, permissions, sectionStyle());
-				rows.push(new KeyedView("request:" + pending.deviceId, details));
-			}
-		}
-		if (list != null && list.devices.length > 0) rows.push(new KeyedView("devices-title", new Text("Paired devices")));
-		if (list != null) for (device in list.devices) {
-			var children:Array<KeyedView> = [new KeyedView("details", paragraph(deviceLabel(device), context))];
-			if (!device.revoked) {
-				var deviceId = device.deviceId;
-				selection(deviceId, device.grants);
-				if (editing.get(deviceId) != true) {
-					children.push(new KeyedView("edit-permissions", new Button("Edit permissions", null, function() {
-						selection(deviceId, device.grants);
-						editing.set(deviceId, true);
-						requestFrame();
-					}, "pairing-edit-grants-" + deviceId)));
-				} else {
-					children.push(new KeyedView("permissions-title", paragraph("Device permissions", context)));
-					var presets = new Select<String>("pairing-device-presets-" + deviceId, [
-						new SelectOption("all", "All permissions", "all"),
-						new SelectOption("read", "Read only", "read"),
-						new SelectOption("edit", "Edit files", "edit"),
-						new SelectOption("custom", "Custom", "custom")
-					], preset(deviceId), function(value) { if (value != "custom") setPreset(deviceId, value); requestFrame(); }, sectionStyle());
-					presets.accessibilityLabel = "Device permission preset";
-					children.push(new KeyedView("presets", presets));
-					for (entry in grantCheckboxes(deviceId)) children.push(entry);
-					children.push(new KeyedView("save-permissions", new Button(client.pairingBusy() ? "Saving permissions…" : "Save permissions", null, function() {
-						client.setPairingGrants(deviceId, grants(deviceId), function(error) {
-							if (error == null) editing.set(deviceId, false);
-							actionError = error == null ? "Permissions updated. The device must reconnect." : error;
-							requestFrame();
-						});
-						requestFrame();
-					}, "pairing-save-grants-" + deviceId)));
-					children.push(new KeyedView("cancel-permissions", new Button("Cancel", null, function() {
-						editing.set(deviceId, false);
-						selection(deviceId, device.grants);
-						requestFrame();
-					}, "pairing-cancel-grants-" + deviceId)));
-				}
-				var revoke = new Button("Revoke", null, function() {
-					var id = deviceId;
-					client.revokePairing(id, function(error) { actionError = error == null ? "Device revoked" : error; requestFrame(); });
-					requestFrame();
-				}, "pairing-revoke-" + deviceId);
-				revoke.enabled = !client.pairingBusy();
-				children.push(new KeyedView("revoke", revoke));
-			}
-			rows.push(new KeyedView("device:" + device.deviceId, new Column("paired-device-" + device.deviceId, children, sectionStyle())));
-		}
-		}
-		var failure = actionError == null ? (view != null ? view.error() : client.pairingError()) : actionError;
+		addMachineRows(machine, rows, context);
+		var failure = actionError == null ? machine.error() : actionError;
 		if (failure != null) rows.push(new KeyedView("error", paragraph(failure, context)));
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.stretch();

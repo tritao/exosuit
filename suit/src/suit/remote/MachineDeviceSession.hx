@@ -10,6 +10,8 @@ import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
 import workspace.service.MachineGrants;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
+import workspace.transport.StreamMultiplexer;
+import workspace.transport.StreamMultiplexer.MuxStream;
 
 /** What a device session asks of the machine it serves; MachineRemote implements it, tests fake it. */
 interface MachineSessionHost {
@@ -22,54 +24,31 @@ interface MachineSessionHost {
 	function revision():Int;
 	/**
 		A connection to `workspace`'s service with the device's stream intro already sent, starting the service when it is
-		idle. `done` gets the connection, or an error code (`unknown_workspace`, `workspace_unavailable`).
+		idle and `start` is true. `done` gets the connection and the service it reached, or an error code
+		(`unknown_workspace`, `workspace_unavailable`).
 	**/
-	function openService(deviceId:String, workspace:String, grants:Array<String>, done:Null<MessageTransport>->Null<String>->Void):Void;
-}
-
-/** Stream 0 of a device's channel as a message transport, for the RPC connection with suit itself. */
-private class MachineStreamTransport implements MessageTransport {
-	final session:MachineDeviceSession;
-	final inbox:Array<Bytes> = [];
-	var closed:Bool = false;
-
-	public function new(session:MachineDeviceSession) {
-		this.session = session;
-	}
-
-	public function deliver(payload:Bytes):Void
-		inbox.push(payload);
-
-	public function isOpen():Bool
-		return !closed && session.channelOpen();
-
-	public function send(message:Bytes):Bool
-		return isOpen() && message.length <= MachineStreamFrame.MAX_PAYLOAD
-			&& session.sendFrame(MachineStreamFrame.encode(MachineStreamFrame.DATA, MachineStreamFrame.MACHINE_STREAM, message));
-
-	public function receive():Null<Bytes>
-		return inbox.length > 0 ? inbox.shift() : null;
-
-	public function close():Void
-		closed = true;
+	function openService(deviceId:String, workspace:String, grants:Array<String>, start:Bool,
+		done:(Null<MessageTransport>, Null<workspace.client.OpenedService>, Null<String>) -> Void):Void;
 }
 
 private typedef ServiceStream = {
-	var id:Int;
+	var device:MuxStream;
 	var workspace:String;
 	var grants:Array<String>;
 	var pipe:MessageTransport;
+	/** A message the other side refused; it is offered again before anything else moves that way. */
+	var toService:Null<Bytes>;
+	var toDevice:Null<Bytes>;
 }
 
 /**
-	A paired device's authenticated channel (ADR 0005 section 4). Stream frames run on it (`MachineStreamFrame`): stream 0
-	is the machine directory, an RPC connection with this process, and OPEN adds a stream that suit forwards, frame
-	for frame and unread, to a workspace service's local pipe. The service enforces the device's grants per request;
+	A paired device's authenticated channel (ADR 0005 section 4). Stream frames run on it, split by the same
+	`StreamMultiplexer` the device uses: stream 0 is the machine directory, an RPC connection with this process, and
+	OPEN adds a stream that suit forwards, message for message and unread, to a workspace service's local pipe. The service enforces the device's grants per request;
 	suit decides only which workspaces open. A grant that changes or goes closes that workspace's streams.
 **/
 class MachineDeviceSession {
-	static inline final OUTBOX_LIMIT = 256;
-	static inline final FRAMES_PER_POLL = 64;
+	static inline final MESSAGES_PER_POLL = 64;
 	/**
 		Streams one device may hold in one workspace, open or opening. Each is a connection to the workspace's service, and
 		the service has a bounded pool of them for all devices.
@@ -77,15 +56,12 @@ class MachineDeviceSession {
 	public static inline final STREAMS_PER_WORKSPACE = 6;
 
 	public final deviceId:String;
-	final secure:MessageTransport;
+	final mux:StreamMultiplexer;
 	final host:MachineSessionHost;
 	final clock:Void->Float;
-	final machineStream:MachineStreamTransport;
 	final streams:Map<Int, ServiceStream> = [];
-	final opening:Array<Int> = [];
 	/** The workspace of each OPEN still in progress (one entry per OPEN). */
 	final openingIn:Array<String> = [];
-	final outbox:Array<Bytes> = [];
 	var handshake:Null<RpcHandshake>;
 	var connection:Null<RpcConnection>;
 	var nextStream:Int = 1;
@@ -94,21 +70,17 @@ class MachineDeviceSession {
 
 	public function new(deviceId:String, secure:MessageTransport, host:MachineSessionHost, clock:Void->Float) {
 		this.deviceId = deviceId;
-		this.secure = secure;
+		this.mux = new StreamMultiplexer(secure);
 		this.host = host;
 		this.clock = clock;
-		machineStream = new MachineStreamTransport(this);
 		var options = new RpcPeerOptions(MachineDirectoryProtocol.APPLICATION, [MachineDirectoryProtocol.CAPABILITY], [], 30000,
 			MachineStreamFrame.MAX_PAYLOAD, 16, 4 * MachineStreamFrame.MAX_PAYLOAD);
-		handshake = RpcHandshake.server(machineStream, clock, options);
+		handshake = RpcHandshake.server(mux.machineStream(), clock, options);
 		shownRevision = host.revision();
 	}
 
 	public function isOpen():Bool
-		return !closed && secure.isOpen();
-
-	public function channelOpen():Bool
-		return !closed && secure.isOpen();
+		return !closed && mux.isOpen();
 
 	/** The number of service streams open now. */
 	public function streamCount():Int {
@@ -130,39 +102,13 @@ class MachineDeviceSession {
 		return count;
 	}
 
-	/** Queues a frame for the device; closes the session when the device is not reading. */
-	public function sendFrame(frame:Bytes):Bool {
-		if (outbox.length == 0 && secure.send(frame))
-			return true;
-		if (outbox.length >= OUTBOX_LIMIT) {
-			close();
-			return false;
-		}
-		outbox.push(frame);
-		return true;
-	}
-
-	function flush():Void {
-		while (outbox.length > 0 && secure.send(outbox[0]))
-			outbox.shift();
-	}
-
 	public function poll():Void {
 		if (closed)
 			return;
-		if (!secure.isOpen()) {
+		mux.poll();
+		if (!mux.isOpen()) {
 			close();
 			return;
-		}
-		flush();
-		for (_ in 0...FRAMES_PER_POLL) {
-			var frame = secure.receive();
-			if (frame == null)
-				break;
-			if (!dispatch(frame)) {
-				close();
-				return;
-			}
 		}
 		var pending = handshake;
 		if (pending != null) {
@@ -194,46 +140,33 @@ class MachineDeviceSession {
 		}
 	}
 
-	function dispatch(frame:Bytes):Bool {
-		var kind = MachineStreamFrame.kind(frame);
-		if (kind < 0)
-			return false;
-		var id = MachineStreamFrame.stream(frame);
-		if (id == MachineStreamFrame.MACHINE_STREAM) {
-			// The machine stream cannot be closed by a frame; the channel ends it.
-			if (kind == MachineStreamFrame.DATA)
-				machineStream.deliver(MachineStreamFrame.payload(frame));
-			return true;
-		}
-		var stream = streams.get(id);
-		if (stream == null) {
-			if (kind == MachineStreamFrame.DATA && opening.indexOf(id) < 0)
-				sendFrame(MachineStreamFrame.encode(MachineStreamFrame.CLOSE, id, null));
-			return true;
-		}
-		if (kind == MachineStreamFrame.CLOSE)
-			closeStream(id, false);
-		else if (!stream.pipe.send(MachineStreamFrame.payload(frame)))
-			closeStream(id, true);
-		return true;
-	}
-
+	/** Moves messages between each device stream and its service's pipe, holding one that a side refused. */
 	function pumpStreams():Void {
 		for (id in [for (key in streams.keys()) key]) {
 			var stream = streams.get(id);
 			if (stream == null)
 				continue;
-			for (_ in 0...FRAMES_PER_POLL) {
-				var message = stream.pipe.receive();
+			for (_ in 0...MESSAGES_PER_POLL) {
+				var message = stream.toService != null ? stream.toService : stream.device.receive();
+				if (message == null)
+					break;
+				stream.toService = stream.pipe.send(message) ? null : message;
+				if (stream.toService != null)
+					break;
+			}
+			for (_ in 0...MESSAGES_PER_POLL) {
+				var message = stream.toDevice != null ? stream.toDevice : stream.pipe.receive();
 				if (message == null)
 					break;
 				if (message.length > MachineStreamFrame.MAX_PAYLOAD) {
 					closeStream(id, true);
 					break;
 				}
-				sendFrame(MachineStreamFrame.encode(MachineStreamFrame.DATA, id, message));
+				stream.toDevice = stream.device.send(message) ? null : message;
+				if (stream.toDevice != null)
+					break;
 			}
-			if (streams.exists(id) && !stream.pipe.isOpen())
+			if (streams.exists(id) && (!stream.pipe.isOpen() || !stream.device.isOpen()))
 				closeStream(id, true);
 		}
 	}
@@ -250,6 +183,7 @@ class MachineDeviceSession {
 		}
 	}
 
+	/** Ends a service stream: its pipe closes, and the device hears of it unless it closed the stream itself. */
 	function closeStream(id:Int, tell:Bool):Void {
 		var stream = streams.get(id);
 		if (stream == null)
@@ -257,7 +191,7 @@ class MachineDeviceSession {
 		streams.remove(id);
 		stream.pipe.close();
 		if (tell)
-			sendFrame(MachineStreamFrame.encode(MachineStreamFrame.CLOSE, id, null));
+			stream.device.close();
 	}
 
 	function register(current:RpcConnection):Void {
@@ -286,16 +220,14 @@ class MachineDeviceSession {
 				context.fail({code: "unknown_workspace", message: "No such workspace", ambiguous: false});
 				return;
 			}
-			if (streamCount() + opening.length >= MachineDirectoryProtocol.STREAM_LIMIT - 1
+			if (streamCount() + openingIn.length >= MachineDirectoryProtocol.STREAM_LIMIT - 1
 				|| streamsIn(ref.workspace) >= STREAMS_PER_WORKSPACE) {
 				context.fail({code: "too_many_streams", message: "Too many open workspaces", ambiguous: false});
 				return;
 			}
 			var id = nextStream++;
-			opening.push(id);
 			openingIn.push(ref.workspace);
-			host.openService(deviceId, ref.workspace, grants, function(pipe, error) {
-				opening.remove(id);
+			host.openService(deviceId, ref.workspace, grants, request.start != false, function(pipe, service, error) {
 				openingIn.remove(ref.workspace);
 				if (pipe == null || closed) {
 					if (pipe != null)
@@ -309,9 +241,16 @@ class MachineDeviceSession {
 					context.fail({code: "unknown_workspace", message: "No such workspace", ambiguous: false});
 					return;
 				}
-				streams.set(id, {id: id, workspace: ref.workspace, grants: grants, pipe: pipe});
-				if (!context.respond({ref: ref, stream: id, grants: grants.copy()}))
-					closeStream(id, false);
+				var device = mux.open(id);
+				if (device == null) {
+					pipe.close();
+					context.fail({code: "too_many_streams", message: "Too many open workspaces", ambiguous: false});
+					return;
+				}
+				streams.set(id, {device: device, workspace: ref.workspace, grants: grants, pipe: pipe, toService: null, toDevice: null});
+				if (!context.respond({ref: ref, stream: id, grants: grants.copy(), generation: service == null ? null : service.generation,
+					root: service == null ? null : service.root}))
+					closeStream(id, true);
 			});
 		});
 		current.register(MachineDirectoryProtocol.CLOSE, function(request, context) {
@@ -332,6 +271,6 @@ class MachineDeviceSession {
 		var pending = handshake;
 		if (pending != null)
 			pending.close();
-		secure.close();
+		mux.close();
 	}
 }

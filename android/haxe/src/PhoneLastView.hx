@@ -1,9 +1,9 @@
+import workspace.client.RemoteViewSource;
 import haxe.Json;
 import sys.FileSystem;
 import sys.io.File;
 import ui.ExosuitApp;
 import ui.UiEditorTabs;
-import PhoneViewSource.PhoneReopen;
 
 /**
 	Remembers the phone's last view (machine, workspace, and the terminal or session that was open) in the app's
@@ -22,7 +22,7 @@ class PhoneLastView {
 	static inline final RESTORE_SECONDS = 40.0;
 
 	final path:String;
-	final remote:PhoneViewSource;
+	final remote:RemoteViewSource;
 	final app:ExosuitApp;
 	final clock:Void->Float;
 	var pending:Null<{machine:String, workspace:String, kind:String, id:String, controlling:Bool}>;
@@ -31,7 +31,7 @@ class PhoneLastView {
 	var terminalShown = false;
 	var holdUntilOpen = false;
 
-	public function new(filesRoot:String, remote:PhoneViewSource, app:ExosuitApp, clock:Void->Float) {
+	public function new(filesRoot:String, remote:RemoteViewSource, app:ExosuitApp, clock:Void->Float) {
 		this.path = filesRoot + "/last-view.json";
 		this.remote = remote;
 		this.app = app;
@@ -98,7 +98,7 @@ class PhoneLastView {
 			var catalog = client.terminalCatalog();
 			if (catalog == null || !client.canReadTerminals()) return;
 			for (record in catalog.terminals) if (record.id == wanted.id) {
-				if (app.openCatalogTerminal(record)) {
+				if (app.terminalTabs.openCatalogTerminal(client, record)) {
 					// It opens as any terminal does. If another client took control while this phone was gone, the person is asked.
 					var pane = wanted.controlling ? terminalPane(wanted.id) : null;
 					if (pane != null) pane.offerControlBack();
@@ -111,7 +111,7 @@ class PhoneLastView {
 			var agents = client.agentService().agents();
 			if (agents == null) return;
 			for (record in agents.records) if (record.id == wanted.id) {
-				app.openCodexAgent(record.id);
+				app.agentTabs.openCodexAgent(record.id);
 				return give_up();
 			}
 			give_up();

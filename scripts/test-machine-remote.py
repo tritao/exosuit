@@ -13,7 +13,6 @@ Every process it starts is stopped at the end, including the workspace services 
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -21,10 +20,8 @@ import sys
 import tempfile
 
 SCRIPTS = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("suit_relay_harness", SCRIPTS / "test-suit-relay.py")
-harness = importlib.util.module_from_spec(spec)
-sys.modules["suit_relay_harness"] = harness
-spec.loader.exec_module(harness)
+sys.path.insert(0, str(SCRIPTS))
+import suit_harness as harness  # noqa: E402
 
 ROOT = harness.ROOT
 TEST = ROOT / "tests" / "machine-remote" / "build" / "host" / "main.hl"

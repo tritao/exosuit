@@ -1,3 +1,7 @@
+package ui;
+
+import workspace.client.RemoteMachine;
+import workspace.client.RemoteMachines;
 import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
@@ -19,20 +23,20 @@ import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineWorkspaceEntry;
 
 /**
-	The phone's Remote Access view (ADR 0005 section 4): the machines this phone is paired with and whether they are
+	A device's Remote view (the phone's, the browser's; ADR 0005 section 4): the machines this device is paired with and whether they are
 	online, each machine's granted workspaces (the owner grants them on the machine; they appear here without pairing
 	again), and each workspace's groups and sessions from its catalog. Tapping a workspace opens it as the attached
 	workspace. Pairing another machine (URL, the code to compare) is below the list.
 **/
-class PhonePanel implements View {
+class RemoteMachinesPanel implements View {
 	/** Rows of groups and sessions shown per workspace before "and N more". */
 	static inline final CATALOG_ROWS = 40;
 
-	final remote:PhoneRemote;
+	final remote:RemoteMachines;
 	final requestFrame:Void->Void;
 	var pairingUrl = "";
 
-	public function new(remote:PhoneRemote, requestFrame:Void->Void) {
+	public function new(remote:RemoteMachines, requestFrame:Void->Void) {
 		this.remote = remote;
 		this.requestFrame = requestFrame;
 	}
@@ -72,8 +76,8 @@ class PhonePanel implements View {
 			address.placeholder = "wss://…/v1/machines/…/pair/…?secret=…";
 			address.style.width = LayoutAxis.grow();
 			address.ellipsizeWhenUnfocused = true;
-			rows.push(new KeyedView("url-label", new Text(remote.machines.length == 0 ? "Pair this phone with a machine" : "Pair another machine", null, tokens.textSecondary)));
-			// The field has no paste menu on the phone; this reads the Android clipboard the way the terminal's Paste key does.
+			rows.push(new KeyedView("url-label", new Text(remote.machines.length == 0 ? "Pair this device with a machine" : "Pair another machine", null, tokens.textSecondary)));
+			// The field has no paste menu on a phone; this reads the host clipboard the way the terminal's Paste key does.
 			var paste = new Button("Paste", null, function() {
 				try context.clipboard.readText(function(text) {
 					var trimmed = StringTools.trim(text == null ? "" : text);
@@ -110,7 +114,7 @@ class PhonePanel implements View {
 		return new ScrollView("phone-remote-scroll", new Column("phone-remote-content", rows, contentStyle), viewportStyle).build(context);
 	}
 
-	function machineRows(rows:Array<KeyedView>, machine:PhoneMachine, context:BuildContext):Void {
+	function machineRows(rows:Array<KeyedView>, machine:RemoteMachine, context:BuildContext):Void {
 		var tokens = context.theme.tokens;
 		var key = machine.device.machineId + ":" + machine.device.deviceId;
 		var refusal = machine.refusal();
@@ -134,9 +138,9 @@ class PhonePanel implements View {
 		}, "phone-forget-" + machine.device.deviceId.substr(0, 8))));
 	}
 
-	function workspaceRows(rows:Array<KeyedView>, machine:PhoneMachine, entry:MachineWorkspaceEntry, machineKey:String):Void {
+	function workspaceRows(rows:Array<KeyedView>, machine:RemoteMachine, entry:MachineWorkspaceEntry, machineKey:String):Void {
 		var key = machineKey + ":" + entry.workspace;
-		var isOpen = remote.openMachine == machine && remote.open != null && remote.open.id == entry.workspace;
+		var isOpen = remote.openMachine == machine && remote.openId == entry.workspace;
 		var mirror = remote.mirrorOf(machine, entry.workspace);
 		var count = mirror == null ? "" : " · " + mirror.sessionList().length + " sessions";
 		var label = entry.name + " · " + (entry.status == MachineDirectoryProtocol.RUNNING ? "running" : "idle") + count + (isOpen ? " · open" : "");

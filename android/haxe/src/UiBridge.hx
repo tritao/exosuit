@@ -1,3 +1,4 @@
+import workspace.client.RemoteMachines;
 import haxe.io.Bytes;
 import runtime.memory.RawPtr;
 
@@ -66,7 +67,7 @@ class UiBridge {
 					// carries on; 0 would put the app on its fatal error screen.
 					return remote.beginPairing(text(command, "url")) ? 1 : 2;
 				case "network":
-					// The device network changed ("changed": true) or the app came back to the foreground. Dial now; see PhoneRemote.networkChanged.
+					// The device network changed ("changed": true) or the app came back to the foreground. Dial now; see RemoteMachines.networkChanged.
 					var remote = AndroidExosuitFactory.remote;
 					if (remote == null) return 0;
 					remote.networkChanged(flag(command, "changed"));

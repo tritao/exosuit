@@ -139,7 +139,7 @@ function Wait-Fake([string]$path, [scriptblock]$test, [string]$what, [int]$secon
 
 $resumeDir = Join-Path $OutDir 'resume'
 # ---- Resume steps ----------------------------------------------------------------------------------------------------------------
-# What "back, connected and drawn" means, read from the app's own UI snapshot (devtools.AutomationProbe, label-driven): the machine
+# What "back, connected and drawn" means, read from the app's own UI snapshot (PhoneSnapshotFile, label-driven): the machine
 # is online, its granted workspaces are listed, the open workspace is connected and its terminal's extra-keys row is on screen.
 function Get-ResumeStatus {
     $snapshot = Get-PhoneSnapshot
@@ -187,7 +187,7 @@ function Open-AlphaTerminal {
     if ((Find-PhoneElements '^Esc$').Count -gt 0) { return }
     $open = (Get-PhoneSnapshot).state.phone.open
     if (-not ($open -and $open.connected)) {
-        if (-not (Find-PhoneElements '^(Alpha|Beta) .* sessions').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }
+        if (-not (Find-PhoneElements '^(Alpha|Beta) · ').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }
         Tap-PhoneElement '^Alpha ' -role 1 -after 1
         $null = Wait-ResumeStatus { param($s) $s.Open } 30
         Start-Sleep -Seconds 3
@@ -323,6 +323,9 @@ function Invoke-ResumeSteps($info) {
 if (-not $SkipBuild) {
     & (Join-Path $PSScriptRoot 'build.ps1') -Abi x86_64
     if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
+    # The host script's admin tool speaks the service's protocol, so a stale build fails the run's setup.
+    python (Join-Path $RepoRoot 'scripts\haxeon_cli.py') build --project (Join-Path $RepoRoot 'tests\mobile-pairing\haxeon.json')
+    if ($LASTEXITCODE -ne 0) { throw 'The admin tool (tests/mobile-pairing) did not build' }
 }
 if (-not (Test-Path $apk)) { throw "Build the APK first: $apk" }
 
@@ -408,15 +411,15 @@ try {
         Start-Sleep -Seconds 2
         Shot (Join-Path $OutDir '2-nothing-granted.png')
 
-        # 2. The owner grants Alpha; the phone lists it with its session. No second pairing.
+        # 2. The owner grants Alpha; the phone lists it (its sessions show once its row is expanded or it is open). No second pairing.
         Host-Command @('grant', 'Alpha:all')
-        Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:1\]' 60 | Out-Null
+        Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+\]' 60 | Out-Null
         Start-Sleep -Seconds 2
         Shot (Join-Path $OutDir '3-alpha-granted.png')
 
         # 3. Later it grants Beta: it appears on the same channel.
         Host-Command @('grant', 'Beta:read')
-        Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:1,Beta:\w+:2\]' 60 | Out-Null
+        Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+,Beta:\w+:[0-9-]+\]' 60 | Out-Null
         Start-Sleep -Seconds 2
         Shot (Join-Path $OutDir '4-both-granted.png')
         $codes = ([regex]::Matches((Logcat), 'exosuit-pairing: code')).Count
@@ -426,7 +429,7 @@ try {
 
     # 4. Open Alpha by TAPPING its row in the Remote list (rail icon, then the row), and look at its Workbench.
     $fake = $info.fakeClaudeLog
-    if (-not (Find-PhoneElements '^(Alpha|Beta) .* sessions').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }  # the rail icon toggles the sidebar
+    if (-not (Find-PhoneElements '^(Alpha|Beta) · ').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }  # the rail icon toggles the sidebar
     Tap-PhoneElement '^Alpha ' -role 1 -after 1
     Wait-Log "exosuit-open: $($info.workspaces.Alpha) connected" 60 | Out-Null
     Start-Sleep -Seconds 6
@@ -503,7 +506,7 @@ esume"
     Shot (Join-Path $OutDir '14-new-claude.png')
 
     # 4e. Beta, tapped open in the Remote list (the keyboard goes away with the terminal view).
-    if (-not (Find-PhoneElements '^(Alpha|Beta) .* sessions').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }  # the rail icon toggles the sidebar
+    if (-not (Find-PhoneElements '^(Alpha|Beta) · ').Count) { Tap-PhoneElement '^Remote$' -role 1 -after 2 }  # the rail icon toggles the sidebar
     Tap-PhoneElement '^Beta ' -role 1 -after 1
     Wait-Log "exosuit-open: $($info.workspaces.Beta) connected" 60 | Out-Null
     Start-Sleep -Seconds 6
@@ -514,7 +517,7 @@ esume"
     & $script:Adb -s $script:Serial logcat -c
     Assert-RelayTunnel
     Start-App @()
-    try { Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:1,Beta:\w+:2\]' 90 | Out-Null }
+    try { Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+,Beta:\w+:[0-9-]+\]' 90 | Out-Null }
     catch {
         Write-Host "adb reverse rules at the timeout: '$((& $script:Adb -s $script:Serial reverse --list) -join '; ')'"
         Shot (Join-Path $OutDir '7-NOT-RECONNECTED.png')
@@ -526,7 +529,7 @@ esume"
 
     # 6. The owner takes Beta back.
     Host-Command @('revoke-grant', 'Beta')
-    Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:1\]' 60 | Out-Null
+    Wait-Log 'exosuit-machine: \S.* online \[Alpha:\w+:[0-9-]+\]' 60 | Out-Null
     Start-Sleep -Seconds 2
     Shot (Join-Path $OutDir '8-beta-revoked.png')
     Write-Host "OK: screenshots in $OutDir; look at each one"

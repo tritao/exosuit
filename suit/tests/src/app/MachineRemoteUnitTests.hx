@@ -310,9 +310,10 @@ private class FakeMachine implements MachineSessionHost {
 		return {machine: "machine-1", name: "test", revision: revision(), workspaces: listed, relay: null};
 	}
 
-	public function openService(deviceId:String, workspace:String, grants:Array<String>, done:Null<MessageTransport>->Null<String>->Void):Void {
+	public function openService(deviceId:String, workspace:String, grants:Array<String>, start:Bool,
+			done:(Null<MessageTransport>, Null<workspace.client.OpenedService>, Null<String>) -> Void):Void {
 		var pipe = MemoryTransport.pair();
 		MachineRemoteUnitTests.addPipe(pipe.client);
-		done(pipe.server, null);
+		done(pipe.server, {endpoint: "", generation: StringTools.lpad("", "a", 32), root: "/w/" + workspace}, null);
 	}
 }

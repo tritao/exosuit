@@ -3,10 +3,6 @@ package workspace.runtime;
 import haxe.io.Bytes;
 import workspace.service.WorkspaceDevicePersistence;
 import workspace.service.WorkspaceDeviceRecord;
-import workspace.service.WorkspacePairingAdmin;
-import workspace.service.WorkspacePairingProtocol.PairingInvitation;
-import workspace.service.WorkspacePairingProtocol.PairingDevice;
-import workspace.service.WorkspacePairingProtocol.PendingPairing;
 import workspace.service.WorkspaceProtocol;
 import workspace.transport.MachineKeys;
 import workspace.transport.NoiseMessageTransport;
@@ -15,6 +11,36 @@ import workspace.transport.NoisePrologue;
 import workspace.transport.NoiseServerHandshake;
 import workspace.transport.RelayFrameCodec;
 import noisekit.NoiseSession;
+
+/** A one-time invitation: what the owner gives the device to pair with. */
+typedef PairingInvitation = {
+	var relayOrigin:String;
+	var machineId:String;
+	var deviceId:String;
+	var secret:String;
+	var pairingSocketUrl:String;
+	var expiresInSeconds:Int;
+	/**
+		`pairingSocketUrl` and `#mk=` with the fingerprint of the machine's Noise key (`MachineKeys.fingerprint`), which the
+		device checks after the handshake. The fragment never reaches the relay: the device connects to `pairingSocketUrl`.
+	**/
+	var invitationUrl:String;
+}
+
+/** A device that finished the handshake and waits for the owner's approval. */
+typedef PendingPairing = {
+	var deviceId:String;
+	var authenticationCode:String;
+	var expiresInSeconds:Int;
+}
+
+/** A paired device. */
+typedef PairingDevice = {
+	var deviceId:String;
+	var grants:Array<String>;
+	var revoked:Bool;
+	var connected:Bool;
+}
 
 private typedef PairingInvitationState = {var expiresAt:Float;}
 private typedef PairingHandshake = {var deviceId:String; var handshake:NoiseServerHandshake;}
@@ -34,7 +60,7 @@ private typedef PairingCandidate = {
 }
 
 /** Owns one-use invitations and the local approval gate for new Noise devices. */
-class WorkspacePairingManager implements WorkspacePairingAdmin {
+class WorkspacePairingManager {
 	static inline final MAX_INVITATIONS:Int = 8;
 	static inline final MAX_PENDING:Int = 8;
 	static inline final DEFAULT_PENDING_MILLISECONDS:Float = 120000;
@@ -421,34 +447,6 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		active.remove(deviceId);
 		activeRecords.remove(deviceId);
 		revokeRelayDevice(deviceId, complete);
-	}
-
-	/** Persist owner-edited grants and close the current session so they take effect immediately. */
-	public function setGrants(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void {
-		if (complete == null)
-			throw "Grant update callback cannot be null";
-		var current = findDevice(deviceId);
-		if (current == null || current.revoked) {
-			complete("device_not_found");
-			return;
-		}
-		if (!validGrants(grants)) {
-			complete("invalid_pairing_grants");
-			return;
-		}
-		var updated:WorkspaceDeviceRecord = {deviceId: current.deviceId, staticPublicKey: current.staticPublicKey,
-			grants: grants.copy(), revoked: false};
-		try
-			store.saveDevice(updated)
-		catch (_:Dynamic) {
-			complete("device_grant_update_failed");
-			return;
-		}
-		var transport = active.get(deviceId);
-		if (transport != null) transport.close();
-		active.remove(deviceId);
-		activeRecords.remove(deviceId);
-		complete(null);
 	}
 
 	function revokeRelayDevice(deviceId:String, complete:Null<String>->Void):Void {

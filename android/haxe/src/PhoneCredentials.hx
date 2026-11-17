@@ -1,28 +1,19 @@
 import haxe.Json;
 import haxe.io.Bytes;
 
-/** One paired machine as the phone keeps it (ADR 0005 section 4: a device pairs once with the machine and is granted workspaces there). The key and token are secrets: the host stores them under the Android Keystore. */
-typedef SavedDevice = {
-	var machineId:String;
-	var deviceId:String;
-	var relayOrigin:String;
-	var staticPrivateKey:String;
-	var deviceToken:String;
-	var machineStaticPublicKey:String;
-	/** The machine's name, learned from its directory. Null until then. */
-	var name:Null<String>;
-}
+/** One paired machine as the phone keeps it (ADR 0005 section 4). The key and token are secrets: the host stores them under the Android Keystore. */
+typedef PairedMachine = workspace.client.DevicePairing.PairedMachine;
 
 /**
 	The phone's paired machines. The document lives in the host's Keystore-encrypted file: it arrives with the `start`
 	command (`load`) and goes back through HostBridge on every change (`save`). Nothing is written by the Haxe side.
 **/
-class PhoneCredentials {
+class PhoneCredentials implements workspace.client.DevicePairing.PairedMachines {
 	/** Version 1 held one pairing per workspace service; those are not machine pairings, so they are not read. */
 	public static inline final VERSION = 2;
 	public static inline final MAX_DEVICES = 16;
 
-	public var devices(default, null):Array<SavedDevice> = [];
+	public var devices(default, null):Array<PairedMachine> = [];
 	/** The host has saved pairings that could not be opened (Keystore or file failure) or read (not a document this version understands); `devices` is empty but nothing was lost yet. */
 	public var unreadable(default, null):Bool = false;
 
@@ -59,7 +50,7 @@ class PhoneCredentials {
 		} catch (_:Dynamic) return false;
 	}
 
-	static function validate(entry:Dynamic):Null<SavedDevice> {
+	static function validate(entry:Dynamic):Null<PairedMachine> {
 		var machineId:Dynamic = Reflect.field(entry, "machineId"), deviceId:Dynamic = Reflect.field(entry, "deviceId");
 		var origin:Dynamic = Reflect.field(entry, "relayOrigin"), key:Dynamic = Reflect.field(entry, "staticPrivateKey");
 		var token:Dynamic = Reflect.field(entry, "deviceToken"), machineKey:Dynamic = Reflect.field(entry, "machineStaticPublicKey");
@@ -73,7 +64,9 @@ class PhoneCredentials {
 	static function hex(value:Dynamic, length:Int):Bool
 		return Std.isOfType(value, String) && (value:String).length == length && ~/^[0-9a-f]+$/.match(value);
 
-	public function find(machineId:String, deviceId:String):Null<SavedDevice> {
+	public function paired():Array<PairedMachine> return devices;
+
+	public function find(machineId:String, deviceId:String):Null<PairedMachine> {
 		for (device in devices) if (device.machineId == machineId && device.deviceId == deviceId) return device;
 		return null;
 	}
@@ -83,7 +76,7 @@ class PhoneCredentials {
 		it, the entry is taken back out (and the one it replaced, if any, put back), so a later save (learn, remove) cannot
 		store a device whose pairing never completed.
 	**/
-	public function put(device:SavedDevice, done:Bool->Void):Void {
+	public function put(device:PairedMachine, done:Bool->Void):Void {
 		var previous = find(device.machineId, device.deviceId);
 		devices = [for (existing in devices) if (existing.machineId != device.machineId || existing.deviceId != device.deviceId) existing];
 		devices.push(device);

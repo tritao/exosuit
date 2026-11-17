@@ -1,21 +1,25 @@
 package app;
 
 import haxe.Json;
+import haxe.io.Path;
 import suit.SuitActions;
 import suit.SuitClient;
 import suit.SuitControl;
 import suit.SuitDaemon;
+import suit.EditorDirectory;
 import suit.SuitInventory;
 import suit.SuitLogin;
 import suit.SuitMenuModel;
 import suit.SuitPaths;
 import suit.SuitReport;
 import suit.SuitTerminator;
-import suit.relay.SuitRelayHosting;
-import suit.relay.SuitRelayHosts;
-import suit.relay.SuitRelayMenu;
+import suit.control.SuitCtl;
 
-/** `suit`: the per-user daemon behind the Exosuit tray icon, and its command line. */
+/**
+	`suit`: the per-user daemon behind the Exosuit tray icon, and its command line. The same program is `suitctl`, the
+	control plane's command line (suit.control.SuitCtl), when run with `--ctl` or under that name (TDD Q7: one program,
+	two names).
+**/
 class SuitMain {
 	static final USAGE:String = [
 		"usage: suit <command>",
@@ -23,7 +27,7 @@ class SuitMain {
 		"  list [--json]             every exosuit process, grouped by editor; orphans, then others found, last",
 		"  list --all [--json]       also counts every kind (zero included), the daemon, remote access and paired devices",
 		"  menu                      print the tray menu as text (disabled items in brackets)",
-		"  watch [--relay] [--once]  the process viewer: list, refreshed every 2 s",
+		"  watch [--once]            the process viewer: list, refreshed every 2 s",
 		"  kill <pid>...             stop listed processes (graceful first, then the tree)",
 		"  kill --orphans            stop exosuit's processes whose editor is gone",
 		"  kill --all                stop exosuit's background processes, terminal hosts included; editors keep running",
@@ -31,13 +35,6 @@ class SuitMain {
 		"  terminals end --all       end every terminal (its program too)",
 		"  terminals end <workspace> end one workspace's terminals (id, root or folder name); add --dry-run to only print",
 		"  kill ... --dry-run        print what a kill would stop, and stop nothing",
-		"  relay list [--json]       workspaces hosting remote access, with devices",
-		"  relay stop <workspace>    stop hosting one workspace (root or folder name); grants persist",
-		"  relay stop --all          stop all hosting",
-		"  relay resume <workspace>|--all  host again what relay stop paused",
-		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters); it is refused for 60 s",
-		"  relay retry <workspace>   try again to host a workspace that failed",
-		"  relay forget <workspace>  stop hosting it from suit and forget its record (needed after moving a build)",
 		"  remote [--json]           remote access: the relay connection, paired devices (name, paired, connected, workspaces), sessions",
 		"  remote disconnect <device> end a device's live session now (id, a prefix of 4+ characters, or its name); it may reconnect",
 		"  remote revoke <device>    revoke a device's pairing: it is cut off and cannot connect again",
@@ -54,6 +51,7 @@ class SuitMain {
 		"  start                     start the daemon if it is not running",
 		"  stop                      stop only the daemon",
 		"  daemon [--login]          run the daemon in this process (--login: stay resident)",
+		"  open|focus|documents|save|project|call ...  the window commands of suitctl (suitctl --help)",
 		"environment: EXOSUIT_SUIT_HOME (isolated home and endpoint), EXOSUIT_SUIT_SCAN=0 (registered processes only)",
 		"bulk kills and quit stop only processes exosuit started (registered, or descended from one); see suit/README.md"
 	].join("\n");
@@ -72,6 +70,10 @@ class SuitMain {
 	}
 
 	static function run(args:Array<String>):Int {
+		if (args.length > 0 && args[0] == "--ctl")
+			return SuitCtl.run(args.slice(1));
+		if (Path.withoutExtension(Path.withoutDirectory(Sys.programPath())) == "suitctl")
+			return SuitCtl.run(args);
 		var command = args.length > 0 ? args[0] : "status";
 		// suit's home must be private before anything is written to it; editors create it the same way.
 		try SuitPaths.prepare() catch (_:Dynamic) {}
@@ -80,6 +82,8 @@ class SuitMain {
 		switch command {
 			case "daemon":
 				return SuitDaemon.run(rest.indexOf("--login") >= 0);
+			case "open" | "focus" | "documents" | "save" | "project" | "call":
+				return SuitCtl.run(args);
 			case "status":
 				var reply = SuitControl.request({op: "status"});
 				if (json) {
@@ -94,7 +98,7 @@ class SuitMain {
 				return 0;
 			case "list":
 				var running = SuitControl.request({op: "refresh"}, 1) != null;
-				var inventory = new SuitInventory();
+				var inventory = new SuitInventory(false, EditorDirectory.fromDaemon());
 				if (rest.indexOf("--all") >= 0) {
 					var daemon = running ? SuitControl.request({op: "status"}, 3) : null;
 					var counts = SuitReport.kindsJson(inventory, daemon, running ? SuitControl.request({op: "remote-status"}, 3) : null,
@@ -113,26 +117,14 @@ class SuitMain {
 			case "menu":
 				var menu = new suit.SuitMenuModel.SuitTextMenu();
 				var ignore = function(_:Dynamic) {};
-				SuitMenuModel.build(menu, new SuitInventory(), {terminate: ignore, openViewer: ignore, quit: function() {}, quitKeepingTerminals: function() {}});
+				SuitMenuModel.build(menu, new SuitInventory(false, EditorDirectory.fromDaemon()), {terminate: ignore, openViewer: ignore, quit: function() {}, quitKeepingTerminals: function() {}});
 				print(menu.toString());
 				return 0;
-			case "tray-check":
-				// Creates the tray icon and builds the native menu without showing it, then removes both.
-				var runtime = haxeon.platform.Runtime.start();
-				var inventory = new SuitInventory();
-				var tray = new suit.SuitTray(inventory.summary(), null);
-				var items = tray.build(function(menu) SuitMenuModel.build(menu, inventory,
-					{terminate: function(_) {}, openViewer: function(_) {}, quit: function() {}, quitKeepingTerminals: function() {}}));
-				tray.setTooltip(inventory.summary() + " ");
-				tray.dispose();
-				runtime.dispose();
-				print('tray icon created and removed; native menu built with $items command items');
-				return 0;
 			case "watch":
-				var relay = rest.indexOf("--relay") >= 0, once = rest.indexOf("--once") >= 0;
+				var once = rest.indexOf("--once") >= 0;
 				while (true) {
-					var inventory = new SuitInventory();
-					var text = relay ? SuitRelayMenu.text(inventory, SuitRelayHosting.readViews()) : SuitReport.text(inventory, null);
+					var inventory = new SuitInventory(false, EditorDirectory.fromDaemon());
+					var text = SuitReport.text(inventory, null);
 					if (!once)
 						Sys.stdout().writeString("\x1b[2J\x1b[H");
 					print(text + (once ? "" : "\n(refreshes every 2 s; use `suit kill` to stop processes; Ctrl+C closes)"));
@@ -141,7 +133,7 @@ class SuitMain {
 					Sys.sleep(2);
 				}
 			case "kill":
-				var inventory = new SuitInventory();
+				var inventory = new SuitInventory(false, EditorDirectory.fromDaemon());
 				var targets:Array<SuitInventory.SuitProcess> = [];
 				var dryRun = rest.remove("--dry-run");
 				if (rest.indexOf("--all") >= 0)
@@ -167,7 +159,7 @@ class SuitMain {
 				stopTargets(inventory, targets);
 				return 0;
 			case "terminals":
-				var inventory = new SuitInventory();
+				var inventory = new SuitInventory(false, EditorDirectory.fromDaemon());
 				var words = [for (word in rest) if (word != "--json" && word != "--dry-run") word];
 				if (words.length == 0 || words[0] == "list") {
 					print(json ? Json.stringify({version: 1, terminals: [for (process in inventory.terminals()) SuitReport.processJson(inventory, process)]})
@@ -184,80 +176,6 @@ class SuitMain {
 					return 0;
 				}
 				stopTargets(inventory, chosen);
-				return 0;
-			case "relay":
-				var inventory = new SuitInventory();
-				var verb = rest.length > 0 ? rest[0] : "list";
-				if (verb == "list") {
-					var hosts = SuitRelayHosting.readViews();
-					if (json)
-						print(Json.stringify(SuitRelayMenu.json(inventory, hosts)));
-					else
-						print(StringTools.trim(SuitRelayMenu.text(inventory, hosts)));
-					return 0;
-				}
-				if (verb == "disconnect") {
-					if (rest.length < 2)
-						throw USAGE;
-					var reply = SuitControl.request({op: "relay-disconnect", client: rest[1]}, 3);
-					if (reply == null)
-						throw "suit is not running, so no remote client is connected through it";
-					if (Reflect.field(reply, "ok") != true)
-						throw Std.string(Reflect.field(reply, "error"));
-					print("disconnected " + Reflect.field(reply, "client") + " from " + Reflect.field(reply, "root"));
-					return 0;
-				}
-				if ((verb == "retry" || verb == "forget") && rest.length >= 2) {
-					var reply = SuitControl.request({op: "relay-" + verb, workspace: rest[1]}, 3);
-					var roots:Array<String> = [];
-					if (reply != null && Std.isOfType(Reflect.field(reply, "roots"), Array))
-						roots = (Reflect.field(reply, "roots") : Array<String>);
-					if (reply == null && verb == "forget")
-						for (host in SuitRelayHosts.load())
-							if (SuitRelayHosts.matches(host, rest[1])) {
-								SuitRelayHosts.remove(host.machineId);
-								roots.push(host.root);
-							}
-					if (roots.length == 0)
-						throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)' + (reply == null && verb == "retry" ? "; suit is not running" : "");
-					for (root in roots)
-						print((verb == "retry" ? "retrying " : "forgot ") + root);
-					return 0;
-				}
-				if ((verb != "stop" && verb != "resume") || rest.length < 2)
-					throw USAGE;
-				var all = rest[1] == "--all";
-				var query:Null<String> = all ? null : rest[1];
-				// The running daemon pauses or resumes its machine sockets and stops the services; without it, this process does.
-				var reply = SuitControl.request({op: verb == "stop" ? "relay-stop" : "relay-resume", workspace: query}, 5);
-				var roots:Array<String> = [];
-				if (reply != null && Std.isOfType(Reflect.field(reply, "roots"), Array))
-					roots = (Reflect.field(reply, "roots") : Array<String>);
-				if (verb == "stop" && reply != null) {
-					if (roots.length == 0 && Reflect.field(reply, "terminating") == 0 && !all)
-						throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)';
-					for (root in roots)
-						print("paused hosting " + root);
-					print("stopping " + Reflect.field(reply, "terminating") + " workspace service(s)");
-					return 0;
-				}
-				if (reply == null && verb == "resume")
-					for (host in SuitRelayHosts.load())
-						if (SuitRelayHosts.matches(host, query) && SuitRelayHosts.setPaused(host.stateDir, false))
-							roots.push(host.root);
-				if (verb == "resume") {
-					if (roots.length == 0 && !all)
-						throw 'No paused workspace matches ${rest[1]} (see `suit relay list`)';
-					for (root in roots)
-						print("resumed hosting " + root + (reply == null ? " (suit is not running; it hosts again when it starts)" : ""));
-					return 0;
-				}
-				var plan = SuitRelayHosting.stop(inventory, query, null);
-				if (plan.terminate.length == 0 && plan.roots.length == 0 && !all)
-					throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)';
-				for (root in plan.roots)
-					print("paused hosting " + root);
-				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, plan.terminate).run())));
 				return 0;
 			case "login":
 				var verb = rest.length > 0 ? rest[0] : "status";
@@ -443,12 +361,12 @@ class SuitMain {
 		var own = inventory.ownTerminal();
 		var last = [for (target in targets) if (own != null && target.pid == own.pid) target];
 		var first = [for (target in targets) if (last.indexOf(target) < 0) target];
-		print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, first).run())));
+		print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, first, SuitTerminator.askThroughDaemon).run())));
 		SuitControl.request({op: "refresh"}, 1);
 		if (own == null || last.length == 0)
 			return;
 		print('${own.pid} terminal-host: ending it now, the terminal this command runs in');
 		Sys.stdout().flush();
-		print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, last).run())));
+		print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, last, SuitTerminator.askThroughDaemon).run())));
 	}
 }

@@ -8,7 +8,6 @@ import workspace.runtime.WorkspacePairingManager;
 import workspace.runtime.WorkspacePairingRelay;
 import workspace.service.WorkspaceDevicePersistence;
 import workspace.service.WorkspaceDeviceRecord;
-import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoiseMessageTransport;
@@ -101,10 +100,10 @@ class WorkspacePairingTests {
 	static function manager(store:MemoryDeviceStore, relay:MemoryPairingRelay, machinePrivate:Bytes,
 		now:Void->Float, onAuthenticated:NoiseMessageTransport->Array<String>->Void):WorkspacePairingManager
 		return new WorkspacePairingManager(store, relay, machinePrivate,
-			function() return [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS], now, onAuthenticated);
+			function() return [WorkspaceProtocol.READ], now, onAuthenticated);
 
-	static function invitation(pairing:WorkspacePairingManager):workspace.service.WorkspacePairingProtocol.PairingInvitation {
-		var result:Null<workspace.service.WorkspacePairingProtocol.PairingInvitation> = null;
+	static function invitation(pairing:WorkspacePairingManager):workspace.runtime.WorkspacePairingManager.PairingInvitation {
+		var result:Null<workspace.runtime.WorkspacePairingManager.PairingInvitation> = null;
 		var error:Null<String> = null;
 		pairing.createInvitation(30, function(value, failure) {
 			result = value;
@@ -187,20 +186,11 @@ class WorkspacePairingTests {
 			&& devices[0].grants[0] == WorkspaceProtocol.READ,
 			'local administration can list the approved device without exposing its key or bearer');
 
-		var grantsError:Null<String> = 'callback_missing';
-		pairing.setGrants(invite.deviceId, [], function(error) grantsError = error);
-		record = store.loadDevices()[0];
-		require(grantsError == null && record.grants.length == 0 && !pair.server.isOpen()
-			&& !pairing.listDevices()[0].connected,
-			'narrowing a device grant persists immediately and closes its active authenticated transport');
-		pairing.setGrants(invite.deviceId, [WorkspaceProtocol.READ], function(error) grantsError = error);
-		require(grantsError == null && store.loadDevices()[0].grants.length == 1,
-			'grant widening is persisted for the next authenticated connection');
 		var restartedPairing = manager(store, relay, machine.privateKey, now, function(_, _) {});
 		var afterRestart = restartedPairing.listDevices();
 		require(afterRestart.length == 1 && afterRestart[0].grants.length == 1
 			&& afterRestart[0].grants[0] == WorkspaceProtocol.READ,
-			'owner-edited device grants survive a pairing-manager restart');
+			'approved devices survive a pairing-manager restart');
 		restartedPairing.dispose();
 
 		var revokedError:Null<String> = 'callback_missing';

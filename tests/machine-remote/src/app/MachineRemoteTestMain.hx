@@ -197,7 +197,7 @@ class MachineRemoteTestMain {
 			throw "--origin, --folder-a and --folder-b are required";
 		runtime = Runtime.start();
 		hub = new NativeRpcHub(runtime.events);
-		machine = new MachineClient(runtime.events, clock);
+		machine = new MachineClient(suit.SuitLink.start(runtime.events));
 		var code = 0;
 		try
 			run(origin, folderA, folderB)
@@ -205,6 +205,7 @@ class MachineRemoteTestMain {
 			Sys.stderr().writeString("machine remote test failed: " + Std.string(error) + "\n");
 			code = 1;
 		}
+		suit.SuitLink.instance.dispose();
 		hub.dispose();
 		runtime.dispose();
 		if (code == 0)
@@ -353,12 +354,24 @@ class MachineRemoteTestMain {
 		check(openAndRead(streams, device, machineId, idB).error == "unknown_workspace", "opening B is refused as unknown_workspace");
 		var wrong = call(device.connection, MachineDirectoryProtocol.OPEN, {ref: {machine: "machine-" + hex(Bytes.alloc(16)), workspace: idA}});
 		check(wrong.error == "machine_mismatch", "a ref to another machine is refused");
+		// A device's reconnects and row links open with start false: an idle service stays idle.
+		var unstarted = call(device.connection, MachineDirectoryProtocol.OPEN, {ref: {machine: machineId, workspace: idA}, start: false});
+		check(unstarted.error == "workspace_unavailable", "OPEN with start false is refused while A is idle (" + unstarted.error + ")");
+		check(directory(device).workspaces[0].status == MachineDirectoryProtocol.IDLE, "OPEN with start false left A idle");
+		var beforeStart = device.changes;
 		var opened = openAndRead(streams, device, machineId, idA);
 		check(opened.error == null, "opening A and reading its catalog works" + (opened.error == null ? "" : " (" + opened.error + ")"));
 		check(opened.page.ref.workspace == idA && opened.page.ref.machine == machineId, "the catalog is A's");
 		var streamA:MuxStream = opened.stream;
+		await("a change notice for A's service starting", 20, function() return device.changes > beforeStart);
 		var running = directory(device);
 		check(running.workspaces[0].status == MachineDirectoryProtocol.RUNNING, "opening A started its service");
+		var startless = call(device.connection, MachineDirectoryProtocol.OPEN, {ref: {machine: machineId, workspace: idA}, start: false});
+		check(startless.error == null, "OPEN with start false opens A's running service");
+		if (startless.error == null) {
+			var extraStream = streams.open(startless.value.stream);
+			if (extraStream != null) extraStream.close();
+		}
 
 		// Granting B makes it appear and open.
 		var changes = device.changes;
@@ -395,7 +408,8 @@ class MachineRemoteTestMain {
 		var second = link(again.machineStream(), MachineDirectoryProtocol.APPLICATION, [MachineDirectoryProtocol.CAPABILITY]);
 		var view2 = directory(second);
 		check(view2.workspaces.length == 1 && listed(view2, idA), "after reconnecting, the directory is still A only");
-		check(openAndRead(again, second, machineId, idA).error == null, "A still opens after reconnecting");
+		var reopenedA = openAndRead(again, second, machineId, idA);
+		check(reopenedA.error == null, "A still opens after reconnecting" + (reopenedA.error == null ? "" : " (" + reopenedA.error + ")"));
 
 		// Revoking the device ends its channel and refuses a new one.
 		ctlOk("revoke the device", function(done) machine.remoteRevoke(deviceId, done));

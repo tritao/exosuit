@@ -11,7 +11,6 @@ let hostMemory = null;
 let guest = null;
 let departing = false;
 const pendingRemoteStoreRequests = new Set();
-const cancelledRemoteStoreRequests = new Set();
 window.addEventListener("pagehide", () => { departing = true; });
 
 function completeRemoteStore(event, success) {
@@ -103,35 +102,31 @@ function persistRemoteDevice(text) {
   event.staticPrivateKey = "";
   event.deviceToken = "";
   event.machineStaticPublicKey = "";
-  store.save(event.machineId, event.deviceId, credentials).then(async () => {
+  store.save(event.machineId, event.deviceId, credentials).then(() => {
     credentials.staticPrivateKey = "";
     credentials.deviceToken = "";
     credentials.machineStaticPublicKey = "";
-    if (cancelledRemoteStoreRequests.delete(event.request)) {
-      try { await store.remove(event.machineId, event.deviceId); }
-      catch (_error) { console.error("Could not clean up an abandoned remote-device record."); }
-      pendingRemoteStoreRequests.delete(event.request);
-      return;
-    }
     completeRemoteStore(event, true);
   }, error => {
     credentials.staticPrivateKey = "";
     credentials.deviceToken = "";
     credentials.machineStaticPublicKey = "";
-    if (cancelledRemoteStoreRequests.delete(event.request)) {
-      pendingRemoteStoreRequests.delete(event.request);
-      return;
-    }
     // Never include event data or credentials in diagnostics.
     console.error("Could not protect remote-device credentials in browser storage:", error && error.message);
     completeRemoteStore(event, false);
   });
 }
 
-function cancelRemoteDeviceStore(text) {
-  const request = Number(text.slice("exosuit-remote-cancel:".length));
-  if (Number.isSafeInteger(request) && pendingRemoteStoreRequests.has(request))
-    cancelledRemoteStoreRequests.add(request);
+function forgetRemoteDevice(text) {
+  let event;
+  try {
+    event = JSON.parse(text.slice("exosuit-remote-forget:".length));
+    if (!/^[0-9a-f]{32}$/.test(event.machineId) || !/^[0-9a-f]{32}$/.test(event.deviceId)) throw new Error("invalid forget request");
+  } catch (_error) {
+    return;
+  }
+  const store = report.remoteDeviceStore;
+  if (store) store.remove(event.machineId, event.deviceId).catch(() => console.error("Could not remove a forgotten remote device."));
 }
 
 function fail(message) {
@@ -192,9 +187,9 @@ async function startGuest() {
     {emscripten: Module, memory: hostMemory, contract: hostContract(), print: text => {
       if (text.startsWith("exosuit-state:")) report.document = JSON.parse(text.slice("exosuit-state:".length));
       else if (text.startsWith("exosuit-remote-store:")) persistRemoteDevice(text);
-      else if (text.startsWith("exosuit-remote-cancel:")) cancelRemoteDeviceStore(text);
       else if (text.startsWith("exosuit-remote-list:")) listRemoteDevices(text);
       else if (text.startsWith("exosuit-remote-load:")) loadRemoteDevice(text);
+      else if (text.startsWith("exosuit-remote-forget:")) forgetRemoteDevice(text);
       else console.log(text);
     }});
   if (departing) return;

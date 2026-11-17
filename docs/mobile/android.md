@@ -3,7 +3,7 @@
 A native Android application that runs haxeon and the same UI the desktop uses (`graphical/` `ExosuitApp`). Status:
 the app starts on the x86_64 emulator, pairs once with a machine (suit) over a relay, lists the workspaces the owner
 grants it with their groups and sessions, follows new grants without pairing again, and opens a workspace in the
-same Workbench the desktop shows (M19 Phase 9, `scripts/machine-acceptance.ps1`).
+same Workbench the desktop shows (`scripts/machine-acceptance.ps1`).
 
 ## Layout of `android/`
 
@@ -11,7 +11,7 @@ same Workbench the desktop shows (M19 Phase 9, `scripts/machine-acceptance.ps1`)
 | --- | --- |
 | `app/` | The Gradle app. Kotlin host only: `ExosuitActivity` (NativeKit view, Choreographer frame loop, lifecycle, font unpacking) and `HaxeonRuntime` (JNI declarations). No Compose. |
 | `nativekit/` | Gradle library `io.nativekit`. Its `src/` is a generated copy of `haxeon/vendor/nativekit/android/nativekit/src/main` (made by `build.ps1`, git-ignored). |
-| `haxe/src/` | The Haxe module: `Main`, `UiBridge` (the one entry the JNI calls: start, resize, frame, close), `AndroidUiHost` (UiHostRuntime on a NativeKit surface), `AndroidExosuitFactory` (builds `ExosuitApp` with the filesystem capability, then the workbench and workspace once paired), `PhoneRemote`/`PhoneMachine`/`PhoneWorkspace`/`PhonePanel`/`PhoneCredentials`/`PhoneInvitation`/`HostBridge` (pairing and attachment). |
+| `haxe/src/` | The Haxe module: `Main`, `UiBridge` (the one entry the JNI calls: start, resize, frame, close), `AndroidUiHost` (UiHostRuntime on a NativeKit surface), `AndroidExosuitFactory` (builds `ExosuitApp` with the filesystem capability, then the workbench and workspace once paired), `PhoneCredentials`/`PhoneLastView`/`HostBridge` (pairing and attachment). |
 | `native/` | `CMakeLists.txt`: one configure per ABI building libhaxeon, NativeKit, GPU, UIKit (with TLS), noisekit, textmate_regex and terminalkit straight from `haxeon/` and `native-packages/`. `exosuit_jni.c`: loads `ui.hl`, forwards JSON commands, creates the GLES3 surface. |
 | `scripts/` | `bootstrap.ps1` (toolchain check), `build.ps1`, `dev.ps1` (fast loop), `run-emulator.ps1`, `machine-acceptance.ps1`, `emulator-lib.ps1`, `env.ps1` (shared). |
 
@@ -78,7 +78,7 @@ folder and ignores it). The app is force-stopped and started again. Pairing live
 survives; the relay reconnects by ticket, so a running rig (desktop, relay, host from `machine-acceptance.ps1` or
 `e2e-local.ps1`) is left alone: start it once and only the phone app changes.
 
-Measured on a warm machine (emulator-5556), without `-Live`: cold worker 70 s (first round only), one-line edit in `PhonePanel.hx` 28 s
+Measured on a warm machine (emulator-5556), without `-Live`: cold worker 70 s (first round only), one-line edit in `RemoteMachinesPanel.hx` 28 s
 compile (3 functions retyped; the rest is the 54 MB module's backend assembly), push 1 s, relaunch under 1 s, so about
 34 s from save to the new screen, against 6 minutes for `build.ps1` plus install.
 
@@ -104,7 +104,7 @@ revision is not the phone's, or the runtime refused the patch. The debug app onl
 patch intent. `build.ps1` and a native change need the APK installed again (`dev.ps1` does it; the first `-Live` round after an
 install is a reload).
 
-Measured (emulator-5556, edit of the label in `PhonePanel.hx`, screenshots before and after looked at): the patch is applied
+Measured (emulator-5556, edit of the label in the Remote panel, screenshots before and after looked at): the patch is applied
 21 s after the compile starts (3 functions retyped; 3.5 s CLI start and request, 3.8 s preparing the session, 10 s IR assembly,
 which is not incremental yet, see `docs/haxeon-compiler-bugs.md`), the app logs the patch as applied immediately and shows the new
 text on the next frame; the full module is on the phone 2 s later. The reload loop it replaces took 34 s and restarted the
@@ -120,7 +120,6 @@ x86_64.
 There are no configure-time patches. Branch `mobile-upstream` supplied the changes (merged here): haxeon's Android
 CMake options `HAXEON_ANDROID_NATIVEKIT` and `HAXEON_ANDROID_UIKIT` (set by `native/CMakeLists.txt`), Mbed TLS for
 libwebsockets, `UiHostRuntime` without a window, the UIKit frame retry, and the sokol `GL_TEXTURE_MAX_LEVEL` fix.
-See `docs/mobile/android-native-libraries.md` once that branch lands.
 
 ## Pairing with a machine
 
@@ -137,37 +136,36 @@ The phone uses the same shared clients as the desktop and the browser build. The
   stream 0 (`exosuit-machine/1`) under an `RpcClient` (reconnect with backoff), reads `DIRECTORY` when connected, on
   `CHANGED` and every 15 s (a status change alone sends no hint), pins the machine's own id from the first answer (its `relay`
   field must be the relay id the phone paired under; a machine that sends no `relay` must answer with the relay id or
-  `machine-<relay id>` as its id), and gives `workspaceConnector(id)`: a connector whose every connect
-  issues `OPEN` (30 s: it starts an idle service) and hands the new stream to the ordinary `RpcClient`. A dropped channel
-  ends every stream, and the clients above reconnect through `OPEN`.
-- `client/WorkspaceConnections` (the desktop's catalog pool) takes an endpoint check and a limit, so the phone keys it by
-  workspace id.
+  `machine-<relay id>` as its id), and gives `openService(id)`, a ServiceOpener for `WorkspaceLink`: it issues `OPEN`
+  (30 s: it starts an idle service), whose answer names the service's generation and root, and hands the link a
+  connector that issues `OPEN` again on every reconnect. A dropped channel ends every stream, and the links reconnect
+  through `OPEN`.
+- The phone holds the same `WorkspaceLinks` and `WorkspaceLink`s as the desktop editor; only the route differs (a relay
+  stream instead of suit's pipe).
 
 The Android files are in `android/haxe/src/`:
 
-- `PhoneInvitation` parses the one-time URL (`wss://relay/v1/machines/<m>/pair/<d>?secret=...#mk=<fingerprint>`;
-  plain `ws` only for loopback; the shared parser is `src/workspace/client/PairingLink`). The phone connects without the
+- `src/workspace/client/PairingLink` parses the one-time URL (`wss://relay/v1/machines/<m>/pair/<d>?secret=...#mk=<fingerprint>`;
+  plain `ws` only for loopback). The phone connects without the
   `#mk=` fragment. After the Noise handshake it checks the machine key it reached against the fingerprint: a mismatch
   ends the pairing ("The machine that answered is not the one that made this invitation"), a match shows "The machine's
   key matches the invitation." An invitation from an older desktop has no fingerprint; the phone still pairs and shows
   "This invitation carries no machine key (it comes from an older desktop), so comparing the code is the only check."
   The desktop asks for invitations valid 300 s, the longest the relay (`MAX_PAIRING_TTL_SECONDS`) and
   `WorkspacePairingManager` allow.
-  `PhoneRemote` runs the Noise pairing, shows the 6-digit code, and after approval and the user's
+  `src/workspace/client/DevicePairing` (shared with the browser) runs the Noise pairing, shows the 6-digit code, and after approval and the user's
   confirmation stores the credentials and connects. Pairing grants only `machine.directory`. Pairing a machine does not
   disturb the machines already connected; pairing the same machine again replaces the older pairing.
 - `PhoneCredentials` is the list of paired machines (relay origin, machine id, device id, device key, device token,
-  pinned machine key, machine name). Version 2; version 1 (one pairing per workspace service) is not read, so a phone
-  paired the old way pairs again.
-- `PhoneMachine` is one paired machine: the relay route, the `DeviceMachine`, and a `WorkspaceConnections` pool with a
-  catalog watch for each running granted workspace except the open one (at most 14: a device holds 16 streams, one is
-  the machine's and one the open workspace's).
-- `PhoneWorkspace` is the open workspace: its own stream and full client grants, a catalog watch on that connection,
-  the file and terminal helpers. `PhoneRemote` presents it to `ExosuitApp` as the attachment (the Workbench client,
+  pinned machine key, machine name), version 2.
+- `RemoteMachine` is one paired machine: the relay route, the `DeviceMachine`, and its `WorkspaceLinks`: the kept link of
+  the open workspace and a row link for each running granted workspace besides (at most 14: a device holds 16 streams,
+  one is the machine's and one the open workspace's).
+- The open workspace is its machine's kept `WorkspaceLink`. `RemoteMachines` presents it to `ExosuitApp` as the attachment (the Workbench client,
   files, terminals) exactly as the local workspace is presented; the delivery-uncertainty guard in
   `RpcWorkspaceWorkbenchClient` is keyed by the workspace id (`workspaceIdentity`), so a prompt whose delivery is
   unknown stays flagged across reconnects and across switching workspaces. One workspace is open at a time.
-- The Remote sidebar panel (`PhonePanel`) lists the paired machines (online, offline, or needs attention with the
+- The Remote sidebar panel (`graphical/src/ui/RemoteMachinesPanel`, shared with the browser) lists the paired machines (online, offline, or needs attention with the
   reason), under each its granted workspaces (running or idle, with the session count), under each the groups and
   sessions from its catalog, and Forget. A machine granted nothing says "Waiting for the owner to grant workspaces."
   Tapping a workspace opens it (idle ones start). Below the list: pair another machine (URL, then the code to compare).
@@ -182,7 +180,7 @@ The Android files are in `android/haxe/src/`:
 - Reconnecting. The Activity watches the default network (`ConnectivityManager.registerDefaultNetworkCallback`,
   permission `ACCESS_NETWORK_STATE`). When it changes (callbacks coalesced for 500 ms; the one Android delivers at
   registration when there is a network is ignored; an app started offline takes its first one as the network coming
-  back) it sends the `network` command with `changed: true`, and `PhoneRemote.networkChanged` drops and redials every
+  back) it sends the `network` command with `changed: true`, and `RemoteMachines.networkChanged` drops and redials every
   machine and the open workspace, since their sockets belong to the old network. It redials at most once per 2 s; a
   change within that time is treated as `changed: false`. When the app returns to the foreground after more than 5 s the
   Activity sends `changed: false`: only connections waiting out a backoff dial at once, and healthy ones are left alone
@@ -204,18 +202,9 @@ The Android files are in `android/haxe/src/`:
 
 ### Tests, desktop test host and acceptance run
 
-`tests/machine-device` is the headless test: the multiplexer and `DeviceMachine` against a fake machine (frame
-vectors, ordering, a busy channel, floods, malformed frames, the 16-stream limit; the directory following grants over
-one channel with `CHANGED` and the periodic read; two and then three workspaces' catalogs over streams; revoke; a cut
-channel reconnecting every stream; refusals and a machine answering for another id).
-
-```
-haxeon run --project tests/machine-device/haxeon.json          (through wt-run.ps1 in a worktree)
-```
-
 `scripts/mobile-machine-host.py start --out DIR` runs, all isolated: the wrangler relay on a free loopback port, an
 isolated suit with remote access enabled for it, two workspaces ("Alpha" with one fake Codex session, "Beta" with two;
-their services are started first so the sessions exist, and suit finds them by their state folders), and a loop that
+their services are started first so the sessions exist, and report to that suit), and a loop that
 approves the pending device with no workspaces once `approve` is requested. `grant --out DIR Alpha:all Beta:read` and
 `revoke-grant --out DIR Beta` send the same control requests the desktop panel sends. `DIR/ready.json` has the
 invitation URL and ids; `DIR/pairing.json` the machine's pending code; `stop --out DIR` ends everything.
@@ -265,8 +254,8 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
   pointer ids are negative, which an earlier `>= 0` check missed. A tap focuses the pane and shows the keyboard.
 - **History.** Opening a terminal brings the screen and the most recent 256 KiB of its history (a few thousand rows),
   not the whole history (up to 16 MiB) the desktop takes; a re-attach to the same service (return to the app, network
-  change) continues by replay and fetches no snapshot. Older history is not on the phone (see
-  `docs/design/terminal-host-status.md`, "History on the phone").
+  change) continues by replay and fetches no snapshot. Older history is not on the phone (`historyLimit`, see
+  `docs/design/terminal-host-status.md`).
 - **Who sets the size (decision).** The controller does, as on the desktop. The phone claims control by itself when
   nobody controls the terminal, and then resizes the PTY to its own grid. When another client (the desktop) controls,
   the phone is an observer: the pane shows "Read only · another client controls..." with a "Take control" button and
@@ -297,15 +286,6 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
   the cause is not found. The acceptance script warns instead of failing. Terminal snapshots and replays were not
   tested beyond the screens above; a burst larger than 65487 bytes must be split by the service.
 
-## Phase 9: what is left
-
-- `wss` against a real Worker (CA export), arm64 on a device, Release build.
-- One workspace is open at a time; opening several at once would need more `PhoneWorkspace` objects and an attachment
-  switcher in `ExosuitApp` (it attaches one workbench).
-- A message on a stream is at most 65487 bytes (`MachineStreamFrame.MAX_PAYLOAD`): a larger file read or terminal
-  burst has to be split by the service (as it already must for a relay message).
-- The `workspace` alias still names the one workspace on a stream; the id-addressed methods are unchanged.
-
 ## Touch and phone behaviour
 
 - **Wide windows.** The right panel needs room for its own minimum beside a usable content area
@@ -324,7 +304,7 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
   that field; a line break is Shift+Enter on a hardware keyboard. Enter and Tab are reported as keys only, never as
   text as well (NativeKit's Android `emitKey`), so Enter no longer types a line break.
 
-## Hardening notes (mobile-harden)
+## Hardening notes
 
 - Emulator: `-gpu host -no-window` is not the default; `swiftshader_indirect` stays (default in `emulator-lib.ps1`, `-Gpu host` is accepted by the acceptance script and renders the app correctly). The emulator now starts with `-cores 2 -memory 3072`.
 - Back at the app's root moves the task to the background; Home, relaunch, and screen off/on resume the drawn UI (the splash hang was an endless loop in `mobile_host_destroy`, fixed in NativeKit).
@@ -333,7 +313,7 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
 - Large terminal frames: replay records are cut at 24 KB, batches at 48 KB, and `SNAPSHOT` is paged (`offset`/`total`), all under the 65487-byte relay frame.
 - Control strip (re-checked 2026-11-04 on the persistent rig, swiftshader_indirect): not reproduced. With the phone controlling the Claude terminal, the editor's Take control (rig step `takeover`) and a second client (rig step `hold`, the admin tool's `--hold-control`) each made the phone show "Read only · another client controls this terminal" and Take control within 0.1 to 2 s (screenshot and snapshot), and the phone's Take control made the editor read only (step `editor-state`), three cycles, also after a tab switch. The earlier miss was most likely the acceptance script reading a stale automation snapshot (fixed in 83fa94de) or the host-GPU headless emulator not presenting frames; if it comes back, run those rig steps first.
 
-## Resume checks (mobile-resume)
+## Resume checks
 
 `android/scripts/machine-acceptance.ps1 -Step resume-home,resume-back,resume-screen,resume-kill,resume-network,resume-desktop` (or `resume-all`) pairs once, opens Alpha's Claude terminal, then does each thing and waits until the UI snapshot shows the machine online, its workspaces listed, the open workspace connected and the terminal drawn. Each step saves a screenshot and a line in `<OutDir>esume	imes.log`. `-Reuse` runs against a host and emulator that are already up.
 

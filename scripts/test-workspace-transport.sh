@@ -7,14 +7,11 @@ root=pathlib.Path(sys.argv[1])
 haxeon=os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(root/'haxeon')))/'scripts/haxeon'))
 with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
  directory=pathlib.Path(temporary); os.chmod(directory,0o700)
- managed_state=directory/'managed-state'; managed_state.mkdir(mode=0o700)
  compiler_mode=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
- subprocess.run([haxeon,'run','--project',str(root/'tests/workspace-transport/haxeon.json'),*compiler_mode,'--','--manager-bootstrap',str(managed_state),'https://relay.example.test'],cwd=root,timeout=120,check=True)
- token=directory/'credential'; token.write_text(secrets.token_hex(32)); os.chmod(token,0o600)
  def free_port():
   with socket.socket() as probe:
    probe.bind(('127.0.0.1',0)); return probe.getsockname()[1]
- agent_port=free_port(); relay_port=free_port()
+ relay_port=free_port()
  machine_id=secrets.token_hex(16); machine_token=secrets.token_hex(32)
  device_id=secrets.token_hex(16); device_token=secrets.token_hex(32)
  relay_config=directory/'relay-config.json'
@@ -57,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
     if time.monotonic() >= deadline:
      worker_log.flush(); raise RuntimeError('local relay Worker did not become ready:\n'+worker_log.read())
     time.sleep(0.2)
-  completed=subprocess.run([haxeon,'run','--project',str(root/'tests/workspace-transport/haxeon.json'),*compiler_mode,'--',str(directory/'agent.sock'),str(agent_port),str(token),str(relay_config)],cwd=root,timeout=120)
+  completed=subprocess.run([haxeon,'run','--project',str(root/'tests/workspace-transport/haxeon.json'),*compiler_mode,'--',str(directory/'agent.sock'),str(relay_config)],cwd=root,timeout=120)
   if completed.returncode != 0:
    worker_log.flush(); print('Local relay Worker log:\n'+worker_log.read(),file=sys.stderr)
    raise RuntimeError(f'workspace transport test exited with status {completed.returncode}')

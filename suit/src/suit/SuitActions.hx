@@ -53,18 +53,6 @@ class SuitActions {
 	public static function quit(inventory:SuitInventory, keepTerminals:Bool):Array<SuitProcess>
 		return keepTerminals ? everythingButTerminals(inventory) : everything(inventory);
 
-	/**
-		The processes serving relay hosting for one workspace root, or, when root is null, for every hosted
-		workspace exosuit started (a bulk stop leaves the others alone).
-	**/
-	public static function hosting(inventory:SuitInventory, ?root:String):Array<SuitProcess> {
-		var result:Array<SuitProcess> = [];
-		for (hosted in inventory.hosted())
-			if (root == null ? hosted.source != Scanned : matchesWorkspace(hosted, root))
-				result.push(hosted);
-		return result;
-	}
-
 	/** Matches a root path or a workspace's folder name. */
 	public static function matchesWorkspace(process:SuitProcess, query:String):Bool {
 		if (process.root == null)

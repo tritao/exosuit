@@ -10,11 +10,8 @@ import haxeon.rpc.RpcHandshake;
 import haxeon.rpc.RpcPeerOptions;
 import workspace.client.WorkspaceCatalogMirror;
 import workspace.client.WorkspaceCatalogWatch;
-import workspace.client.WorkspaceConnections;
-import workspace.client.WorkspaceServiceTarget;
-import workspace.client.WorkspaceStarter;
-import workspace.client.WorkspaceStarter.StartedProcess;
-import workspace.client.WorkspaceConnections.WatchedService;
+import workspace.client.CatalogSnapshots;
+import workspace.client.WorkspaceLink;
 import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceCatalogProtocol.CatalogChange;
 import workspace.service.WorkspaceCatalogProtocol.CatalogQuery;
@@ -24,31 +21,13 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceCatalog;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 
-private class FakeStarted implements StartedProcess {
-	public var alive = true;
-	public var code = 0;
-	public var released = false;
-
-	public function new() {}
-
-	public function running():Bool return alive;
-
-	public function exitStatus():Int return code;
-
-	public function readStdout():String return "";
-
-	public function readStderr():String return "";
-
-	public function release():Void released = true;
-}
-
 private class NoAttempt implements RpcConnectAttempt {
 	public function new() {}
 
 	public function cancel():Void {}
 }
 
-/** A workspace service's catalog end, answering CATALOG and UNWATCH the way docs/roadmap/RPC-VECTORS.md says. */
+/** A workspace service's catalog end, answering CATALOG and UNWATCH the way docs/RPC-VECTORS.md says. */
 private class FakeService {
 	public final id:String;
 	public var instance:String;
@@ -62,8 +41,6 @@ private class FakeService {
 	/** The next this many CATALOG calls fail. */
 	public var failNext = 0;
 	public var refuseWatch = false;
-	/** The application name the service answers the handshake with; another one makes the watch end. */
-	public var application = "exosuit-agent/1";
 	public var requests = 0;
 	/** UNWATCH calls received. */
 	public var unwatched = 0;
@@ -121,9 +98,9 @@ private class FakeService {
 
 	public function accept(transport:MemoryTransport):Void {
 		connections++;
-		// The watch asks for the catalog plus the three read grants (WorkspaceCatalogWatch), and a service that lacks one refuses it.
+		// The watch's owner asks for the catalog plus the three read grants (Holder), and a service that lacks one refuses it.
 		var granted = [WorkspaceCatalogProtocol.CAPABILITY, workspace.service.WorkspaceProtocol.READ, workspace.service.WorkspaceAgentProtocol.READ, workspace.service.WorkspaceTerminalProtocol.READ];
-		var options = new RpcPeerOptions(application, granted, [], 2000, 262144, 8, 1048576);
+		var options = new RpcPeerOptions("exosuit-agent/1", granted, [], 2000, 262144, 8, 1048576);
 		handshakes.push({handshake: RpcHandshake.server(transport, clock, options), transport: transport});
 	}
 
@@ -314,19 +291,58 @@ private class Dial implements RpcConnector {
 	}
 }
 
-/** A window's pool against fake workspace services: the catalog follows other clients, kills and restarts. */
+/**
+	A watch's owner, as a WorkspaceLink holds one: its own client to the service, and the shared catalog watch it
+	attaches to each connection that client establishes and detaches when that connection goes away.
+**/
+private class Holder {
+	public final watch:WorkspaceCatalogWatch;
+	public final client:RpcClient;
+	/** Connections the watch was attached to. */
+	public var attached = 0;
+	var held:Null<RpcConnection>;
+
+	public function new(network:Network, endpoint:String, clock:Void->Float, ref:WorkspaceRef, learning:Bool = false) {
+		var created = WorkspaceCatalogWatch.shared(ref, clock, learning);
+		watch = created;
+		// The connection holds the three read grants along with the catalog, as a link's client does.
+		var granted = [WorkspaceCatalogProtocol.CAPABILITY, workspace.service.WorkspaceProtocol.READ, workspace.service.WorkspaceAgentProtocol.READ,
+			workspace.service.WorkspaceTerminalProtocol.READ];
+		client = new RpcClient(network.connector(endpoint), clock, function() return 0.5,
+			new RpcPeerOptions("exosuit-editor/1", granted, granted, 2000, 262144, 8, 1048576), function(connection, _, _) {
+				held = connection;
+				attached++;
+				created.attach(connection);
+			}, 100, 5000, 5000);
+	}
+
+	/** The connection the watch is attached to, while it is the client's current one. */
+	public function connection():Null<RpcConnection>
+		return held;
+
+	public function poll():Void {
+		client.poll();
+		var last = held;
+		if (last != null && client.current() != last) {
+			held = null;
+			watch.detach();
+		}
+		watch.poll();
+	}
+
+	public function dispose():Void {
+		watch.dispose();
+		client.close();
+	}
+}
+
+/** Catalog watches shared on their owners' connections, against fake workspace services: they follow other clients, kills and restarts. */
 class WorkspaceCatalogTestMain {
 	static function require(value:Bool, message:String):Void {
 		if (!value) throw message;
 	}
 
 	static var now = 0.0;
-
-	static function get(pool:WorkspaceConnections, id:String):WorkspaceCatalogWatch {
-		var watch = pool.watchOf(id);
-		if (watch == null) throw "no watch for " + id;
-		return watch;
-	}
 
 	static function clock():Float
 		return now;
@@ -335,12 +351,13 @@ class WorkspaceCatalogTestMain {
 	static function ep(id:String):String
 		return Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-" + id : "/tmp/exosuit-" + id + "/agent.sock";
 
-	static function service(id:String, pid:Int, running:Bool = true):WatchedService
-		return {workspace: id, endpoint: ep(id), pid: pid, running: running};
+	/** A holder of a watch on `id`'s service; with `learning` the watch starts on the alias and learns the id. */
+	static function hold(network:Network, id:String, learning:Bool = false):Holder
+		return new Holder(network, ep(id), clock, {machine: "m", workspace: learning ? "workspace" : id}, learning);
 
-	static function pump(pool:WorkspaceConnections, services:Array<FakeService>, rounds:Int = 12):Void {
+	static function pump(holders:Array<Holder>, services:Array<FakeService>, rounds:Int = 12):Void {
 		for (round in 0...rounds) {
-			pool.poll();
+			for (holder in holders) holder.poll();
 			for (fake in services) fake.poll();
 		}
 	}
@@ -351,110 +368,27 @@ class WorkspaceCatalogTestMain {
 		bounds();
 		bigWorkspace();
 		unwatchNeverAnswered();
-		starterQueue();
+		snapshots();
 		hostileInput();
 		changeDuringRead();
 		changeDuringBackoff();
 		endpoints();
-		deadWatch();
-		keptCopies();
 		behaviour();
 		measure();
 	}
 
-	/** Only the agent's own endpoint shapes are connected to. */
+	/** Only the agent's own endpoint shapes are valid. */
 	static function endpoints():Void {
 		var pipe = "\\\\.\\pipe\\exosuit-0123abcd-X_y";
-		require(WorkspaceConnections.validEndpoint(pipe, true), "the agent's pipe name is valid");
-		require(!WorkspaceConnections.validEndpoint("\\\\.\\pipe\\other", true) && !WorkspaceConnections.validEndpoint("\\\\.\\pipe\\exosuit-", true)
-			&& !WorkspaceConnections.validEndpoint("\\\\.\\pipe\\exosuit-a\\b", true) && !WorkspaceConnections.validEndpoint("\\\\evil\\pipe\\exosuit-a", true)
-			&& !WorkspaceConnections.validEndpoint("C:\\x\\agent.sock", true), "other pipes and paths are refused on Windows");
-		require(WorkspaceConnections.validEndpoint("/home/u/state/workspaces/w1/agent.sock", false), "the agent's socket path is valid");
-		require(!WorkspaceConnections.validEndpoint("agent.sock", false) && !WorkspaceConnections.validEndpoint("/tmp/other.sock", false)
-			&& !WorkspaceConnections.validEndpoint("/tmp/../etc/agent.sock", false) && !WorkspaceConnections.validEndpoint("", false), "other sockets are refused");
-		var network = new Network();
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		pool.sync("m", [{workspace: "A", endpoint: "/etc/passwd", pid: 1, running: true}], null);
-		require(pool.count() == 0 && network.opened == 0, "an endpoint of another shape is never dialed");
-		pool.dispose();
-		print("PASS: only the agent's pipe and socket shapes are connected to");
-	}
-
-	/** A watch that ends by itself waits, doubling, before its service is tried again, and does not keep the window polling fast. */
-	static function deadWatch():Void {
-		var network = new Network();
-		var d = new FakeService("D", "id", clock);
-		d.application = "not-the-agent/1";
-		network.add(d, ep("D"));
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		var list = [service("D", 1)];
-		pool.sync("m", list, null);
-		pump(pool, [d], 20);
-		require(pool.count() == 0 && network.opened == 1 && !pool.anyDown(), "an ended watch is dropped and does not count as down");
-		pump(pool, [d], 20);
-		require(network.opened == 1, "and it is not dialed again at once");
-		now += 1100;
-		pump(pool, [d], 20);
-		require(network.opened == 2 && pool.count() == 0, "tried again after a second");
-		now += 1500;
-		pump(pool, [d], 20);
-		require(network.opened == 2, "the second wait is longer");
-		now += 600;
-		pump(pool, [d], 20);
-		require(network.opened == 3, "two seconds");
-		// A restarted service (another pid) is new information: it is tried at once.
-		pool.sync("m", [service("D", 2)], null);
-		pump(pool, [d], 20);
-		require(network.opened == 4, "a new pid is not held back");
-		// A service that behaves goes live, and the waits start over.
-		d.application = "exosuit-agent/1";
-		now += 1100;
-		pump(pool, [d], 40);
-		require(pool.count() == 1 && pool.liveCount() == 1, "it recovers");
-		// A watch that stays down long enough no longer asks for fast refreshes.
-		var slow = new FakeService("S", "is", clock);
-		slow.up = false;
-		network.add(slow, ep("S"));
-		pool.sync("m", [service("D", 2), service("S", 1)], null);
-		pump(pool, [slow, d], 10);
-		require(pool.anyDown(), "a young watch that is down asks for fast refreshes");
-		now += 20000;
-		pump(pool, [slow, d], 10);
-		require(!pool.anyDown(), "an old one does not");
-		pool.dispose();
-		print("PASS: a watch that ends waits 1 s, 2 s, ... before its service is dialed again; dead watches do not keep the window refreshing");
-	}
-
-	/** The last copy stays while a service restarts or the window is attached elsewhere, until a new watch reads or the workspace is gone. */
-	static function keptCopies():Void {
-		var network = new Network();
-		var a = new FakeService("A", "ia", clock);
-		network.add(a, ep("A"));
-		a.addSession("s1", "Kept");
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		var list = [service("A", 1)];
-		pool.sync("m", list, null, ["A"]);
-		pump(pool, [a]);
-		require(pool.mirrorOf("A") != null && get(pool, "A").live, "live copy");
-		// The window attaches to it: the watch goes, the copy stays.
-		pool.sync("m", list, "A", ["A"]);
-		var held = pool.mirrorOf("A");
-		require(pool.watchOf("A") == null && held != null && held.sessions.exists("s1"), "the copy stays when the window attaches");
-		// Detaching starts a new watch; the old copy shows until the new one has read.
-		pool.sync("m", list, null, ["A"]);
-		require(pool.mirrorOf("A") == held, "the old copy shows until the new watch has read");
-		pump(pool, [a]);
-		require(pool.mirrorOf("A") == get(pool, "A").mirror && pool.mirrorOf("A") != held, "then the new watch's copy replaces it");
-		// A service stops and restarts: rows stay.
-		a.kill();
-		pump(pool, [a], 3);
-		pool.sync("m", [service("A", 1, false)], null, ["A"]);
-		require(pool.watchOf("A") == null && pool.mirrorOf("A") != null, "rows stay while the service is stopped");
-		// The workspace leaves the machine.
-		pool.sync("m", [], null, []);
-		require(pool.mirrorOf("A") == null, "a workspace that left the machine loses its copy");
-		pool.dispose();
-		print("PASS: the last catalog copy is kept across restarts and attaching, and goes when a new watch reads or the workspace leaves");
+		require(WorkspaceLink.validEndpoint(pipe, true), "the agent's pipe name is valid");
+		require(!WorkspaceLink.validEndpoint("\\\\.\\pipe\\other", true) && !WorkspaceLink.validEndpoint("\\\\.\\pipe\\exosuit-", true)
+			&& !WorkspaceLink.validEndpoint("\\\\.\\pipe\\exosuit-a\\b", true) && !WorkspaceLink.validEndpoint("\\\\evil\\pipe\\exosuit-a", true)
+			&& !WorkspaceLink.validEndpoint("C:\\x\\agent.sock", true), "other pipes and paths are refused on Windows");
+		require(WorkspaceLink.validEndpoint("/home/u/state/workspaces/w1/agent.sock", false), "the agent's socket path is valid");
+		require(!WorkspaceLink.validEndpoint("agent.sock", false) && !WorkspaceLink.validEndpoint("/tmp/other.sock", false)
+			&& !WorkspaceLink.validEndpoint("/tmp/../etc/agent.sock", false) && !WorkspaceLink.validEndpoint("", false)
+			&& !WorkspaceLink.validEndpoint("/etc/passwd", false), "other sockets are refused");
+		print("PASS: only the agent's pipe and socket shapes are valid endpoints");
 	}
 
 	/** A looping, oversized, failing or non-watching service is bounded, backed off and never read as live. */
@@ -463,63 +397,62 @@ class WorkspaceCatalogTestMain {
 		var x = new FakeService("X", "ix", clock);
 		network.add(x, ep("X"));
 		x.addSession("s", "One");
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		pool.sync("m", [service("X", 1)], null);
+		var holder = hold(network, "X");
+		var watch = holder.watch;
 
 		x.misbehave = "repeat";
-		pump(pool, [x], 60);
-		var watch = get(pool, "X");
+		pump([holder], [x], 60);
 		require(!watch.live && watch.mirror.token == null && watch.reads == 2 && watch.error != null, "a more page that repeats its token is a failure: " + watch.reads + " " + watch.error);
 		require(watch.retryDelay == 2000, "and the next retry waits longer: " + watch.retryDelay);
 
 		x.misbehave = "endless";
 		now += 1500;
-		pump(pool, [x], 4000);
+		pump([holder], [x], 4000);
 		require(!watch.live && watch.mirror.token == null && x.requests >= WorkspaceCatalogWatch.MAX_PAGES && x.requests <= WorkspaceCatalogWatch.MAX_PAGES + 2, "an endless catalog stops at the page cap: " + x.requests);
 		require(watch.error != null && watch.error.indexOf("pages") >= 0, "page cap reason: " + watch.error);
 
 		x.misbehave = "huge";
 		now += 5000;
-		pump(pool, [x], 200);
+		pump([holder], [x], 200);
 		require(!watch.live && watch.mirror.token == null && watch.error != null && watch.error.indexOf("items") >= 0, "an oversized catalog is refused: " + watch.error);
 
 		// A well-behaved service recovers, and the delay starts over.
 		x.misbehave = "";
 		now += 40000;
-		pump(pool, [x], 40);
+		pump([holder], [x], 40);
 		require(watch.live && watch.retryDelay == WorkspaceCatalogWatch.RETRY_MIN_MS && watch.mirror.sessions.exists("s"), "recovery resets the delay: " + watch.retryDelay);
+		require(holder.attached == 1, "all of it on one connection: " + holder.attached);
 
 		// Failed calls wait 1 s, 2 s, 4 s: each retry comes only after its delay.
 		x.addSession("t", "Two");
-		pump(pool, [x], 6);
+		pump([holder], [x], 6);
+		holder.dispose();
 		x.failNext = 3;
 		var before = x.requests;
-		watch.dispose();
-		pool.sync("m", [], null);
-		pool.sync("m", [service("X", 2)], null);
-		var again = get(pool, "X");
-		pump(pool, [x], 10);
+		var second = hold(network, "X");
+		var again = second.watch;
+		pump([second], [x], 10);
 		require(x.requests == before + 1 && again.retryDelay == 2000, "first failure waits a second: " + (x.requests - before));
 		now += 900;
-		pump(pool, [x], 10);
+		pump([second], [x], 10);
 		require(x.requests == before + 1, "no retry before the delay");
 		now += 200;
-		pump(pool, [x], 10);
+		pump([second], [x], 10);
 		require(x.requests == before + 2 && again.retryDelay == 4000, "second retry after two: " + again.retryDelay);
 		now += 2100;
-		pump(pool, [x], 10);
+		pump([second], [x], 10);
 		now += 4100;
-		pump(pool, [x], 20);
+		pump([second], [x], 20);
 		require(again.live && again.retryDelay == WorkspaceCatalogWatch.RETRY_MIN_MS, "third failure then success");
+		second.dispose();
 
 		// A service that does not register the watch is not live.
-		pool.sync("m", [], null);
 		x.refuseWatch = true;
-		pool.sync("m", [service("X", 3)], null);
-		pump(pool, [x], 20);
-		var unwatched = get(pool, "X");
+		var third = hold(network, "X");
+		pump([third], [x], 20);
+		var unwatched = third.watch;
 		require(!unwatched.live && unwatched.mirror.sessions.exists("s") && unwatched.error != null, "watching:false is not live, though its data shows");
-		pool.dispose();
+		third.dispose();
 		print("PASS: paged reads are capped, a stuck token fails, retries back off from 1 s and reset, and watching:false is not live");
 	}
 
@@ -531,12 +464,11 @@ class WorkspaceCatalogTestMain {
 		big.pageSize = WorkspaceCatalogProtocol.PAGE_LIMIT;
 		network.add(big, ep("Big"));
 		for (index in 0...2000) big.addSession("s" + index, "Session " + index);
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		pool.sync("m", [service("Big", 1)], null);
-		pump(pool, [big], 400);
-		var watch = get(pool, "Big");
+		var holder = hold(network, "Big");
+		pump([holder], [big], 400);
+		var watch = holder.watch;
 		require(watch.live && Lambda.count(watch.mirror.sessions) == 2000 && watch.reads > 64, "two thousand items over " + watch.reads + " pages: " + Lambda.count(watch.mirror.sessions) + " " + watch.error);
-		pool.dispose();
+		holder.dispose();
 		print("PASS: a catalog of 2000 items reads in " + watch.reads + " pages");
 	}
 
@@ -547,12 +479,11 @@ class WorkspaceCatalogTestMain {
 		a.pageSize = 1;
 		network.add(a, ep("A"));
 		for (index in 0...12) a.addSession("s" + index, "S" + index);
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		pool.sync("m", [service("A", 1)], null);
-		var watch = get(pool, "A");
+		var holder = hold(network, "A");
+		var watch = holder.watch;
 		var injected = false;
 		for (round in 0...400) {
-			pump(pool, [a], 1);
+			pump([holder], [a], 1);
 			if (!injected && watch.reads >= 2) {
 				require(watch.mirror.token == null, "still reading");
 				a.addGroup("0early", "Sorted before what was sent");
@@ -560,7 +491,7 @@ class WorkspaceCatalogTestMain {
 			}
 		}
 		require(injected && watch.live && watch.mirror.groups.exists("0early") && Lambda.count(watch.mirror.sessions) == 12, "the change made during the read arrived: " + watch.error);
-		pool.dispose();
+		holder.dispose();
 		print("PASS: a CHANGED during a multi-page read is read after it");
 	}
 
@@ -574,42 +505,27 @@ class WorkspaceCatalogTestMain {
 		var a = new FakeService("A", "ia", clock);
 		network.add(a, ep("A"));
 		a.addSession("s1", "One");
-		var watch = WorkspaceCatalogWatch.shared({machine: "m", workspace: "workspace"}, clock, true);
-		var granted = [WorkspaceCatalogProtocol.CAPABILITY, workspace.service.WorkspaceProtocol.READ, workspace.service.WorkspaceAgentProtocol.READ,
-			workspace.service.WorkspaceTerminalProtocol.READ];
-		var attached = 0;
-		var client = new RpcClient(network.connector(ep("A")), clock, function() return 0.5,
-			new RpcPeerOptions("exosuit-editor/1", granted, granted, 2000, 262144, 8, 1048576), function(connection, _, _) {
-				attached++;
-				watch.attach(connection);
-			}, 100, 5000, 5000);
-		function spin(rounds:Int):Void {
-			for (round in 0...rounds) {
-				client.poll();
-				watch.poll();
-				a.poll();
-			}
-		}
-		spin(60);
-		require(watch.live && attached == 1, "the shared watch reads on the client's connection: " + watch.error);
+		var holder = hold(network, "A", true);
+		var watch = holder.watch;
+		pump([holder], [a], 60);
+		require(watch.live && holder.attached == 1, "the shared watch reads on the client's connection: " + watch.error);
 		require(watch.ref.workspace == "A" && watch.ref.machine == "m", "the watch adopted the service's real id: " + watch.ref.workspace);
 		require(Lambda.count(watch.mirror.sessions) == 1, "the first page holds the session");
 		var readsBefore = watch.reads;
 		a.addSession("s2", "Two");
-		spin(60);
+		pump([holder], [a], 60);
 		require(Lambda.count(watch.mirror.sessions) == 2 && watch.reads == readsBefore + 1, "a CHANGED reads once");
 		// The service goes away and comes back as another instance: the watch keeps its copy while down, then resets.
 		a.kill();
-		spin(60);
+		pump([holder], [a], 60);
 		require(!watch.live && Lambda.count(watch.mirror.sessions) == 2, "down: not live, copy kept");
 		a.restart("ib");
 		for (round in 0...80) {
 			now += 100;
-			spin(1);
+			pump([holder], [a], 1);
 		}
-		require(watch.live && attached == 2 && watch.mirror.instance == "ib", "after the restart it attached to the new connection and read again");
-		watch.dispose();
-		client.close();
+		require(watch.live && holder.attached == 2 && watch.mirror.instance == "ib", "after the restart it attached to the new connection and read again");
+		holder.dispose();
 		print("PASS: a shared catalog watch learns the id, follows changes and reattaches after a restart");
 	}
 
@@ -619,24 +535,51 @@ class WorkspaceCatalogTestMain {
 		var a = new FakeService("A", "ia", clock);
 		network.add(a, ep("A"));
 		a.addSession("s1", "One");
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		pool.sync("m", [service("A", 1)], null);
-		pump(pool, [a]);
-		var watch = get(pool, "A");
+		var holder = hold(network, "A");
+		pump([holder], [a]);
+		var watch = holder.watch;
 		require(watch.live, "live first");
 		var before = a.requests;
 		a.failNext = 1;
 		a.addSession("u1", "Two");
-		pump(pool, [a]);
+		pump([holder], [a]);
 		require(a.requests == before + 1 && watch.error != null, "the read failed");
 		a.addSession("u2", "Three");
-		pump(pool, [a]);
+		pump([holder], [a]);
 		require(a.requests == before + 1, "CHANGED waits for the delay: " + (a.requests - before));
 		now += 1100;
-		pump(pool, [a]);
+		pump([holder], [a]);
 		require(a.requests == before + 2 && watch.mirror.sessions.exists("u1") && watch.mirror.sessions.exists("u2") && watch.error == null, "then one read gets both");
-		pool.dispose();
+		holder.dispose();
 		print("PASS: CHANGED during a retry delay waits for the delay");
+	}
+
+	/** A disposed watch's UNWATCH that is never answered holds nothing: dispose returns at once and the owner's connection stays. */
+	static function unwatchNeverAnswered():Void {
+		var network = new Network();
+		var a = new FakeService("A", "ia", clock);
+		network.add(a, ep("A"));
+		a.silentUnwatch = true;
+		var holder = hold(network, "A");
+		pump([holder], [a]);
+		var watch = holder.watch;
+		require(watch.live, "live first");
+		var connection = holder.connection();
+		watch.dispose();
+		require(watch.ended() && !watch.live, "dispose ends the watch at once");
+		pump([holder], [a], 6);
+		require(a.unwatched == 1, "UNWATCH was sent: " + a.unwatched);
+		now += WorkspaceCatalogWatch.LINGER_MS + 100;
+		pump([holder], [a], 6);
+		require(connection != null && connection.isOpen() && holder.client.current() == connection && holder.attached == 1,
+			"the unanswered UNWATCH timed out and left the owner's connection open");
+		// The service still believes it is watched; a change it announces reaches a watch that is gone, and nothing reads.
+		var requests = a.requests;
+		a.addSession("late", "Late");
+		pump([holder], [a], 6);
+		require(a.requests == requests && watch.reads > 0, "a disposed watch reads nothing more");
+		holder.client.close();
+		print("PASS: an unanswered UNWATCH never blocks: the watch ends at once and its owner's connection stays");
 	}
 
 	/** Names from a catalog are clipped, and repeated folders are kept once however many come. */
@@ -663,70 +606,50 @@ class WorkspaceCatalogTestMain {
 		print("PASS: catalog names are clipped, folders deduplicated with a map, sorted lists cached per revision");
 	}
 
-	/** A dropped watch whose UNWATCH is never answered closes after the linger, and disposing the pool does not wait for it. */
-	static function unwatchNeverAnswered():Void {
-		var network = new Network();
-		var a = new FakeService("A", "ia", clock);
-		network.add(a, ep("A"));
-		a.silentUnwatch = true;
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		var list = [service("A", 1)];
-		pool.sync("m", list, null);
-		pump(pool, [a]);
-		require(get(pool, "A").live, "live first");
-		pool.sync("m", list, "A");
-		pump(pool, [a], 6);
-		require(a.unwatched == 1 && pool.retiringCount() == 1, "UNWATCH was sent and waits for an answer: " + pool.retiringCount());
-		now += WorkspaceCatalogWatch.LINGER_MS + 100;
-		pump(pool, [a], 6);
-		require(pool.retiringCount() == 0, "the watch closed without an answer");
-		// Disposing the pool while one is outstanding returns at once.
-		pool.sync("m", list, null);
-		pump(pool, [a]);
-		pool.sync("m", list, "A");
-		pump(pool, [a], 4);
-		require(pool.retiringCount() == 1, "a second unanswered UNWATCH");
-		pool.dispose();
-		print("PASS: an unanswered UNWATCH closes after the linger and never blocks the pool");
-	}
-
-	/** The starter launches two at a time, queues the rest, frees a slot on timeout, and drops a queued start on cancel. */
-	static function starterQueue():Void {
+	/**
+		Idle rows: a service's catalog snapshot reads back as the catalog it held, is read again only when its bytes
+		change, and a missing, damaged or partial one gives no rows.
+	**/
+	static function snapshots():Void {
+		var base = haxe.io.Path.join([Sys.getEnv("TEMP") == null ? "/tmp" : Sys.getEnv("TEMP"), "exosuit-snapshots-" + Std.int(Sys.time())]);
+		var folder = base + "/workspaces/w1";
+		for (path in [base, base + "/workspaces", folder]) sys.FileSystem.createDirectory(path);
+		var file = folder + "/" + WorkspaceCatalogProtocol.SNAPSHOT_FILE;
 		var clockNow = 0.0;
-		var fakes:Array<FakeStarted> = [];
-		var launched:Array<String> = [];
-		var finished:Map<String, String> = [];
-		var starter = new WorkspaceStarter(null, "launcher", function() return clockNow, null, function(target, root) {
-			var fake = new FakeStarted();
-			fakes.push(fake);
-			launched.push(target.workspace);
-			return fake;
-		});
-		var begin = function(id:String):Void {
-			starter.start(WorkspaceServiceTarget.forWorkspace(id, ["."], null), function(failure) finished.set(id, failure == null ? "ok" : failure));
-		};
-		begin("a");
-		begin("b");
-		begin("c");
-		starter.poll();
-		require(launched.join(",") == "a,b" && starter.queued() == 1 && starter.starting("c"), "two launch, the third waits: " + launched + " " + finished);
-		require(starter.cancel("c") && !starter.starting("c") && starter.queued() == 0 && finished.get("c") == "ok", "a queued start is dropped");
-		require(!starter.cancel("a") && starter.starting("a"), "a launched start is not");
-		begin("c");
-		starter.poll();
-		require(launched.length == 2 && starter.queued() == 1, "still two slots in use");
-		fakes[0].alive = false;
-		starter.poll();
-		starter.poll();
-		require(finished.get("a") == "ok" && fakes[0].released && launched.join(",") == "a,b,c", "a finished start frees its slot: " + launched);
-		begin("d");
-		starter.poll();
-		require(launched.length == 3 && starter.queued() == 1, "d waits");
-		clockNow += 96000;
-		starter.poll();
-		starter.poll();
-		require(finished.get("b") != null && finished.get("b") != "ok" && finished.get("c") != "ok" && launched.join(",") == "a,b,c,d", "a start that times out frees its slot: " + launched + " " + finished);
-		print("PASS: starts launch two at a time, queue, free slots on exit or timeout, and a queued one cancels");
+		var saved = new CatalogSnapshots(base, function() return clockNow);
+		require(saved.of("w1") == null && saved.of("../w1") == null, "no snapshot, or a bad id, gives no rows");
+		var page:WorkspaceCatalog = {ref: {machine: "", workspace: "w1"}, instance: "i", token: "i.3", reset: true, more: false, name: "One",
+			folders: ["/a"], scratch: null, status: "idle", attention: 0,
+			groups: [{id: "g", name: "Work", cwd: null, revision: 1, parent: null, order: 0}],
+			sessions: [], terminals: [{id: "t", name: "shell", group: "g", directory: "/a", state: "running", exitCode: 0, available: true,
+				revision: haxe.Int64.make(0, 4), agentProvider: null, attention: 0}],
+			removedGroups: [], removedSessions: [], removedTerminals: [], watching: false};
+		sys.io.File.saveBytes(file, WorkspaceCatalogProtocol.encodeSnapshot(page));
+		clockNow += 5000;
+		var mirror = saved.of("w1");
+		require(mirror != null && mirror.groupList().length == 1 && mirror.terminalList().length == 1 && mirror.terminalList()[0].name == "shell",
+			"the snapshot reads back as its catalog");
+		var revision = saved.revision;
+		clockNow += 5000;
+		require(saved.of("w1") == mirror && saved.revision == revision, "unchanged bytes are not decoded again");
+		page.terminals = [];
+		sys.io.File.saveBytes(file, WorkspaceCatalogProtocol.encodeSnapshot(page));
+		require(saved.of("w1") == mirror, "a snapshot is looked at no more than once per check interval");
+		clockNow += 5000;
+		var next = saved.of("w1");
+		require(next != mirror && next.terminalList().length == 0 && saved.revision > revision, "a changed snapshot is read again");
+		page.more = true;
+		sys.io.File.saveBytes(file, WorkspaceCatalogProtocol.encodeSnapshot(page));
+		clockNow += 5000;
+		require(saved.of("w1") == null, "a partial page gives no rows");
+		sys.io.File.saveContent(file, "not a snapshot");
+		clockNow += 5000;
+		require(saved.of("w1") == null, "a damaged snapshot gives no rows");
+		sys.FileSystem.deleteFile(file);
+		sys.FileSystem.deleteDirectory(folder);
+		sys.FileSystem.deleteDirectory(base + "/workspaces");
+		sys.FileSystem.deleteDirectory(base);
+		print("PASS: idle rows come from the service's catalog snapshot, read again only when it changes");
 	}
 
 	/** A page that removes and upserts the same id leaves it present. */
@@ -754,14 +677,13 @@ class WorkspaceCatalogTestMain {
 		b.addTerminal("t1", "Shell");
 		for (index in 0...6) b.addSession("b" + index, "Session " + index);
 		var all = [a, b];
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
+		var holderA = hold(network, "A"), holderB = hold(network, "B");
+		var holders = [holderA, holderB];
 
-		// Both running: the pool connects to each, pages the paged one, and the first copy is a reset.
-		var list = [service("A", 1), service("B", 2)];
-		pool.sync("m", list, null);
-		pump(pool, all);
-		require(pool.count() == 2 && pool.liveCount() == 2, "two live watches");
-		var watchA = get(pool, "A"), watchB = get(pool, "B");
+		// Each watch reads on its owner's connection, pages the paged one, and the first copy is a reset.
+		pump(holders, all);
+		var watchA = holderA.watch, watchB = holderB.watch;
+		require(watchA.live && watchB.live, "two live watches");
 		require(watchA.mirror.sessions.exists("s1") && watchA.mirror.groups.exists("g1") && watchA.mirror.name == "Workspace A", "A's catalog arrived");
 		require(Lambda.count(watchB.mirror.sessions) == 6 && watchB.mirror.terminals.exists("t1") && !watchB.mirror.partial, "B's seven items arrived over pages: " + Lambda.count(watchB.mirror.sessions));
 		require(b.resets == 1 && watchB.reads == 3, "B was paged: " + watchB.reads + " pages");
@@ -769,82 +691,82 @@ class WorkspaceCatalogTestMain {
 		require(a.watchers.length == 1 && b.watchers.length == 1, "each service watches this connection");
 
 		// A session another client creates shows up within one catalog event: one notification, one read.
-		var before = watchA.reads, revision = pool.revision();
+		var before = watchA.reads, revision = watchA.revision;
 		a.addSession("s2", "Made elsewhere", "g1");
-		pump(pool, all);
+		pump(holders, all);
 		require(a.changedSent == 1, "one CHANGED for one change");
 		require(watchA.mirror.sessions.exists("s2") && watchA.reads == before + 1 && a.deltas == 1, "the new session arrived in one delta read");
-		require(pool.revision() != revision, "the pool's revision moved");
+		require(watchA.revision != revision, "the watch's revision moved");
 		require(b.deltas == 0, "the other service was not read");
 
 		// A hint whose token is ours causes no read.
 		var reads = watchA.reads;
 		a.repeat();
-		pump(pool, all);
+		pump(holders, all);
 		require(watchA.reads == reads && watchA.skipped == 1, "a CHANGED with our token is skipped");
 
 		// A removal arrives as a delta too.
 		a.removeSession("s1");
-		pump(pool, all);
+		pump(holders, all);
 		require(!watchA.mirror.sessions.exists("s1") && watchA.mirror.sessions.exists("s2"), "removal applied");
 
-		// The window's attached workspace needs no second connection; leaving it brings it back.
-		pool.sync("m", list, "B");
-		require(pool.count() == 1 && pool.watchOf("B") == null, "the attached workspace is dropped from the pool");
-		pump(pool, all);
-		require(b.watchers.length == 0, "its service stopped watching this connection");
-		require(b.unwatched == 1, "UNWATCH reached the service before the connection closed: " + b.unwatched);
-		pool.sync("m", list, null);
-		pump(pool, all);
-		require(pool.count() == 2 && get(pool, "B").live && b.resets == 2, "it returns with a fresh reset");
+		// Disposing a watch unwatches on the owner's connection, which stays; a new watch on a new connection starts with a reset.
+		var kept = holderB.connection();
+		watchB.dispose();
+		pump(holders, all);
+		require(b.unwatched == 1 && b.watchers.length == 0, "UNWATCH reached the service: " + b.unwatched);
+		require(kept != null && kept.isOpen() && holderB.client.current() == kept, "the owner's connection stays open");
+		var copy = watchB.mirror;
+		b.addSession("b9", "After");
+		pump(holders, all);
+		require(watchB.mirror == copy && !copy.sessions.exists("b9"), "a disposed watch's copy no longer changes");
+		holderB.client.close();
+		holderB = hold(network, "B");
+		holders = [holderA, holderB];
+		pump(holders, all);
+		require(holderB.watch.live && b.resets == 2 && holderB.watch.mirror.sessions.exists("b9"), "a new watch starts with a fresh reset");
 
-		// A dropped connection reconnects with backoff and resumes from its token: no reset, only the delta.
+		// A dropped connection: the owner detaches, the watch keeps its copy, and on the client's next connection it
+		// resumes from its token: no reset, only the delta.
 		var resumed = a.resets;
 		a.kill();
 		a.up = true;
-		pump(pool, all, 3);
-		require(!get(pool, "A").live && pool.anyDown(), "a lost connection shows as not live");
+		pump(holders, all, 3);
+		require(!watchA.live && watchA.mirror.sessions.exists("s2"), "a lost connection shows as not live, copy kept");
 		a.addSession("s3", "While away", "g1");
 		now += 200;
-		pump(pool, all);
+		pump(holders, all);
 		now += 400;
-		pump(pool, all);
-		require(get(pool, "A").live && get(pool, "A").mirror.sessions.exists("s3"), "reconnected and caught up");
+		pump(holders, all);
+		require(watchA.live && watchA.mirror.sessions.exists("s3") && holderA.attached == 2, "reattached and caught up: " + holderA.attached);
 		require(a.resets == resumed, "resumed from the token, with no reset: " + a.resets + " vs " + resumed);
 
-		// Killing a service shows it idle: the watch is down, then suit says so and the pool drops it.
+		// A detach the owner reports itself (before the watch sees the connection close) clears live the same way.
+		var revisionBefore = watchA.revision;
+		watchA.detach();
+		require(!watchA.live && watchA.revision == revisionBefore + 1 && watchA.mirror.sessions.exists("s3"), "detach keeps the copy and clears live");
+		var ignored = watchA.reads;
+		a.addSession("s4", "Unseen", "g1");
+		pump(holders, all);
+		require(watchA.reads == ignored && !watchA.mirror.sessions.exists("s4"), "a detached watch ignores CHANGED on its old connection");
+
+		// A killed service that restarts as a new instance comes back with a reset that keeps stored work.
 		a.kill();
-		pump(pool, all, 3);
-		require(!get(pool, "A").live, "the killed service's watch is not live");
-		list = [service("A", 1, false), service("B", 2)];
-		pool.sync("m", list, null);
-		require(pool.count() == 1 && pool.watchOf("A") == null, "suit says stopped: the watch is dropped");
-		pump(pool, all);
-		require(get(pool, "B").live, "the other workspace is untouched");
-
-		// Restarting brings it back, as a new instance with a reset.
+		pump(holders, all, 3);
+		require(!watchA.live, "the killed service's watch is not live");
+		require(holderB.watch.live, "the other workspace is untouched");
 		a.restart("ia2");
-		list = [service("A", 9), service("B", 2)];
-		pool.sync("m", list, null);
-		pump(pool, all);
-		var restored = pool.watchOf("A");
-		require(restored != null && restored.live && restored.mirror.instance == "ia2" && restored.mirror.sessions.exists("s3"), "restarted service's catalog is back");
-		require(pool.count() == 2, "both watched again");
+		for (round in 0...40) {
+			now += 100;
+			pump(holders, all, 1);
+		}
+		require(watchA.live && watchA.mirror.instance == "ia2" && watchA.mirror.sessions.exists("s4") && a.resets == resumed + 1 && holderA.attached == 3,
+			"restarted service's catalog is back with a reset, reattached on the new connection");
 
-		// A new pid at the same endpoint is a restart too: the old watch is replaced.
-		list = [service("A", 10), service("B", 2)];
-		pool.sync("m", list, null);
-		require(pool.watchOf("A") != restored, "a new pid replaces the watch");
-		pump(pool, all);
-		require(get(pool, "A").live, "and it goes live");
-
-		// A service suit has not reported running is never connected to.
-		pool.sync("m", [service("A", 10, false), service("B", 2, false)], null);
-		require(pool.count() == 0, "idle services have no connection");
-		pump(pool, all);
+		for (holder in holders) holder.dispose();
+		pump([], all, 4);
 		require(a.watchers.length == 0 && b.watchers.length == 0, "no watchers remain");
-		pool.dispose();
-		print("PASS: the pool follows suit's list; catalogs page, resume and update in one event; a killed service shows idle and a restart returns");
+		print("PASS: shared watches page, resume, update in one event and unwatch on their owner's connection; a killed service returns after a restart");
 	}
 
 	/** Ten workspaces of realistic size in one window: connections held and memory taken. */
@@ -853,7 +775,6 @@ class WorkspaceCatalogTestMain {
 		var baseline = hl.Gc.heapBytes();
 		var network = new Network();
 		var fakes:Array<FakeService> = [];
-		var list:Array<WatchedService> = [];
 		for (index in 0...10) {
 			var id = "W" + index;
 			var fake = new FakeService(id, "i" + index, clock);
@@ -863,17 +784,17 @@ class WorkspaceCatalogTestMain {
 			for (t in 0...12) fake.addTerminal("t" + t, "Terminal " + t, "g" + (t % 6));
 			network.add(fake, ep(id));
 			fakes.push(fake);
-			list.push(service(id, index + 1));
 		}
 		hl.Gc.major();
 		var servers = hl.Gc.heapBytes();
-		var pool = new WorkspaceConnections(network.connector, clock, function() return 0.5);
-		pool.sync("m", list, null);
-		pump(pool, fakes, 30);
-		require(pool.count() == 10 && pool.liveCount() == 10, "ten live watches: " + pool.liveCount());
+		var holders = [for (index in 0...10) hold(network, "W" + index)];
+		pump(holders, fakes, 30);
+		var live = 0;
+		for (holder in holders) if (holder.watch.live) live++;
+		require(live == 10, "ten live watches: " + live);
 		var items = 0;
-		for (index in 0...10) {
-			var mirror = get(pool, "W" + index).mirror;
+		for (holder in holders) {
+			var mirror = holder.watch.mirror;
 			items += Lambda.count(mirror.sessions) + Lambda.count(mirror.terminals) + Lambda.count(mirror.groups);
 		}
 		hl.Gc.major();
@@ -882,15 +803,15 @@ class WorkspaceCatalogTestMain {
 		var opened = network.opened;
 		// One change on one service reads one service.
 		var reads = 0;
-		for (index in 0...10) reads += get(pool, "W" + index).reads;
+		for (holder in holders) reads += holder.watch.reads;
 		fakes[3].addSession("late", "Late");
-		pump(pool, fakes);
+		pump(holders, fakes);
 		var after = 0;
-		for (index in 0...10) after += get(pool, "W" + index).reads;
+		for (holder in holders) after += holder.watch.reads;
 		require(after == reads + 1, "one change cost one read across ten workspaces: " + (after - reads));
-		pool.dispose();
-		print("PASS: ten workspaces: " + pool.count() + " connections held after dispose, " + opened + " opened, " + items + " catalog items mirrored, "
-			+ Std.int(perWatch / 1024) + " KiB heap per watched workspace (" + Std.int((held - servers) / 1024) + " KiB total; fakes " + Std.int((servers - baseline) / 1024) + " KiB)");
+		for (holder in holders) holder.dispose();
+		print("PASS: ten workspaces: " + opened + " connections opened, " + items + " catalog items mirrored, "
+			+ Std.int(perWatch / 1024) + " KiB heap per watched workspace with its connection (" + Std.int((held - servers) / 1024) + " KiB total; fakes " + Std.int((servers - baseline) / 1024) + " KiB)");
 	}
 
 	static function print(text:String):Void

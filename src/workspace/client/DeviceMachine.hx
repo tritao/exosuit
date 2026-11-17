@@ -57,24 +57,37 @@ private class MachineStreamConnector implements RpcConnector {
 		});
 }
 
-/** A workspace's stream: connecting asks the machine to OPEN it, so every reconnect of the workspace's client opens a fresh stream. */
+/**
+	A workspace's stream: connecting asks the machine to OPEN it, so every reconnect of the workspace's client opens a
+	fresh stream. A reconnect never starts the service (`start` false): one that stopped stays stopped, and the link
+	decides whether to ask again (WorkspaceLink's `revive`). `first`, when given, is a stream already opened, which the
+	first connect takes.
+**/
 private class WorkspaceStreamConnector implements RpcConnector {
 	final owner:DeviceMachine;
 	final workspace:String;
+	var first:Null<MessageTransport>;
 
-	public function new(owner:DeviceMachine, workspace:String) {
+	public function new(owner:DeviceMachine, workspace:String, ?first:MessageTransport) {
 		this.owner = owner;
 		this.workspace = workspace;
+		this.first = first;
 	}
 
 	public function connect(complete:RpcConnectResult->Void):RpcConnectAttempt {
+		var ready = first;
+		first = null;
+		if (ready != null && ready.isOpen()) {
+			complete(Opened(ready));
+			return new Finished();
+		}
 		var attempt = new WaitingAttempt();
 		var machine = owner.machineId;
 		if (machine == null) {
 			complete(Failed({code: "disconnected", message: "The machine has not answered yet", ambiguous: false}, true));
 			return attempt;
 		}
-		owner.openStream({machine: machine, workspace: workspace}, function(stream, error) {
+		owner.openStream({machine: machine, workspace: workspace}, false, function(stream, _, error) {
 			if (attempt.cancelled) {
 				if (stream != null)
 					stream.close();
@@ -96,18 +109,18 @@ private class WorkspaceStreamConnector implements RpcConnector {
 	A paired machine as the device sees it (ADR 0005 section 4): the directory of the workspaces granted to this device,
 	and a way to open a stream to each. It dials the machine's channel through `channel` (a connector whose transport is
 	already Noise-authenticated, such as `DeviceRpcConnector`), runs the machine protocol on stream 0 under an RpcClient
-	(so it reconnects with backoff), reads DIRECTORY when connected and whenever CHANGED arrives, and again every
-	REFRESH_MS because a status change alone sends no hint.
+	(so it reconnects with backoff), reads DIRECTORY when connected and whenever CHANGED arrives (grants, names, a
+	service starting or stopping), and again every REFRESH_MS, which also finds a relay session that died unnoticed.
 
-	`workspaceConnector(id)` gives the normal workspace clients (full client, catalog watch, the pool) a connector for
-	one workspace: each connect issues OPEN and hands the new stream to the RpcClient. A reconnect of the channel ends
-	every stream, so the clients above reconnect through OPEN again; nothing replays.
+	`openService(id, start)` makes the device's ServiceOpener for WorkspaceLink: it opens a stream to the workspace and
+	names the service suit forwarded it to; its connector issues OPEN again on every reconnect, never starting the service. A reconnect of the channel ends
+	every stream, so the links above reconnect through OPEN again; nothing replays.
 **/
 class DeviceMachine {
 	public static inline final REFRESH_MS = 15000.0;
 	static inline final CALL_TIMEOUT = 8000;
-	/** OPEN starts an idle workspace's service, which takes a while. */
-	public static inline final OPEN_TIMEOUT = 30000;
+	/** OPEN starts an idle workspace's service, which suit gives SuitServices.START_SECONDS (30 s); the answer gets more. */
+	public static inline final OPEN_TIMEOUT = 40000;
 
 	/** The id the device pairs under: the machine's relay id (32 hex digits), which the directory names in `relay`. */
 	public final relayId:String;
@@ -164,12 +177,40 @@ class DeviceMachine {
 		return null;
 	}
 
-	/** True when the machine answered at least once and granted this device no workspace. */
-	public function grantedNothing():Bool
-		return directory != null && directory.workspaces.length == 0;
+	/**
+		A ServiceOpener (WorkspaceLink) for the workspaces of this machine: opens a stream to workspace `id` (suit starts
+		its service when idle and `start` is true, else answers `workspace_unavailable`) and gives the service's
+		generation and root with a connector whose first connect takes that stream.
+	**/
+	public function openService(id:String, start:Bool, done:(Null<OpenedService>, Null<String>) -> Void):Void {
+		var machine = machineId;
+		if (machine == null) {
+			done(null, "The machine has not answered yet");
+			return;
+		}
+		openStream({machine: machine, workspace: id}, start, function(stream, opened, error) {
+			if (stream == null || opened == null) {
+				done(null, error == null ? "The machine is not connected" : describe(error.code));
+				return;
+			}
+			var generation = opened.generation, root = opened.root;
+			if (generation == null || root == null) {
+				stream.close();
+				done(null, "The machine is too old to open workspaces here; update Exosuit on it");
+				return;
+			}
+			done({endpoint: "", generation: generation, root: root, connector: new WorkspaceStreamConnector(this, id, stream)}, null);
+		});
+	}
 
-	public function workspaceConnector(workspace:String):RpcConnector
-		return new WorkspaceStreamConnector(this, workspace);
+	static function describe(code:String):String
+		return switch code {
+			case "unknown_workspace": "This device may not open that workspace";
+			case "workspace_unavailable": "The workspace's service is not running";
+			case "too_many_streams": "Too many workspaces are open on this device";
+			case "disconnected": "The machine is not connected";
+			case other: "The machine refused the workspace (" + other + ")";
+		}
 
 	/** Takes the channel a connect produced as the current one (closing the previous), and returns its machine stream. */
 	public function adopt(transport:MessageTransport):Null<haxeon.rpc.MessageTransport> {
@@ -194,13 +235,6 @@ class DeviceMachine {
 		});
 		revision++;
 		read(connection);
-	}
-
-	/** Reads the directory again now (a read already running is followed by one more). */
-	public function refresh():Void {
-		var connection = machineConnection;
-		if (connection != null && connected())
-			read(connection);
 	}
 
 	function read(connection:RpcConnection):Void {
@@ -274,24 +308,25 @@ class DeviceMachine {
 	}
 
 	/**
-		Asks the machine to open a stream to a granted workspace and registers it on the current channel. `done` gets the
-		transport, or the error (`disconnected` when the machine is not connected right now).
+		Asks the machine to open a stream to a granted workspace (starting its service when idle, if `start`) and registers
+		it on the current channel. `done` gets the transport, or the error (`disconnected` when the machine is not
+		connected right now).
 	**/
-	public function openStream(ref:WorkspaceRef, done:(Null<MessageTransport>, Null<RpcError>) -> Void):Void {
+	public function openStream(ref:WorkspaceRef, start:Bool, done:(Null<MessageTransport>, Null<WorkspaceStream>, Null<RpcError>) -> Void):Void {
 		var connection = machineConnection, link = mux;
 		if (disposed || connection == null || link == null || !connected() || !link.isOpen()) {
-			done(null, {code: "disconnected", message: "The machine is not connected", ambiguous: false});
+			done(null, null, {code: "disconnected", message: "The machine is not connected", ambiguous: false});
 			return;
 		}
-		connection.call(MachineDirectoryProtocol.OPEN, {ref: ref}, OPEN_TIMEOUT, function(opened:WorkspaceStream) {
+		connection.call(MachineDirectoryProtocol.OPEN, {ref: ref, start: start}, OPEN_TIMEOUT, function(opened:WorkspaceStream) {
 			if (machineConnection != connection || mux != link) {
 				// The channel changed while the machine was answering: the stream died with it. Tell the machine anyway.
-				done(null, {code: "disconnected", message: "The machine connection changed", ambiguous: false});
+				done(null, null, {code: "disconnected", message: "The machine connection changed", ambiguous: false});
 				return;
 			}
 			var stream = link.open(opened.stream);
 			if (stream == null || !sameRef(opened.ref, ref)) {
-				done(null, {code: "invalid_response", message: "The machine opened an unusable stream", ambiguous: false});
+				done(null, null, {code: "invalid_response", message: "The machine opened an unusable stream", ambiguous: false});
 				if (stream != null)
 					stream.close();
 				else
@@ -299,9 +334,9 @@ class DeviceMachine {
 				return;
 			}
 			// Directory entries go stale once grants change; the machine closes the stream then, and the client reconnects.
-			done(stream, null);
+			done(stream, opened, null);
 		}, function(failure) {
-			done(null, failure);
+			done(null, null, failure);
 		});
 	}
 
@@ -310,12 +345,6 @@ class DeviceMachine {
 
 	static function sameRef(left:WorkspaceRef, right:WorkspaceRef):Bool
 		return left.machine == right.machine && left.workspace == right.workspace;
-
-	/** Streams open to workspaces now (the machine stream is not counted). */
-	public function openStreams():Int {
-		var channel = mux;
-		return channel == null || !channel.isOpen() ? 0 : channel.count() - 1;
-	}
 
 	/** Moves the channel, the machine client and its refresh along; call every frame. */
 	public function poll():Void {

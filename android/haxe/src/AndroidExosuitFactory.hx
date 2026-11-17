@@ -1,3 +1,4 @@
+import workspace.client.RemoteMachines;
 import haxe.io.Bytes;
 import haxe.io.Path;
 import haxeon.ui.host.UiApplication;
@@ -15,8 +16,8 @@ import workspace.service.WorkspaceTerminalProtocol;
 /** Builds the same ExosuitApp the desktop runs, with the capabilities a phone has, attached to its paired workspace. */
 class AndroidExosuitFactory {
 	/** The phone's remote attachment, once the app exists; the Activity's test-rig commands (pair, open) go to it. */
-	public static var remote(default, null):Null<PhoneRemote>;
-	static var phonePanel:Null<PhonePanel>;
+	public static var remote(default, null):Null<RemoteMachines>;
+	static var phonePanel:Null<ui.RemoteMachinesPanel>;
 	static var lastView:Null<PhoneLastView>;
 	/** The workspace that was open (or opening) when an invitation link arrived: its Workbench attaching does not cover the Remote panel. */
 	static var prefillHold:Null<String> = null;
@@ -30,7 +31,7 @@ class AndroidExosuitFactory {
 		var panel = phonePanel, current = app;
 		if (panel == null || current == null) return false;
 		var text = StringTools.trim(url);
-		if (PhoneInvitation.parse(text) == null) {
+		if (workspace.client.PairingLink.parse(text) == null) {
 			Sys.println("exosuit-prefill: the text is no pairing link and was ignored");
 			return false;
 		}
@@ -55,9 +56,9 @@ class AndroidExosuitFactory {
 			throw "An existing absolute app-files directory is required";
 		var root = appFilesRoot;
 		while (root.length > 1 && (StringTools.endsWith(root, "/") || StringTools.endsWith(root, "\\"))) root = root.substr(0, root.length - 1);
-		// The app keeps its settings and state in its private files directory, and never starts a local suit.
+		// The app keeps its settings and state in its private files directory. There is no suit on the phone: only the
+		// desktop's GraphicalMain makes a suit link, and the phone reaches its machine's suit through the relay.
 		Sys.putEnv("PRAGTICAL_PORTABLE", root);
-		Sys.putEnv("EXOSUIT_SUIT", "off");
 		var app:Null<ExosuitApp> = null;
 		var redraw = function() {
 			if (app == null) context.requestFrame(); else app.requestFrame();
@@ -69,7 +70,7 @@ class AndroidExosuitFactory {
 		var credentials = new PhoneCredentials();
 		credentials.load(credentialDocument, credentialsUnreadable);
 		if (credentialDocument != null) for (index in 0...credentialDocument.length) credentialDocument.set(index, 0);
-		var phone = new PhoneRemote(context.events, function() return NativeKit.nk_time_seconds() * 1000, credentials, redraw);
+		var phone = new RemoteMachines(context.events, function() return NativeKit.nk_time_seconds() * 1000, credentials, redraw);
 		// A workspace terminal is a service-owned PTY the phone attaches to (never a local shell); the pane gets the touch
 		// extra-keys row and finger scrolling because this host's primary input is touch.
 		var openTerminal = function(id:String, cwd:String, restored:Bool, requestFrame:Void->Void, palette:ui.TerminalPalette, group:Null<String>,
@@ -90,25 +91,28 @@ class AndroidExosuitFactory {
 		var settings = created.application.settings.store;
 		if (settings.isDefault("terminal/fonts/font_size")) settings.set("terminal/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(11));
 		remote = phone;
-		var panel = new PhonePanel(phone, redraw);
+		var machines = new ui.DeviceWorkbenchMachine(created, phone);
+		created.attachWorkbenchMachine(machines);
+		var panel = new ui.RemoteMachinesPanel(phone, redraw);
 		phonePanel = panel;
 		created.registerSidebarDestination("remote-access", IconName.Radar, function() return panel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote", 30, true));
-		var filesAttached = false, workbenchAttached = false;
+		var filesAttached = false;
+		var attachedWorkbench:Null<workspace.client.WorkspaceWorkbenchClient> = null;
 		var lastView = new PhoneLastView(root, phone, created, function() return NativeKit.nk_time_seconds() * 1000);
 		AndroidExosuitFactory.lastView = lastView;
 		var applicationPoll = context.onPoll;
 		// Debug builds with files/automation.on (see ExosuitActivity): the labelled elements and the app's state for the test scripts.
-		var automationDirectory = devtools.AutomationProbe.directoryFromEnvironment();
-		var automation = automationDirectory == null ? null : new devtools.AutomationProbe(automationDirectory, created.context(), function() {
-			var state:Dynamic = created.automationState();
+		var automationDirectory = PhoneSnapshotFile.directoryFromEnvironment();
+		var automation = automationDirectory == null ? null : new PhoneSnapshotFile(automationDirectory, created.context(), function() {
+			var state:Dynamic = created.diagnostics.automationState();
 			state.phone = phone.automationState();
 			return state;
 		});
 		context.onPoll = function() {
 			if (applicationPoll != null) applicationPoll();
 			if (automation != null) automation.poll();
-			phone.poll();
+			machines.poll();
 			lastView.poll();
 			var identified = phone.fileScope() != null;
 			var filesAvailable = identified && phone.hasCapability(WorkspaceFileProtocol.READ);
@@ -120,21 +124,23 @@ class AndroidExosuitFactory {
 				created.detachWorkspace(phone);
 			}
 			var workbenchAvailable = identified && phone.hasCapability(WorkspaceTerminalProtocol.READ) && phone.hasCapability(WorkspaceTerminalProtocol.CATALOG);
-			if (workbenchAvailable && !workbenchAttached) {
-				workbenchAttached = true;
-				created.attachWorkbench(phone.workbenchService());
-				var open = phone.openView();
-				var held = prefillHolding && (open == null ? null : open.workspace) == prefillHold;
-				prefillHolding = false;
-				if (!held) created.showSidebarMode("workbench");
-			} else if (!workbenchAvailable && workbenchAttached) {
-				workbenchAttached = false;
-				created.detachWorkbench(phone.workbenchService());
-				created.showSidebarMode("remote-access");
+			// The Workbench reads the open workspace's link: another workspace opened is another client.
+			var wanted = workbenchAvailable ? phone.workbenchService() : null, attached = attachedWorkbench;
+			if (attached != wanted) {
+				if (attached != null) created.detachWorkbench(attached);
+				attachedWorkbench = wanted;
+				if (wanted != null) {
+					created.attachWorkbench(wanted);
+					var open = phone.openView();
+					var held = prefillHolding && (open == null ? null : open.workspace) == prefillHold;
+					prefillHolding = false;
+					if (!held) created.showSidebarMode("workbench");
+				} else
+					created.showSidebarMode("remote-access");
 			}
 		};
 		created.showSidebarMode("remote-access");
-		phone.connectSaved();
+		phone.connectSaved(credentials.unreadable);
 		return created;
 	}
 

@@ -3,8 +3,7 @@ package workspace.transport;
 import haxe.io.Bytes;
 
 /**
-	The byte stream under a `RelaySocketLink`: the machine WebSocket itself, or, when suit holds that
-	socket, the daemon's local link to suit (`suit.relay.SuitRelayStream`), which carries the same bytes.
+	The byte stream under a `RelaySocketLink`: a relay WebSocket (`NativeKitByteStream`), or a test's in-memory stand-in.
 **/
 interface RelayByteStream {
 	function isOpen():Bool;

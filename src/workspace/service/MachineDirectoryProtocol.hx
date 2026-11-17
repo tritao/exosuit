@@ -34,16 +34,27 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 	@:optional @:id(5) var relay:Null<String>;
 }
 
-/** Opens a stream to one granted workspace's service. */
+/**
+	Opens a stream to one granted workspace's service. `start` false asks only for a service that already runs: with
+	none, the answer is `workspace_unavailable` and nothing starts (a device's reconnects and its row links). Absent
+	means true.
+**/
 @:wire typedef OpenWorkspace = {
 	@:id(1) var ref:WorkspaceRef;
+	@:optional @:id(2) var start:Null<Bool>;
 }
 
-/** The stream a successful open made: frames with this id reach the workspace's service. */
+/**
+	The stream a successful open made: frames with this id reach the workspace's service. `generation` and `root` are
+	what that service's IDENTITY answers with (as suit's `workspace.open` names them to an editor), so the device checks
+	it reached that service; a machine too old to send them sends none.
+**/
 @:wire typedef WorkspaceStream = {
 	@:id(1) var ref:WorkspaceRef;
 	@:id(2) var stream:Int;
 	@:id(3) var grants:Array<String>;
+	@:optional @:id(4) var generation:Null<String>;
+	@:optional @:id(5) var root:Null<String>;
 }
 
 @:wire typedef CloseWorkspace = {
@@ -63,7 +74,8 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 	it were connected to that service directly. Suit forwards frames without reading them.
 
 	Errors: `machine_mismatch`, `unknown_workspace` (a ref this machine does not have, or a workspace not granted: the
-	two are the same answer, so a device cannot probe for ids), `workspace_unavailable` (the service did not start),
+	two are the same answer, so a device cannot probe for ids), `workspace_unavailable` (the service did not start, or
+	is not running and `start` was false),
 	`too_many_streams`, `invalid_request`. Never reuse ids.
 **/
 class MachineDirectoryProtocol {

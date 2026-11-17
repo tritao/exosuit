@@ -12,8 +12,7 @@ import haxeon.ui.host.BrowserUiHostSession;
 import haxeon.ui.host.UiHostSession.UiHostLifecycle;
 import ui.ExosuitPalette;
 import platform.HostCapabilities;
-import app.BrowserRemoteAccessPanel;
-import app.BrowserRemoteWorkspaceClient;
+import workspace.client.RemoteMachines;
 import workspace.service.WorkspaceTerminalProtocol;
 import sys.FileSystem;
 import sys.io.File;
@@ -24,7 +23,8 @@ class WebMain {
 	static var height = 840;
 	static var session:Null<BrowserUiHostSession>;
 	static var editor:Null<ExosuitApp>;
-	static var remoteAccess:Null<BrowserRemoteWorkspaceClient>;
+	static var remoteAccess:Null<RemoteMachines>;
+	static var pairedMachines:Null<BrowserPairedMachines>;
 
 	@:expose public static function configure(canvasWidth:Int, canvasHeight:Int):Int {
 		if (session != null || canvasWidth <= 0 || canvasHeight <= 0) return 1;
@@ -51,24 +51,31 @@ class WebMain {
 			var redraw = function() {
 				if (browserApp == null) context.requestFrame(); else browserApp.requestFrame();
 			};
-			var remote = new BrowserRemoteWorkspaceClient(context.events,
-				function() return NativeKit.nk_time_seconds() * 1000,
-				redraw);
+			// The browser is a paired device like the phone: RemoteMachines over suit's machine relay, its pairings in IndexedDB.
+			var store = new BrowserPairedMachines();
+			pairedMachines = store;
+			var remote = new RemoteMachines(context.events, function() return NativeKit.nk_time_seconds() * 1000, store, redraw);
 			var app = new ExosuitApp(context.fonts, ExosuitPalette.theme(false), context, "/workspace", HostCapabilities.browser(), null, false, null,
 				function(id, cwd, restored, requestFrame, palette, group, directory)
 					return ui.TerminalPane.openRemote(function() return remote, id, cwd, restored,
 						requestFrame, palette, group, directory, context.fonts, !restored));
 			browserApp = app;
 			remoteAccess = remote;
-			var remotePanel = new BrowserRemoteAccessPanel(remote, redraw);
+			var machines = new ui.DeviceWorkbenchMachine(app, remote);
+			app.attachWorkbenchMachine(machines);
+			var remotePanel = new ui.RemoteMachinesPanel(remote, redraw);
+			store.load(function(unreadable) {
+				remote.connectSaved(unreadable);
+				redraw();
+			});
 			var filesAttached = false;
-			var workbenchAttached = false;
+			var attachedWorkbench:Null<workspace.client.WorkspaceWorkbenchClient> = null;
 			// ExosuitApp owns service/explorer polling once the workspace is attached.
 			// Preserve it when adding the browser connection lifecycle callback.
 			var pollEditor = context.onPoll;
 			context.onPoll = function() {
 				if (pollEditor != null) pollEditor();
-				if (!filesAttached) remote.poll();
+				machines.poll();
 				// Keep projections attached while a known workspace reconnects. Their
 				// clients disable mutations until the new authenticated connection is ready.
 				var identified = remote.fileScope() != null;
@@ -84,12 +91,12 @@ class WebMain {
 				}
 				var workbenchAvailable = identified && remote.hasCapability(WorkspaceTerminalProtocol.READ)
 					&& remote.hasCapability(WorkspaceTerminalProtocol.CATALOG);
-				if (workbenchAvailable && !workbenchAttached) {
-					workbenchAttached = true;
-					app.attachWorkbench(remote.workbenchService());
-				} else if (!workbenchAvailable && workbenchAttached) {
-					workbenchAttached = false;
-					app.detachWorkbench(remote.workbenchService());
+				// The Workbench reads the open workspace's link: another workspace opened is another client.
+				var wanted = workbenchAvailable ? remote.workbenchService() : null, attached = attachedWorkbench;
+				if (attached != wanted) {
+					if (attached != null) app.detachWorkbench(attached);
+					attachedWorkbench = wanted;
+					if (wanted != null) app.attachWorkbench(wanted);
 				}
 			};
 			app.registerSidebarDestination("remote-access", IconName.Radar, function() return remotePanel,
@@ -136,18 +143,7 @@ class WebMain {
 				message: session.error.message,
 				stack: session.error.stack
 			},
-			remoteAccess: remoteAccess == null ? null : {
-				status: remoteAccess.status,
-				rpcFailure: remoteAccess.lastRpcFailure,
-				rpcFailures: remoteAccess.rpcFailures,
-				error: remoteAccess.error,
-				authenticationCode: remoteAccess.authenticationCode,
-				codeConfirmed: remoteAccess.codeConfirmed,
-				connecting: remoteAccess.connecting,
-				workspaceRoot: remoteAccess.workspaceRoot,
-				grants: remoteAccess.grants,
-				savedDevices: remoteAccess.savedDevices
-			}
+			remoteAccess: remoteAccess == null ? null : remoteAccess.automationState()
 		}));
 		return 0;
 	}
@@ -158,24 +154,24 @@ class WebMain {
 
 	/** Completion callback for IndexedDB credential persistence in the browser host. */
 	@:expose public static function remoteCredentialStored(request:Int, success:Int):Int {
-		var client = remoteAccess;
-		if (client == null) return 1;
-		client.credentialStored(request, success != 0);
+		var store = pairedMachines;
+		if (store == null) return 1;
+		store.stored(request, success != 0);
 		return 0;
 	}
 
 	/** IndexedDB metadata and credentials cross the browser boundary as bounded ASCII chunks. */
 	@:expose public static function remoteStorePayloadChunk(request:Int, kind:Int, index:Int, value:Int):Int {
-		var client = remoteAccess;
-		if (client == null) return 1;
-		client.receiveStorePayloadChunk(request, kind, index, value);
+		var store = pairedMachines;
+		if (store == null) return 1;
+		store.chunk(request, kind, index, value);
 		return 0;
 	}
 
 	@:expose public static function remoteStorePayloadComplete(request:Int, kind:Int, length:Int, success:Int):Int {
-		var client = remoteAccess;
-		if (client == null) return 1;
-		client.receiveStorePayloadComplete(request, kind, length, success != 0);
+		var store = pairedMachines;
+		if (store == null) return 1;
+		store.complete(request, kind, length, success != 0);
 		return 0;
 	}
 }
