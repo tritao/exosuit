@@ -10,10 +10,9 @@ mkdir -p "$1"
 stage=$(cd "$1" && pwd)
 mkdir -p "$stage/tools" "$stage/lib" "$stage/stdlib"
 cp "$root_dir/graphical/build/host/main.hl" "$stage/exosuit.hl"
-cp "$haxeon_root/.tools/hashlink/hl" "$stage/tools/"
-cp -L "$haxeon_root/.tools/hashlink/libhl.so" "$stage/lib/libhl.so.1"
-ln -s libhl.so.1 "$stage/lib/libhl.so"
-cp "$haxeon_root/out/haxeon_runtime.hdll" "$stage/lib/"
+# hl is one file: libhl and the Haxeon runtime are compiled into it.
+hashlink_dir=$("$haxeon_root/scripts/hashlink-path.sh")
+cp "$hashlink_dir/hl" "$stage/tools/"
 cp "$root_dir/graphical/build/host/native/pluginhost/libexosuit_plugin_host.so" "$stage/lib/"
 cp -a "$root_dir/graphical/build/host/native/exosuit-ui-native/"*.so* "$stage/lib/"
 cp "$root_dir/agent/build/host/main.hl" "$stage/tools/exosuit-agent.hl"
@@ -28,10 +27,11 @@ cp -R "$root_dir/agent/naming/node_modules/@anthropic-ai/claude-agent-sdk" "$sta
 cp "$root_dir/packaging/exosuit-agent" "$stage/tools/"
 # Relocate only staged binaries; source build output retains its build paths.
 patchelf --set-rpath '$ORIGIN/../lib' "$stage/tools/hl"
-for library in "$stage/lib/"*.so* "$stage/lib/"*.hdll; do
+for library in "$stage/lib/"*.so*; do
 	[[ -L "$library" ]] || patchelf --set-rpath '$ORIGIN' "$library"
 done
-cp "$haxeon_root/out/haxeon-lsp.hl" "$stage/tools/"
+# The language server is Haxeon's LspMain, built once into the checkout's tool cache (`haxeon lsp` runs the same file).
+cp "$("$haxeon_root/scripts/haxeon" dev tool-path LspMain)" "$stage/tools/haxeon-lsp.hl"
 cp -R "$haxeon_root/stdlib/." "$stage/stdlib/"
 cp "$root_dir/packaging/haxeon-lsp" "$stage/tools/"
 cp "$root_dir/packaging/exosuit" "$stage/exosuit"

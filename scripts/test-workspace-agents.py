@@ -4,6 +4,7 @@ import os,subprocess,tempfile,json
 from pathlib import Path
 import sys
 from haxeon_cli import run_cli
+import haxeon_paths
 ROOT=Path(__file__).resolve().parent.parent
 HAXEON=ROOT/'haxeon'
 project=ROOT/'tests/workspace-agents/haxeon.json'
@@ -13,7 +14,7 @@ windows=os.name=='nt'
 output=project.parent/'build/host'
 env=dict(os.environ)
 variable='PATH' if windows else 'LD_LIBRARY_PATH'
-env[variable]=os.pathsep.join([*(str(p) for p in [HAXEON/'out',HAXEON/'.tools/hashlink',*sorted(p for p in (output/'native').iterdir() if p.is_dir())]),*([env[variable]] if env.get(variable) else [])])
+env[variable]=os.pathsep.join([*(str(p) for p in [HAXEON/'out',haxeon_paths.vm_dir(HAXEON),*sorted(p for p in (output/'native').iterdir() if p.is_dir())]),*([env[variable]] if env.get(variable) else [])])
 with tempfile.TemporaryDirectory(prefix='exosuit-codex-') as temporary:
  root=Path(temporary)
  fake=project.parent/'fake-codex.py'
@@ -21,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-codex-') as temporary:
   # The agent runs the CLI directly, so Windows needs an executable wrapper around the Python fake.
   fake=Path(temporary)/'fake-codex.cmd'
   fake.write_bytes(('@"%s" "%s" %%*'%(sys.executable,project.parent/'fake-codex.py')).encode()+bytes([13,10]))
- subprocess.run([str(HAXEON/'.tools/hashlink'/('hl.exe' if windows else 'hl')),str(output/'main.hl'),temporary,str(fake),str(ROOT/'scripts/run-codex-proxy.py')],env=env,check=True,timeout=90)
+ subprocess.run([str(haxeon_paths.hl(HAXEON)),str(output/'main.hl'),temporary,str(fake),str(ROOT/'scripts/run-codex-proxy.py')],env=env,check=True,timeout=90)
  state=json.loads((root/'fake-codex.json').read_text())
  # One thread for resource "a", however often it is created, and one for the newer-version resource.
  assert state['starts']==2 and state['prompts']==3,state

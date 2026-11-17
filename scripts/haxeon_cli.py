@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 import sys
 
+import haxeon_paths
+
 
 def run_cli(
     project_root: Path,
@@ -37,89 +39,20 @@ def run_cli(
             [str(haxeon_script), *arguments], env=environment, check=False
         ).returncode
 
-    haxe = haxeon_root / ".tools" / "haxe" / "haxe.exe"
-    hashlink = haxeon_root / ".tools" / "hashlink" / "hl.exe"
-    if not haxe.is_file():
+    # On Windows hl.exe runs the CLI's bytecode from the VM directory: the command line keeps `hl.exe ... haxeon-cli.hl`,
+    # which exohost classifies, and HAXEON_HOME stays the caller's (haxeon.exe would overwrite it with its build checkout).
+    hashlink = haxeon_paths.hl(haxeon_root)
+    cli = haxeon_paths.cli(haxeon_root)
+    if not hashlink.is_file() or not cli.is_file():
         raise RuntimeError(
-            "Pinned Haxe compiler is not bootstrapped; run the Haxeon Windows "
-            "toolchain bootstrap first"
+            f"The Haxeon VM is not built ({hashlink if not hashlink.is_file() else cli} is missing); "
+            "run scripts/build-windows.ps1"
         )
-    if not hashlink.is_file():
-        return subprocess.run(
-            [
-                str(haxe),
-                "-cp",
-                str(haxeon_root / "src"),
-                "--run",
-                "tools.HaxeonCli",
-                *arguments,
-            ],
-            env=environment,
-            check=False,
-        ).returncode
-
-    cli = haxeon_root / "out" / "haxeon-cli.hl"
-    sources = list((haxeon_root / "src").rglob("*.hx"))
-    rebuild_cli = not cli.is_file() or haxe.stat().st_mtime_ns > cli.stat().st_mtime_ns
-    if cli.is_file() and not rebuild_cli:
-        rebuild_cli = any(source.stat().st_mtime_ns > cli.stat().st_mtime_ns for source in sources)
-
-    if rebuild_cli:
-        cli.parent.mkdir(parents=True, exist_ok=True)
-        temporary = cli.with_name(f"{cli.name}.tmp.{os.getpid()}")
-        try:
-            result = subprocess.run(
-                [
-                    str(haxe),
-                    "-cp",
-                    str(haxeon_root / "src"),
-                    "-main",
-                    "tools.HaxeonCli",
-                    "-hl",
-                    str(temporary),
-                ],
-                env=environment,
-                check=False,
-            )
-            if result.returncode != 0:
-                return result.returncode
-            os.replace(temporary, cli)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    hashlink_directory = hashlink.parent
-    runtime_directory = haxeon_root / "out"
     environment["PATH"] = ";".join(
-        [str(hashlink_directory), str(runtime_directory), environment.get("PATH", "")]
+        [str(hashlink.parent), str(haxeon_root / "out"), environment.get("PATH", "")]
     )
     return subprocess.run(
         [str(hashlink), str(cli), *arguments], env=environment, check=False
-    ).returncode
-
-
-def ensure_language_server(project_root: Path) -> int:
-    """Build out/haxeon-lsp.hl on Windows, where the Bash launcher cannot rebuild it on demand."""
-    if os.name != "nt":
-        return 0
-    haxeon_root = Path(
-        os.environ.get("HAXEON_ROOT") or str(project_root / "haxeon")
-    ).expanduser().resolve(strict=True)
-    haxe = haxeon_root / ".tools" / "haxe" / "haxe.exe"
-    project = haxeon_root / "haxeon-lsp.hxml"
-    server = haxeon_root / "out" / "haxeon-lsp.hl"
-    if server.is_file():
-        built = server.stat().st_mtime_ns
-        sources = [project, *(haxeon_root / "src").rglob("*.hx")]
-        if not any(source.stat().st_mtime_ns > built for source in sources):
-            return 0
-    if not haxe.is_file():
-        raise RuntimeError(
-            "Pinned Haxe compiler is not bootstrapped; run the Haxeon Windows "
-            "toolchain bootstrap first"
-        )
-    server.parent.mkdir(parents=True, exist_ok=True)
-    return subprocess.run(
-        [str(haxe), "--cwd", str(haxeon_root), str(project)], check=False
     ).returncode
 
 
@@ -127,7 +60,11 @@ def main() -> int:
     project_root = Path(
         os.environ.get("EXOSUIT_PROJECT_ROOT") or Path(__file__).resolve().parent.parent
     ).expanduser().resolve()
-    return run_cli(project_root, sys.argv[1:])
+    try:
+        return run_cli(project_root, sys.argv[1:])
+    except RuntimeError as error:
+        print(error, file=sys.stderr)
+        return 127
 
 
 if __name__ == "__main__":

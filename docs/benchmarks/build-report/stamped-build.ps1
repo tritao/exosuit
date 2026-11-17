@@ -63,11 +63,18 @@ Enter-VisualStudio2026
 Write-Output '== Haxeon toolchain bootstrap'
 cmake -P haxeon/cmake/Bootstrap.cmake
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-# The first build would compile these with the pinned Haxe (scripts/haxeon_cli.py); a checkout that has been built
-# once has them, so they belong to the bootstrap rather than to the measured build.
-Write-Output '== Haxeon CLI and language server'
-python -c "import sys; sys.path.insert(0, 'scripts'); from pathlib import Path; import haxeon_cli as h; root = Path('.').resolve(); sys.exit(h.ensure_language_server(root) or h.run_cli(root, ['help']))"
-if (-not (Test-Path haxeon/out/haxeon-cli.hl) -or -not (Test-Path haxeon/out/haxeon-lsp.hl)) { Write-Output 'haxeon-cli.hl or haxeon-lsp.hl is missing'; exit 1 }
+# The bootstrap no longer builds the VM; the windows-msvc preset does (haxeon.exe, hl.exe and haxeon-cli.hl), as in
+# build-windows.ps1, so it belongs to the bootstrap rather than to the measured build.
+Write-Output '== Haxeon native preset'
+Push-Location haxeon
+try {
+	cmake --preset windows-msvc
+	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+	cmake --build --preset windows-msvc
+	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} finally { Pop-Location }
+$cli = python -c "import sys; sys.path.insert(0, 'scripts'); from pathlib import Path; import haxeon_paths as p; print(p.cli(Path('haxeon').resolve()))"
+if (-not (Test-Path $cli)) { Write-Output "$cli is missing"; exit 1 }
 exit 0
 '@ | Set-Content -Encoding utf8 $helper
 	try { $code = [StampedRun]::Run('pwsh', "-NoProfile -File `"$helper`"", $Log) } finally { Remove-Item $helper -ErrorAction SilentlyContinue }

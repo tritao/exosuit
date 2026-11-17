@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from haxeon_cli import ensure_language_server, run_cli
+from haxeon_cli import run_cli
 from prepare_agent_naming import prepare
 
 
@@ -38,13 +38,9 @@ def main() -> int:
             break
 
     try:
-        # The Claude naming adapter belongs to the agent, and the language server to the editor (graphical).
+        # The Claude naming adapter belongs to the agent.
         if "agent" in projects:
             prepare(root_dir)
-        if "graphical" in projects:
-            status = ensure_language_server(root_dir)
-            if status != 0:
-                return status
         # The terminal host is built on its own beside the agent: a small program starts much faster (TerminalHosts).
         builds = [part for project in projects for part in ([project, "agent/terminal-host"] if project == "agent" else [project])]
         for project in builds:

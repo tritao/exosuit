@@ -82,7 +82,7 @@ $env:HAXEON_COMPILER_SESSION_DIR = $session
 $env:HAXEON_COMPILER_IDLE_SECONDS = "$IdleSeconds"
 # The worker's identity includes PATH, so give it a fixed one: the same worker (and its warm state) must answer every
 # round, whichever shell started the script.
-$compilePath = (@((Split-Path (Get-Command pwsh).Source), (Join-Path $HaxeonRoot 'out'), (Join-Path $HaxeonRoot '.tools/hashlink'), "$env:SystemRoot\system32", $env:SystemRoot, (Join-Path $env:ANDROID_HOME 'platform-tools'))) -join ';'
+$compilePath = (@((Split-Path (Get-Command pwsh).Source), (Join-Path $HaxeonRoot 'out'), $VmDirectory, "$env:SystemRoot\system32", $env:SystemRoot, (Join-Path $env:ANDROID_HOME 'platform-tools'))) -join ';'
 
 function Install-Full {
     if ($NoFallback) { throw 'The non-Haxe sources changed (or no APK is installed); run build.ps1 and install, or drop -NoFallback' }
@@ -145,10 +145,9 @@ function Read-Stamp { try { return [IO.File]::ReadAllText("$liveModule.live.stam
 function Start-LiveCompile {
     $projectPath = Write-HaxeProject $liveOut
     $env:HAXEON_HOME = $HaxeonRoot
-    $hl = Join-Path $HaxeonRoot '.tools/hashlink/hl.exe'
     $info = [Diagnostics.ProcessStartInfo]::new((Get-Command pwsh).Source)
-    $compileArguments = '"' + (Join-Path $HaxeonRoot 'out/haxeon-cli.hl') + '" build --compiler-only --live --project "' + $projectPath + '"'
-    foreach ($argument in '-NoProfile', '-File', $script:Guard, '-TimeoutSeconds', '900', '-Exe', $hl, "-ArgLine:$compileArguments",
+    $compileArguments = '"' + $Cli + '" build --compiler-only --live --project "' + $projectPath + '"'
+    foreach ($argument in '-NoProfile', '-File', $script:Guard, '-TimeoutSeconds', '900', '-Exe', $Hl, "-ArgLine:$compileArguments",
         '-Log', (Join-Path $liveOut 'compile.log'), '-WorkingDirectory', $RepoRoot) { $info.ArgumentList.Add($argument) }
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $savedPath = $env:PATH; $env:PATH = $compilePath
