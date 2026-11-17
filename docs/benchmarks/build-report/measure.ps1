@@ -49,7 +49,8 @@ $python = (Get-Command python -ErrorAction Stop).Source
 
 if (-not (Test-Path (Join-Path $Worktree 'scripts\build-windows.ps1'))) { throw "$Worktree is not an Exosuit checkout" }
 $haxeon = Join-Path $Worktree 'haxeon'
-if (-not (Test-Path (Join-Path $haxeon 'out\haxeon-cli.hl'))) { throw "$haxeon is not bootstrapped (no out\haxeon-cli.hl)" }
+$cli = & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pathlib import Path; import haxeon_paths as p; print(p.cli(Path(sys.argv[2])))" (Join-Path $Worktree 'scripts') $haxeon
+if (-not (Test-Path $cli)) { throw "$haxeon is not bootstrapped (no $cli)" }
 $appBuilds = 'agent', 'exohost', 'graphical' | ForEach-Object { Join-Path $Worktree "$_\build" }
 $present = @($appBuilds | Where-Object { Test-Path $_ })
 switch ($Kind) {
