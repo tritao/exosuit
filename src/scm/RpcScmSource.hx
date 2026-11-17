@@ -189,7 +189,7 @@ class RpcScmSource implements ScmSource implements ScmRemoteReader {
 			complete:ScmApplyCompletion):ScmJob<scm.ScmApplyResult> {
 		if (complete == null) throw "SCM callback cannot be null";
 		var job:ScmJob<scm.ScmApplyResult> = null;
-		job = new ScmJob<scm.ScmApplyResult>(nextGeneration++, function() activeJobs.remove(cast job));
+		job = new ScmJob<scm.ScmApplyResult>(nextGeneration++, function() forgetJob(cast job));
 		activeJobs.push(cast job);
 		if (!knownRepository(repositoryId)) {
 			finish(job, complete, null, new ScmError("not_found", "Repository is outside this workspace root"));
@@ -453,14 +453,19 @@ class RpcScmSource implements ScmSource implements ScmRemoteReader {
 	function newJob<T>(complete:ScmJobResult<T>->Void):ScmJob<T> {
 		if (complete == null) throw "SCM callback cannot be null";
 		var job:ScmJob<T> = null;
-		job = new ScmJob<T>(nextGeneration++, function() activeJobs.remove(cast job));
+		job = new ScmJob<T>(nextGeneration++, function() forgetJob(cast job));
 		activeJobs.push(cast job);
 		return job;
 	}
 
 	function finish<T>(job:ScmJob<T>, complete:ScmJobResult<T>->Void, value:Null<T>, error:Null<ScmError>):Void {
-		activeJobs.remove(cast job);
+		forgetJob(cast job);
 		if (!disposed && job.finish()) complete(new ScmJobResult<T>(job.generation, value, error));
+	}
+
+	/** `Array.remove` on this list fails IR verification inside the generic job instances (HAXEON-BUG, C-handoffs.md); a loop does not. */
+	function forgetJob(job:ScmJob<Dynamic>):Void {
+		for (index in 0...activeJobs.length) if (activeJobs[index] == job) { activeJobs.splice(index, 1); break; }
 	}
 
 	function retireJobs():Void {

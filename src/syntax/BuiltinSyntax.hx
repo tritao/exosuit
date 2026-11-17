@@ -224,7 +224,7 @@ class BuiltinSyntax {
 					matchRule("\\\\.", "constant.character.escape.shell"),
 					matchRule("\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?", "variable.other.shell")
 				]},
-				{begin: "'", end: "'", name: "string.quoted.single.shell", contentName: "string.quoted.single.shell", patterns: []}
+				{begin: "'", end: "'", name: "string.quoted.single.shell", contentName: "string.quoted.single.shell", patterns: ([] : Array<Dynamic>)}
 			]}}
 		};
 	}

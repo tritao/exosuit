@@ -269,12 +269,11 @@ class MachineCatalog {
 		if (FileSystem.exists(path)) sys.io.AtomicFile.write(path, content) else sys.io.AtomicFile.create(path, content);
 	}
 
-	/** Creates `directory` and any missing parents; createDirectory makes one level and does not report failure. */
+	/** Creates `directory` and any missing parents; throws `Could not create <directory>` when that fails. */
 	static function createDirectories(directory:String):Void {
 		if (directory.length == 0 || FileSystem.exists(directory))
 			return;
-		createDirectories(Path.directory(directory));
-		FileSystem.createDirectory(directory);
+		try FileSystem.createDirectory(directory) catch (_:Dynamic) {}
 		if (!FileSystem.exists(directory))
 			throw 'Could not create $directory';
 	}

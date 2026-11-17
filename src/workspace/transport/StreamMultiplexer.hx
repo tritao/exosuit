@@ -44,7 +44,7 @@ class MuxStream implements MessageTransport {
 			owner.pump();
 		if (ended || inbox.length == 0)
 			return null;
-		var message = inbox.shift();
+		var message = inbox.shift() ?? throw "Inbox is empty";
 		inboxBytes -= message.length;
 		return message;
 	}

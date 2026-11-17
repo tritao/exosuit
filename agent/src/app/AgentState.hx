@@ -54,7 +54,8 @@ class AgentState {
 		var parent = Path.directory(path);
 		if (parent == path || parent == "") throw 'Could not create directory: $path';
 		ensureDirectories(parent);
-		FileSystem.createDirectory(path);
+		// The check below reports a failure with this function's message.
+		try FileSystem.createDirectory(path) catch (_:Dynamic) {}
 		if (!FileSystem.isDirectory(path)) throw 'Could not create directory: $path';
 	}
 

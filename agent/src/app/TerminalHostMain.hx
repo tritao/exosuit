@@ -388,7 +388,7 @@ class TerminalHostMain {
 				while (outgoing.length > 0 && (unacknowledged == 0
 					|| unacknowledged + TerminalHostProtocol.cost(outgoing[0]) <= TerminalHostProtocol.WINDOW)
 					&& service.send(outgoing[0])) {
-					unacknowledged += TerminalHostProtocol.cost(outgoing.shift());
+					unacknowledged += TerminalHostProtocol.cost(outgoing.shift() ?? throw "No outgoing message");
 					sent = true;
 				}
 				if (sent || outgoing.length == 0) stalledSince = 0;

@@ -2,6 +2,8 @@ package workspace.transport;
 
 import haxe.io.Bytes;
 import haxeon.wire.MessagePackFrame;
+// HAXEON-BUG: MessagePackFrame defaults a parameter from MessagePackReader, which the compiler resolves in the importing module (C-handoffs.md).
+import haxeon.wire.MessagePackReader;
 
 /** Bounded codec for the Worker envelope: version byte, 16-byte route, HMPK frame. */
 class RelayFrameCodec {

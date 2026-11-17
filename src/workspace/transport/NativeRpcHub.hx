@@ -4,6 +4,7 @@ import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
+import nativekit.ffi.NativeKitTypes.Result;
 import haxeon.platform.event.EventPump;
 import haxeon.platform.event.EventSubscription;
 import haxeon.platform.event.PlatformEvent;
@@ -78,7 +79,7 @@ class NativeRpcHub {
 		if (disposed || streamsCount() >= maxStreams)
 			throw "RPC transport hub unavailable";
 		var opened = NativeKit.nk_transport_connect(options);
-		if (opened.status != 0) {
+		if (opened.status != Result.Ok) {
 			done(null, "connect_failed");
 			return new CompletedAttempt();
 		}
@@ -183,7 +184,7 @@ class NativeRpcHub {
 				} else if (kind == EventKind.TransportFailed || kind == EventKind.TransportClosed) {
 					pending.remove(key);
 					// Why NativeKit ended the stream, for whoever logs the lost connection.
-					var code:Int = result;
+					var code:Int = (result : Int);
 					if (byteStream.failure == null && code != 0)
 						byteStream.failure = code == RECEIVE_OVERFLOW ? "receive_overflow" : "transport_error " + code;
 					if (connecting != null && !connecting.attempt.complete) {
@@ -257,7 +258,7 @@ class NativeRpcHub {
 			throw "Invalid WebSocket port";
 		var options = new TransportOptions();
 		options.set_kind(TransportKind.Websocket);
-		options.set_flags(TransportFlags.NoDelay | (secure ? TransportFlags.Secure : 0));
+		options.set_flags(secure ? TransportFlags.NoDelay | TransportFlags.Secure : TransportFlags.NoDelay);
 		options.set_host(pattern.matched(2));
 		options.set_port(port);
 		var path = pattern.matched(4);

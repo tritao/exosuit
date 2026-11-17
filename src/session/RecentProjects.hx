@@ -49,17 +49,8 @@ class RecentProjects {
 		if (path.length == 0) return;
 		var separator = path.lastIndexOf("/"), parent = separator < 0 ? "" : path.substring(0, separator);
 		try {
-			if (parent.length > 0 && !FileSystem.exists(parent)) createParents(parent);
+			if (parent.length > 0) FileSystem.createDirectory(parent);
 			sys.io.AtomicFile.write(path, "version=" + VERSION + "\n" + paths.join("\n") + (paths.length == 0 ? "" : "\n"));
 		} catch (error:Dynamic) {}
-	}
-
-	static function createParents(path:String):Void {
-		var separator = path.lastIndexOf("/");
-		if (separator > 0) {
-			var parent = path.substring(0, separator);
-			if (!FileSystem.exists(parent)) createParents(parent);
-		}
-		if (!FileSystem.exists(path)) FileSystem.createDirectory(path);
 	}
 }

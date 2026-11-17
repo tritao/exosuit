@@ -3,6 +3,8 @@ package workspace.transport;
 import haxe.io.Bytes;
 import haxeon.rpc.MessageTransport;
 import haxeon.wire.MessagePackFrame;
+// HAXEON-BUG: MessagePackFrame defaults a parameter from MessagePackReader, which the compiler resolves in the importing module (C-handoffs.md).
+import haxeon.wire.MessagePackReader;
 import haxeon.wire.MessagePackFrameReader;
 import nativekit.ffi.NativeKitTypes;
 

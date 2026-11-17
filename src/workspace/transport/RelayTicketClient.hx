@@ -7,7 +7,7 @@ import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKitNet;
 import nativekit.ffi.NativeKitNetConstants;
 import nativekit.ffi.NativeKitNetTypes.HttpClientOptions;
-import nativekit.ffi.NativeKitNetTypes.HttpHeader;
+import nativekit.ffi.NativeKitNetTypes.NativeHttpHeader;
 import nativekit.ffi.NativeKitNetTypes.HttpMethod;
 import nativekit.ffi.NativeKitNetTypes.HttpRequestMode;
 import nativekit.ffi.NativeKitNetTypes.HttpRequestOptions;
@@ -256,10 +256,10 @@ class RelayTicketClient {
 
 		var startFailed = false;
 		try {
-			var authorization = new HttpHeader();
+			var authorization = new NativeHttpHeader();
 			authorization.set_name_bytes(Bytes.ofString("Authorization"));
 			authorization.set_value_bytes(Bytes.ofString("Bearer " + machineToken));
-			var contentType = new HttpHeader();
+			var contentType = new NativeHttpHeader();
 			contentType.set_name_bytes(Bytes.ofString("Content-Type"));
 			contentType.set_value_bytes(Bytes.ofString("application/json"));
 			var requestOptions = new HttpRequestOptions();

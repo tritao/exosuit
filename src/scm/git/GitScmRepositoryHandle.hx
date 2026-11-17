@@ -614,8 +614,6 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle implements scm.ScmOr
 
 	static function ensureDirectory(path:String):Bool {
 		if (FileSystem.exists(path)) return FileSystem.isDirectory(path);
-		var separator = path.lastIndexOf("/");
-		if (separator > 0 && !ensureDirectory(path.substring(0, separator))) return false;
 		try FileSystem.createDirectory(path) catch (_:Dynamic) return false;
 		return FileSystem.exists(path) && FileSystem.isDirectory(path);
 	}

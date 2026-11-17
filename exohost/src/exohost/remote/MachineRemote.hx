@@ -6,6 +6,7 @@ import haxe.io.Path;
 import haxeon.platform.event.EventPump;
 import haxeon.rpc.MessageTransport;
 import haxeon.rpc.RpcConnectResult;
+import exohost.ExohostServices;
 import noisekit.NoiseSession;
 import sys.FileSystem;
 import sys.io.AtomicFile;

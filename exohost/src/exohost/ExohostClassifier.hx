@@ -38,7 +38,8 @@ class ExohostClassifier {
 			return result(ExohostKind.AgentProvider);
 		if (lowered.indexOf("--mode rpc") >= 0 && lowered.indexOf("pi-permissions-") >= 0)
 			return result(ExohostKind.AgentProvider);
-		if (lowered.indexOf("haxeon-lsp") >= 0)
+		// The language server: a bundle's `haxeon-lsp.hl`, or what `haxeon lsp` runs from its tool cache, `<haxeon>/out/tools/LspMain-<key>.hl`.
+		if (lowered.indexOf("haxeon-lsp") >= 0 || lowered.indexOf("/out/tools/lspmain-") >= 0)
 			return result(ExohostKind.LanguageServer);
 		if (lowered.indexOf("scripts/devtools.py") >= 0)
 			return result(ExohostKind.HelperProcess);
@@ -125,9 +126,9 @@ class ExohostClassifier {
 	}
 
 	/**
-		The toolchain a HashLink process runs on: its program's folder (`<haxeon>/.tools/hashlink`), as ExohostInventory.rootKey
+		The toolchain a HashLink process runs on: its program's folder (Haxeon's VM directory, `<haxeon>/out/cmake/windows-msvc/hashlink-runtime`), as ExohostInventory.rootKey
 		compares paths. A Haxeon client and the compiler workers it starts run the same hl.exe. Null when there is no program
-		or it is not named by an absolute path (`hl out/haxeon-cli.hl build`, found on PATH): its toolchain is unknown.
+		or it is not named by an absolute path (`hl haxeon-cli.hl build`, found on PATH): its toolchain is unknown.
 	**/
 	public static function toolchainOf(arguments:Array<String>):Null<String> {
 		if (arguments.length == 0 || arguments[0].length == 0)

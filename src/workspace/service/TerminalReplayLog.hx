@@ -46,7 +46,7 @@ class TerminalReplayLog {
     retained += data.length + 64;
     // Bound metadata too: repeated resizes without output must not grow forever.
     while (entries.length > 1 && (retained > limit || entries.length > 4096)) {
-      var old = entries.shift();
+      var old = entries.shift() ?? throw "No log entry";
       retained -= old.data.length + 64;
       startOffset = old.offset + old.data.length;
       startCursor = old.sequence + 1;

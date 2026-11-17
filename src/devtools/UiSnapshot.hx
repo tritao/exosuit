@@ -35,7 +35,7 @@ class UiSnapshot {
 				try {
 					var bounds = node.globalBounds();
 					if (bounds.width <= 0 || bounds.height <= 0) return;
-					elements.push({id: node.id.value, role: Std.string(semantics.role), label: semantics.label.substr(0, 160),
+					elements.push({id: node.id.value, role: Std.string((semantics.role : Int)), label: semantics.label.substr(0, 160),
 						x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height});
 				} catch (_:Dynamic) {}
 			});

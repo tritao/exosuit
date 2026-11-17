@@ -1,7 +1,7 @@
 package process;
 
 #if !wasm
-import sys.io.Process;
+import sys.io.ChildProcess;
 #end
 
 class ProcessManager {
@@ -19,7 +19,7 @@ class ProcessManager {
 		var keys:Array<String> = [], values:Array<String> = [];
 		if (environment != null)
 			for (key => value in environment) { keys.push(key); values.push(value); }
-		var child = Process.spawn(executable, arguments, cwd, keys, values);
+		var child = ChildProcess.spawn(executable, arguments, cwd, keys, values);
 		var process = new OwnedProcess(child);
 		owned.push(process);
 		return process;

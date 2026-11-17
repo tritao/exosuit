@@ -175,7 +175,7 @@ class JsonRpcTransport {
 			return;
 		}
 		if (rawId == null) return;
-		var id = Std.parseInt(Std.string(rawId)), request = pending.get(id);
+		var id = Std.parseInt(Std.string(rawId)) ?? 0, request = pending.get(id);
 		if (request == null) return;
 		pending.remove(id);
 		var rpcError:Dynamic = Reflect.field(message, "error");
@@ -225,7 +225,7 @@ class JsonRpcTransport {
 			var separator = header.indexOf(":");
 			if (separator < 0) continue;
 			if (header.substring(0, separator).toLowerCase() == "content-length")
-				result = Std.parseInt(StringTools.trim(header.substring(separator + 1)));
+				result = Std.parseInt(StringTools.trim(header.substring(separator + 1))) ?? 0;
 		}
 		return result;
 	}

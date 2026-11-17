@@ -7,6 +7,7 @@ class ProjectNode {
 	public final depth:Int;
 	public final children:Array<ProjectNode> = [];
 	public var expanded(default, null):Bool;
+	@:allow(workspace.ProjectScan)
 	public var loaded(default, null):Bool = false;
 
 	public function new(name:String, path:String, directory:Bool, depth:Int, expanded:Bool = false) {

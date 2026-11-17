@@ -37,7 +37,7 @@ class RelayChannel implements MessageTransport {
 			link.poll();
 		if (incoming.length == 0)
 			return null;
-		var value = incoming.shift();
+		var value = incoming.shift() ?? throw "No incoming message";
 		queuedBytes -= value.length;
 		return value;
 	}

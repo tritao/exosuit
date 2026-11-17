@@ -162,7 +162,7 @@ class ExohostServices {
 		if (launcher == null)
 			throw "The workspace agent is not installed";
 		var target = targetOf(entry);
-		return sys.io.Process.spawn(Sys.executablePath(), [launcher].concat(target.serviceArguments()), target.root(),
+		return sys.io.ChildProcess.spawn(Sys.executablePath(), [launcher].concat(target.serviceArguments()), target.root(),
 			[ExohostClient.libraryVariable()], [ExohostClient.nativePath(launcher)], true);
 	}
 
@@ -245,7 +245,7 @@ class ExohostServices {
 		if (launcher == null)
 			return;
 		try {
-			var child = sys.io.Process.spawn(Sys.executablePath(), [launcher, "--spare"], Path.directory(launcher),
+			var child = sys.io.ChildProcess.spawn(Sys.executablePath(), [launcher, "--spare"], Path.directory(launcher),
 				[ExohostClient.libraryVariable()], [ExohostClient.nativePath(launcher)], true);
 			spare = {child: child, launcher: launcher, build: "", link: null, pid: 0, deadline: now + SPARE_SECONDS};
 		} catch (_:Dynamic) {

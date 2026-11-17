@@ -289,8 +289,8 @@ starts exohost before any Haxe code runs: `ExohostClient.nativePath` (editors,
 bundles, `exohost start`) and `library_path` in `scripts/exohost.py` (source
 trees, and `scripts/test-exohost.py`). In order: the directories under the
 bytecode's `native/`, `lib/` beside the bytecode's directory, the HashLink
-runtime's directory, Haxeon's `out/` and `.tools/hashlink/`, then the
-inherited value.
+runtime's directory, Haxeon's `out/`, then the inherited value (Haxeon's VM directory
+is the runtime's own directory).
 
 ## Decisions
 

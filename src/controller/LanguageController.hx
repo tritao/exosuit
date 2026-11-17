@@ -411,7 +411,7 @@ class LanguageController {
 			if (entry == null) return;
 			root.closeCommandView();
 			if (client != service || document.buffer.stateId != revision) { reportError("language", "Navigation result is stale; run the command again"); return; }
-			var index = Std.parseInt(entry.value);
+			var index = Std.parseInt(entry.value) ?? 0;
 			if (index < 0 || index >= locations.length) return;
 			var location = locations[index];
 			try {

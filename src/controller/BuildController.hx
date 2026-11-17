@@ -1,7 +1,7 @@
 package controller;
 
 import build.BuildDiagnostic;
-import build.BuildOutput;
+import build.BuildLog;
 import build.BuildTask;
 import build.BuildTaskCodec;
 import command.CommandContext;
@@ -20,7 +20,7 @@ import workspace.Workspace;
 class BuildController {
 	static inline final PROBLEM_OWNER = "build";
 	public final available:Bool;
-	public final output:BuildOutput = new BuildOutput();
+	public final output:BuildLog = new BuildLog();
 	public var active(default, null):Null<OwnedProcess>;
 	/** In live mode, the watcher's rebuilds and patches (LiveBuildFeed); null otherwise. */
 	public var live(default, null):Null<LiveBuildFeed>;
@@ -72,7 +72,7 @@ class BuildController {
 		root.openCommandView(new CommandViewProvider("Run Task: ", entries, function(query) {}, function(entry, query, backwards) {
 			root.closeCommandView();
 			if (entry == null) return;
-			var index = Std.parseInt(entry.value);
+			var index = Std.parseInt(entry.value) ?? 0;
 			if (index >= 0 && index < tasks.length) run(project, tasks[index]);
 		}));
 		return true;

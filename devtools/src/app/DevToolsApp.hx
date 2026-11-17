@@ -138,9 +138,7 @@ class DevToolsApp implements DesktopUiApplication {
 			var indent = ""; for (_ in 0...Std.int(Math.min(row.depth, 20))) indent += "  ";
 			var button = new Button(indent + "#" + id + " " + row.type + " " + row.label, style(25), function() {
 				client.select(id); client.picking = false; client.paused = false; host.requestFrame();
-			}, "node-" + id);
-			button.selected = client.selected == id;
-			button.ellipsizeLabel = true;
+			}, "node-" + id, null, null, client.selected == id, null, null, null, null, null, null, true);
 			tree.push(key("node-" + id, button));
 		}
 		var properties:Array<KeyedView> = [key("notice", text("Properties describe the current UI tree. Frame timings can be historical."))];
