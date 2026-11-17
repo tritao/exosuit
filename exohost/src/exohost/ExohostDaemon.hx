@@ -437,7 +437,7 @@ class ExohostDaemon {
 			var commandArguments = Sys.systemName() == "Windows"
 				? ["/c", "start", "Exosuit processes", Sys.executablePath(), launcher].concat(arguments)
 				: ["-e", Sys.executablePath(), launcher].concat(arguments);
-			var child = sys.io.Process.spawn(command, commandArguments, Path.directory(launcher), [ExohostClient.libraryVariable()],
+			var child = sys.io.ChildProcess.spawn(command, commandArguments, Path.directory(launcher), [ExohostClient.libraryVariable()],
 				[ExohostClient.nativePath(launcher)], true);
 			child.close();
 		} catch (_:Dynamic) {}

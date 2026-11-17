@@ -294,7 +294,7 @@ class ExohostLogin {
 	}
 
 	static function spawnReg(arguments:Array<String>):sys.io.ChildProcess
-		return sys.io.Process.spawn(native(systemRoot()) + "\\System32\\reg.exe", arguments, "", null, null, true);
+		return sys.io.ChildProcess.spawn(native(systemRoot()) + "\\System32\\reg.exe", arguments, "", null, null, true);
 
 	/** Blocking, for the CLI: runs reg.exe without a console window; its exit code, or -1 when it could not run or hung. */
 	static function reg(arguments:Array<String>):Int {

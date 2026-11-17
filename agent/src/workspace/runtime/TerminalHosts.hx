@@ -434,7 +434,7 @@ class TerminalHosts {
 		var variable = Sys.systemName() == "Windows" ? "PATH" : Sys.systemName() == "Mac" ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH";
 		// Detached: outside the service's job, so stopping or killing the service leaves the host running. Its own folder is
 		// its working directory, so it does not pin the workspace's.
-		var child = try sys.io.Process.spawn(runtime.executable, [runtime.program, "--terminal-host", directory], directory,
+		var child = try sys.io.ChildProcess.spawn(runtime.executable, [runtime.program, "--terminal-host", directory], directory,
 			[variable], [runtime.libraryPath], true) catch (failure:Dynamic) {
 				removeSpec(directory);
 				throw failure;
