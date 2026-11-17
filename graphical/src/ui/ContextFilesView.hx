@@ -30,6 +30,8 @@ class ContextFilesView implements View {
 		this.host = host; this.changed = changed; this.dark = dark; this.events = events;
 	}
 	public function dispose():Void { if (model != null) model.dispose(); model = null; tree = null; key = ""; }
+	/** UI thread, before each build (see ExplorerTreeModel.prepareBuild). */
+	public function prepareBuild():Void { if (model != null) model.prepareBuild(); }
 	public function poll(now:Float):Void {
 		var current = model; if (current == null) return;
 		var before = current.revision();
@@ -64,7 +66,7 @@ class ContextFilesView implements View {
 					tree.onExpansionRequested = function(path, expanded, toggle) {
 						var allowed = local.requestExpansion(path, expanded, toggle); changed(); return allowed;
 					};
-					tree.onExpandedChanged = local.setDirectoryExpanded;
+					tree.onExpandedChanged = function(path, expanded) { local.setDirectoryExpanded(path, expanded); changed(); };
 					tree.onCollapseAll = local.cancelRequestedExpansions;
 				} else if (remote != null) tree.hasChildrenHint = remote.isDirectoryKey;
 			}

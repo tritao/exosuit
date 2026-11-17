@@ -66,7 +66,7 @@ class WorkspaceFileLoader {
 		if (pumping) return;
 		pumping = true;
 		while (queue.length > 0 && active < capacity()) {
-			var job = queue.shift();
+			var job = queue.shift() ?? throw "No queued file load";
 			if (!isWanted(job)) { jobs.remove(job.id); continue; }
 			active++;
 			var started = Sys.time();
@@ -99,7 +99,7 @@ class WorkspaceFileLoader {
 		}
 		cache.push({key: key, result: result});
 		cachedBytes += result.sizeBytes;
-		while (cache.length > 16 || cachedBytes > 16777216) cachedBytes -= cache.shift().result.sizeBytes;
+		while (cache.length > 16 || cachedBytes > 16777216) cachedBytes -= (cache.shift() ?? throw "No cached file").result.sizeBytes;
 	}
 }
 

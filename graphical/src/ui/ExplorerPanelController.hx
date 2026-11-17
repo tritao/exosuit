@@ -67,13 +67,8 @@ class ExplorerPanelController {
 		style.padding = new Insets(4, 4, 4, 4);
 		style.childDistribution = haxeon.ui.LayoutDistribution.Center;
 		style.childAlignY = LayoutAlignmentY.Center;
-		var button = new Button("", style, action, "explorer-action:" + label);
-		if (onEvent != null) button.onClickEvent = onEvent;
-		button.enabled = enabled;
-		button.variant = ButtonVariant.Navigation;
-		button.leadingIcon = icon;
-		button.iconSize = 16;
-		button.accessibilityLabel = label;
+		var button = new Button("", style, action, "explorer-action:" + label, enabled, ButtonVariant.Navigation, null, null,
+			icon, null, null, null, null, null, 16, label, onEvent);
 		return new TabTooltip("explorer-action-tooltip:" + label, button,
 			new Text(readOnly ? label + " (remote files are read-only)" : label),
 			function() return new Rect(0, 0, app.viewportWidth, app.viewportHeight), app.application.settings.current.tabTooltipDelay);
@@ -150,9 +145,8 @@ class ExplorerPanelController {
 	}
 	function explorerPanel():View {
 		if (app.explorerRoot == null) {
-			var open = new Button("Open", null, app.openFolderDialog, "explorer-open-folder");
-			open.variant = ButtonVariant.Secondary;
-			open.leadingIcon = IconName.FolderOpen;
+			var open = new Button("Open", null, app.openFolderDialog, "explorer-open-folder", null, ButtonVariant.Secondary, null, null,
+				IconName.FolderOpen);
 			var compact = new LayoutStyle();
 			compact.width = LayoutAxis.grow();
 			compact.padding = new Insets(4.0, 8.0, 4.0, 8.0);
@@ -189,7 +183,6 @@ class ExplorerPanelController {
 		if (remoteModel != null) remoteModel.fontSize = app.application.settings.current.explorerFontSize;
 		if (localModel != null) localModel.fontSize = app.application.settings.current.explorerFontSize;
 		if (app.explorerTree != null) {
-			if (remoteModel != null) app.remoteFileTabs.advanceWorkspaceFolderReveal(app.explorerTree, remoteModel);
 			return new ExplorerTreeView(app.explorerTree, app.explorerModel, app.darkPalette, app.hostContext == null ? null : app.hostContext.events, app.explorerRename,
 			app.host.focusExplorer, function(command) app.application.commands.perform(command, app.application.context));
 		}
@@ -211,8 +204,11 @@ class ExplorerPanelController {
 		tree.guidesOnInteraction = true;
 		tree.compactLeafIndent = true;
 		tree.expandOnSingleClick = true;
-		if (remoteModel != null)
+		if (remoteModel != null) {
 			tree.hasChildrenHint = function(key) return remoteModel.isDirectoryKey(key);
+			// After the tree's build, where expanding and selecting may write the tree's state.
+			tree.onStateReady = function(current) app.remoteFileTabs.advanceWorkspaceFolderReveal(current, remoteModel);
+		}
 		if (localModel != null) {
 			tree.onStateReady = function(current) {
 				var path = app.renamedExplorerPath;
@@ -232,7 +228,10 @@ class ExplorerPanelController {
 				return allowed;
 			};
 			tree.onCollapseAll = localModel.cancelRequestedExpansions;
-			tree.onExpandedChanged = function(path, expanded) localModel.setDirectoryExpanded(path, expanded);
+			tree.onExpandedChanged = function(path, expanded) {
+				localModel.setDirectoryExpanded(path, expanded);
+				app.requestFrame();
+			};
 		}
 		tree.onItemClicked = function(path, count) {
 			if (remoteModel != null) {
@@ -281,7 +280,6 @@ class ExplorerPanelController {
 			], event, function() return app.explorerRoot == menuRoot && app.host.focusedFilePath() == path && FileSystem.exists(path));
 		};
 		app.explorerTree = tree;
-		if (remoteModel != null) app.remoteFileTabs.advanceWorkspaceFolderReveal(tree, remoteModel);
 		return new ExplorerTreeView(tree, app.explorerModel, app.darkPalette, app.hostContext == null ? null : app.hostContext.events, app.explorerRename,
 			app.host.focusExplorer, function(command) app.application.commands.perform(command, app.application.context));
 	}

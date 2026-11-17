@@ -1,5 +1,7 @@
 package ui;
 
+import haxeon.reactive.ReactiveRuntime;
+import haxeon.reactive.Signal;
 import haxeon.ui.LayoutAlignmentY;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
@@ -53,7 +55,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		value = Math.max(6.0, Math.min(96.0, value));
 		if (fontSize != value) {
 			fontSize = value;
-			revisionValue++;
+			noteChangeBeforeReads();
 		}
 		return fontSize;
 	}
@@ -75,6 +77,11 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	var generation:Int = 0;
 	var disposed:Bool = false;
 	var revisionValue:Int = 0;
+	/**
+		What TreeView sees of `revisionValue`: every TreeViewModel method reads it, so the tree re-flattens when a
+		listing, the roots or the rows' look changed. Written on the UI thread only, outside builds.
+	**/
+	final changes:Signal<Int> = new Signal(0);
 	var decorationProvider:Null<PluginResourceDecorationRegistry>;
 	var observedDecorationRevision:Int = -1;
 	var rootsRequested:Bool = false;
@@ -113,28 +120,73 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	public function rootIdentity():String return workspace + ":" + scope;
 	/** The workspace authority paired with this remote file tree. */
 	public function sourceControlSource():Null<ScmSource> return sourceControl;
-	public function rootCount():Int return 1;
-	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
+	public function rootCount():Int {
+		track();
+		return 1;
+	}
+	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata> {
+		track();
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(rootKey(), true)];
+	}
 	public function rootKeyAt(index:Int):String return index == 0 ? rootKey() : "";
-	public function initiallyExpanded(key:String):Bool return key == rootKey();
-	public function estimatedExtent():Float return 20.0;
-	public function extentIsUniform():Bool return true;
-	public function extentAt(key:String):Float return 20.0;
-	public function revision():Int {
+	public function initiallyExpanded(key:String):Bool {
+		track();
+		return key == rootKey();
+	}
+	public function estimatedExtent():Float {
+		track();
+		return 20.0;
+	}
+	public function extentIsUniform():Bool {
+		track();
+		return true;
+	}
+	public function extentAt(key:String):Float {
+		track();
+		return 20.0;
+	}
+	public function revision():Int return revisionValue;
+
+	public function prepareBuild():Void {
 		var current = decorationProvider == null ? -1 : decorationProvider.revision;
 		if (current != observedDecorationRevision) {
 			observedDecorationRevision = current;
 			revisionValue++;
 		}
-		return revisionValue;
+		changes.update(revisionValue);
+	}
+
+	function track():Void {
+		changes.value;
+	}
+
+	/**
+		A change made by a reply, a watch event, a poll or a handler: publish it to TreeView and ask for a frame. Inside
+		a build (a lazy load from `childKeyAt` whose call failed at once) neither is allowed; `childKeyAt` reads the
+		model after that call, so the running build already shows the change, and `prepareBuild` publishes it.
+	**/
+	function noteChange():Void {
+		revisionValue++;
+		if (ReactiveRuntime.isTracking()) return;
+		changes.update(revisionValue);
+		changed();
+	}
+
+	/**
+		For the setters the panel builds call before their tree reads this model (font size, decorations): the change
+		must reach the tree in the same build.
+	**/
+	function noteChangeBeforeReads():Void {
+		revisionValue++;
+		// The panel builds set these before their TreeView reads `changes`, so the write precedes every read this frame.
+		ReactiveRuntime.withoutTracking(() -> changes.update(revisionValue));
 	}
 
 	public function setResourceDecorations(provider:Null<PluginResourceDecorationRegistry>):Void {
 		if (decorationProvider == provider) return;
 		decorationProvider = provider;
 		observedDecorationRevision = provider == null ? -1 : provider.revision;
-		revisionValue++;
+		noteChangeBeforeReads();
 	}
 
 	public function refresh():Void {
@@ -158,8 +210,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			activeClient = client;
 			if (connectionResetPending || hadState) resetForConnection();
 			connectionResetPending = false;
-			revisionValue++;
-			changed();
+			noteChange();
 		}
 		if (!rootsRequested && rootError == null)
 			requestRoots();
@@ -202,6 +253,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	}
 
 	public function childCount(parentKey:String):Int {
+		track();
 		var special = specialLabels.get(parentKey);
 		if (special != null) return 0;
 		if (!isDirectory(parentKey)) return 0;
@@ -218,11 +270,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	}
 
 	public function childKeyAt(parentKey:String, index:Int):String {
+		track();
 		if (index < 0 || !isDirectory(parentKey)) return "";
 		if (!rootsLoaded && listings.get(pathForKey(parentKey)) == null) {
+			if (rootError == null) requestRoots();
+			// A call that fails at once sets rootError; this build shows it (see noteChange).
 			if (rootError != null)
 				return index == 0 ? specialKey("retry-roots", "", "Could not connect — retry") : "";
-			requestRoots();
 			return specialKey("loading-roots", "", "Loading workspace…");
 		}
 		var path = pathForKey(parentKey);
@@ -257,10 +311,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		return "";
 	}
 
-	public function buildItem(key:String):View
+	public function buildItem(key:String):View {
+		track();
 		return new Text(displayName(key), null, theme.tokens.text, TextStyleOverride.text(fontSize));
+	}
 
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View {
+		track();
 		var special = specialLabels.get(key);
 		if (special != null)
 			return new Text(special, null, theme.tokens.textSecondary, TextStyleOverride.text(fontSize));
@@ -296,7 +353,10 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		case Danger: theme.tokens.danger;
 	}
 
-	public function isDirectoryKey(key:String):Bool return isDirectory(key);
+	public function isDirectoryKey(key:String):Bool {
+		track();
+		return isDirectory(key);
+	}
 	public function isMoreKey(key:String):Bool return specialKind(key) == "more";
 	public function isRetryKey(key:String):Bool return specialKind(key) == "retry" || specialKind(key) == "retry-roots";
 	public function activateSpecial(key:String):Void {
@@ -370,15 +430,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 				rootsRequested = false;
 				rootsRetryAt = Sys.time() + 1.0;
 			}
-			revisionValue++;
-			changed();
+			noteChange();
 		}, function(error) {
 			if (!requestCurrent(client, requestGeneration)) return;
 			rootsRequested = false;
 			rootError = error == null ? "Could not read workspace roots" : error.message;
 			rootsRetryAt = Sys.time() + 1.0;
-			revisionValue++;
-			changed();
+			noteChange();
 		});
 	}
 
@@ -395,8 +453,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 					|| result.epoch == null || result.epoch.length == 0 || result.cursor < 0) {
 					client.unwatch(workspace, rootId(), watchListener);
 					watchRetryAt = Sys.time() + 1.0;
-					revisionValue++;
-					changed();
+					noteChange();
 					return;
 				}
 				var reset = result.reset || watchEpoch != result.epoch;
@@ -404,15 +461,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 				watchEpoch = result.epoch;
 				watchingChanges = true;
 				if (reset) noteFilesChanged();
-				revisionValue++;
-				changed();
+				noteChange();
 			}, function(_) {
 				if (!requestCurrent(client, requestGeneration)) return;
 				watchRequested = false;
 				client.unwatch(workspace, rootId(), watchListener);
 				watchRetryAt = Sys.time() + 1.0;
-				revisionValue++;
-				changed();
+				noteChange();
 			});
 	}
 
@@ -440,7 +495,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			listing.error = null;
 			listing.limited = false;
 		}
-		if (clearedError) { revisionValue++; changed(); }
+		if (clearedError) noteChange();
 	}
 
 	function requestCurrent(client:WorkspaceFileClient, requestGeneration:Int):Bool
@@ -495,8 +550,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			// Keep the snapshot and make retry restart an interrupted replacement.
 			listing.stale = replacing || listing.stale;
 			listing.error = message;
-			revisionValue++;
-			changed();
+			noteChange();
 		}
 		function fetch(pageCursor:Null<String>):Void {
 			if (pageCursor != null) seenCursors.set(pageCursor, true);
@@ -563,8 +617,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 				listing.loading = false;
 				listing.refreshing = false;
 				if (visibleChanged) {
-					revisionValue++;
-					changed();
+					noteChange();
 				}
 			}, function(error) {
 				if (!current() || superseded()) return;
