@@ -192,6 +192,23 @@ class TerminalServiceTests {
     step();
     step();
     require(error == "input_sequence", "Duplicate input accepted");
+    // A new view (another pane, a restarted terminal) numbers its input from 1 once control is given again.
+    deadline = clock() + 2000;
+    var given = false;
+    client.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
+      claim: true, takeover: false}, 1000, function(_) given = true, function(e) throw e.code);
+    while (!given) {
+      require(clock() < deadline, "Control was not given again");
+      step();
+    }
+    var restarted = false;
+    var again:TerminalInput = {workspace: "w", instance: "instance", id: "bounded", sequence: 1, data: haxe.io.Bytes.ofString(" ")};
+    client.call(WorkspaceTerminalProtocol.INPUT, again, 1000, function(_) restarted = true,
+      function(e) throw "Input numbered from 1 after control was given again was refused: " + e.code);
+    while (!restarted) {
+      require(clock() < deadline, "Input after control was given again timed out");
+      step();
+    }
     var advanced = false;
     deadline = clock() + 10000;
     while (!advanced) {

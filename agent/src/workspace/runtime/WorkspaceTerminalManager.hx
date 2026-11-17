@@ -695,7 +695,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       }
       t.used = Sys.time();
       var openKey = clientKey(scope, r.clientKey);
-      if (control && t.state == "running" && (controller(r.id) == null || sameClient(r.id, openKey))) setController(r.id, connection, openKey);
+      if (control && t.state == "running" && (controller(r.id) == null || controller(r.id) == connection || sameClient(r.id, openKey))) { setController(r.id, connection, openKey); inputSequence.remove(r.id); }
       var openingTheme:Null<TerminalTheme> = r.theme;
       if (openingTheme != null && controller(r.id) == connection)
         applyTheme(t, openingTheme);
@@ -777,7 +777,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       var owner = controller(r.id);
       if (r.claim) {
         var claimKey = clientKey(scope, r.clientKey);
-        if (owner == null || owner == connection || r.takeover || sameClient(r.id, claimKey)) setController(r.id, connection, claimKey);
+        if (owner == null || owner == connection || r.takeover || sameClient(r.id, claimKey)) { setController(r.id, connection, claimKey); inputSequence.remove(r.id); }
       } else if (owner == connection) {
         clearController(r.id);
       }
@@ -803,7 +803,9 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       var previous = inputSequence.get(r.id);
-      if (r.sequence !=(previous == null ? 1 : previous + 1)) {
+      // Numbering starts again whenever control is given (setController): a client numbers its input per view, and a
+      // new view, a reconnect or a restarted terminal starts its own count. After the first input, each must follow on.
+      if (previous != null && r.sequence != previous + 1) {
         c.fail(error("input_sequence"));
         return;
       }
@@ -889,7 +891,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         var kept = adoptRecord(record);
         if (kept == null) { c.fail(error("terminal_running")); return; }
         ServiceLog.note('terminal ${r.id}: Restart found its host running; the terminal was taken back instead');
-        setController(r.id, connection, null);
+        { setController(r.id, connection, null); inputSequence.remove(r.id); }
         c.respond(info(kept, connection));
         return;
       }
@@ -911,7 +913,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         applyTheme(t, restartingTheme);
         var running = copy(starting); running.state = "running"; running.revision += 1;
         save(running);
-        setController(r.id, connection, null);
+        { setController(r.id, connection, null); inputSequence.remove(r.id); }
         c.respond(info(t, connection));
       } catch (failure:Dynamic) {
         ServiceLog.note('terminal ${r.id} could not be restarted: ${Std.string(failure)}');
