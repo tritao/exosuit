@@ -2,6 +2,8 @@ package workspace.transport;
 
 import haxe.io.Bytes;
 import haxeon.wire.MessagePackFrame;
+// MessagePackFrame.payloadLength defaults a parameter from MessagePackReader; the compiler resolves that name in the importing module (HAXEON-BUG in C-handoffs.md).
+import haxeon.wire.MessagePackReader;
 
 /** Incrementally decodes routed HMPK messages without assuming socket read boundaries. */
 class RelayFrameReader {

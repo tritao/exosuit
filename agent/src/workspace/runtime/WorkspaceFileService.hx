@@ -13,6 +13,7 @@ import haxeon.platform.event.EventSubscription;
 import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitFilesystemTypes.FileSystemEntry;
+import nativekit.ffi.NativeKitFilesystemTypes.FileSystemEntryKind;
 import nativekit.ffi.NativeKitTypes;
 import nativekit.ffi.NativeKitTypes.Result;
 import haxeon.rpc.RpcConnection;
@@ -1248,9 +1249,9 @@ class WorkspaceFileService {
 
 	static function metadata(workspace:String, root:String, name:Null<String>, entry:FileSystemEntry):WorkspaceFileEntry {
 		var kind = switch entry.get_kind() {
-			case 1: "file";
-			case 2: "directory";
-			case 3: "symlink";
+			case FileSystemEntryKind.Regular: "file";
+			case FileSystemEntryKind.Directory: "directory";
+			case FileSystemEntryKind.Symlink: "symlink";
 			case _: "other";
 		};
 		return {
@@ -1269,7 +1270,7 @@ class WorkspaceFileService {
 		var revision = new StringBuf();
 		addHashField(revision, workspace);
 		addHashField(revision, root);
-		addHashField(revision, Std.string(entry.get_kind()));
+		addHashField(revision, Std.string((entry.get_kind() : Int)));
 		addHashField(revision, Int64.toStr(entry.get_size()));
 		addHashField(revision, Int64.toStr(entry.get_modified_unix_ns()));
 		addHashField(revision, Int64.toStr(entry.get_changed_unix_ns()));

@@ -44,7 +44,7 @@ class NativeKitByteStream implements RelayByteStream {
 		var result = NativeKit.nk_transport_send(handle.borrow(), bytes);
 		if (result == Result.ErrorQueueFull)
 			return false;
-		if (result != 0) {
+		if (result != Result.Ok) {
 			failure = "transport_failed";
 			close();
 			return false;
@@ -61,7 +61,7 @@ class NativeKitByteStream implements RelayByteStream {
 		var read = NativeKit.nk_transport_receive(handle.borrow(), buffer);
 		if (read.status == TransportError.WouldBlock)
 			return 0;
-		if (read.status != 0) {
+		if (read.status != Result.Ok) {
 			failure = "disconnected";
 			close();
 			return -1;
