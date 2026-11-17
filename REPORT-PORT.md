@@ -239,6 +239,12 @@ exception is G07, where the port does better.
   old geometry: scroll-past-end space, content size and hit area were out of date.
 - **Why the port exposed it.** The baseline's per-frame root rebuilds hid this. On the port the pane is a tracked
   scope, so it rebuilds rarely and the stale geometry would have stayed.
+- **Rerun on the final binaries.** On 2026-11-18, around 13:00, all 8 verify scenarios were rerun as
+  `runs/port-<id>-final-verify`. **None reported a retention difference.** G01, G03, G04, G08 and G14 pass every check.
+  G06 and G09 fail only their known scenario gaps.
+- **G02's idle-rate failures there are environmental.** G02 failed its idle-rate checks, but the baseline captured at
+  the same time (`runs/base-g02-now`) idled at 6.9 frames/s as well. The machine was in use at that point, so the
+  idle-rate checks are valid only from the quiet final pass.
 - **The fix** is `b98ce09a`. After it every verify run passes the retention check:
   - G02, G01, G03 and G04 pass all their checks.
   - G06 and G09 fail only their known scenario gaps.
