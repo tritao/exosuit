@@ -2,6 +2,7 @@ package devtools;
 
 import haxe.io.Bytes;
 import haxeon.ui.core.UiContext;
+import haxeon.ui.core.UiDirtyFlag;
 import haxeon.ui.core.WidgetId;
 import haxeon.ui.host.DesktopUiHostContext;
 import workspace.transport.NativeRpcHub;
@@ -48,9 +49,9 @@ class InspectionAgent {
 			var truncated = paintTruncated; paintTruncated = false;
 			if (ui.root != null && !metrics.reusedSubmission) ui.root.walk(function(node) {
 				if (node.styleType == "devtools-overlay") return;
-				if (node.invalidationFlags == 0) return;
+				if (node.invalidationFlags == UiDirtyFlag.None) return;
 				if (events.length >= 64) { truncated = true; return; }
-				events.push({id:node.id.value, kind:"invalidation", flags:node.invalidationFlags, type:node.styleType});
+				events.push({id:node.id.value, kind:"invalidation", flags:(node.invalidationFlags : Int), type:node.styleType});
 			});
 			frameEvents.set(lastFrame, {id:lastFrame, events:events, truncated:truncated});
 		}
