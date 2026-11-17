@@ -623,3 +623,13 @@ restored context's retained row node still carries that state from when the cont
 cleared without focusing (`haxeon/packages/ui/haxe/haxeon/ui/widgets/collections/TreeView.hx`, the row build
 callback). Fix in haxeon: treat the request as met only when `focus.focusedId` is the row's id. No workaround in
 exosuit; the scenario clicks the root's row once more before using the keyboard.
+
+## Self-hosting check: the self-hosted compile server cannot start on Windows
+
+Seen 2026-11-18 on upstream main `ff7e29aac` (+ our series, `5d2c7ab19`): `haxeon scripts/check-self-hosting.hx` passes
+the fixed point (stage 1 = stage 2) and builds all 9 entry points, then fails its "programs" step: the test driver's
+compile server exits with "A secure random token requires the Haxeon runtime". `CompilerServer.windowsSecureToken`
+(`src/compiler/tools/CompilerServer.hx`) calls the runtime's `__host_secure_random_token` only `#if (hl && !haxeon)`;
+built by haxeon itself (the self-hosted server this step tests), it throws. So the step cannot pass on Windows.
+Fix in haxeon: bind `__host_secure_random_token` for haxeon-built HashLink too (or use the platform's random source).
+Not a port problem; the gate the port relies on (fixed point and entry points) passes.
