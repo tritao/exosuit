@@ -48,6 +48,27 @@ def run_cli(
             f"The Haxeon VM is not built ({hashlink if not hashlink.is_file() else cli} is missing); "
             "run scripts/build-windows.ps1"
         )
+    # As scripts/haxeon does on POSIX, bring the CLI's bytecode up to date with its sources first (the inputs its CMake rule names).
+    built = cli.stat().st_mtime_ns
+    inputs = [
+        haxeon_root / "common.hxml",
+        haxeon_root / ".tools" / "haxe" / "haxe.exe",
+        *(haxeon_root / "src").rglob("*.hx"),
+        *(haxeon_root / "lib").rglob("*.hx"),
+    ]
+    if any(source.is_file() and source.stat().st_mtime_ns > built for source in inputs):
+        build = subprocess.run(
+            ["cmake", "--build", "--preset", "windows-msvc", "--target", "haxeon-command"],
+            cwd=haxeon_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        if build.returncode != 0:
+            raise RuntimeError(
+                f"{build.stdout}Rebuilding the Haxeon CLI ({cli}) failed; run scripts/build-windows.ps1"
+            )
     environment["PATH"] = ";".join(
         [str(hashlink.parent), str(haxeon_root / "out"), environment.get("PATH", "")]
     )
