@@ -1,6 +1,6 @@
 package app;
 
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import workspace.client.WorkspaceWorkbenchClient;
 
 /**

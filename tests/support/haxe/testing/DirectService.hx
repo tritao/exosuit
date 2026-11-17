@@ -7,10 +7,10 @@ import workspace.client.OpenedService;
 import workspace.client.WorkspaceServiceTarget;
 
 /**
-	A workspace service for a test program without suit: `open` starts the agent bytecode `launcher` the way suit does
+	A workspace service for a test program without exohost: `open` starts the agent bytecode `launcher` the way exohost does
 	(`--workspace ID --folder F...`, detached) and answers with the pipe and generation its `service.log` names. A
 	service already running for the workspace (the start exits 3, the lock is held) is answered from the same log.
-	The state is under EXOSUIT_AGENT_STATE_HOME and suit's home is EXOSUIT_SUIT_HOME, both of which the test's driver sets.
+	The state is under EXOSUIT_AGENT_STATE_HOME and exohost's home is EXOSUIT_EXOHOST_HOME, both of which the test's driver sets.
 **/
 class DirectService {
 	static inline final IN_USE = 3;
@@ -19,10 +19,10 @@ class DirectService {
 	public final launcher:String;
 	final targets:Map<String, WorkspaceServiceTarget> = [];
 
-	/** Refuses to run without EXOSUIT_AGENT_STATE_HOME and EXOSUIT_SUIT_HOME: without them a service would keep its state in
-		the user's own folder (%LOCALAPPDATA%\Exosuit, ~/.local/state/exosuit) and report to the user's suit. **/
+	/** Refuses to run without EXOSUIT_AGENT_STATE_HOME and EXOSUIT_EXOHOST_HOME: without them a service would keep its state in
+		the user's own folder (%LOCALAPPDATA%\Exosuit, ~/.local/state/exosuit) and report to the user's exohost. **/
 	public function new(launcher:String) {
-		for (name in ["EXOSUIT_AGENT_STATE_HOME", "EXOSUIT_SUIT_HOME"]) {
+		for (name in ["EXOSUIT_AGENT_STATE_HOME", "EXOSUIT_EXOHOST_HOME"]) {
 			var value = Sys.getEnv(name);
 			if (value == null || value.length == 0) throw name + " is not set: a test service needs state of its own (scripts/test_driver.py)";
 		}
@@ -45,7 +45,7 @@ class DirectService {
 
 	/** The state folder of workspace `id`, as the agent's AgentState names it. */
 	public static function stateOf(id:String):String
-		return Path.join([suit.MachineCatalog.agentStateBase(), "workspaces", id]);
+		return Path.join([exohost.MachineCatalog.agentStateBase(), "workspaces", id]);
 
 	/** A ServiceOpener. It blocks while the service starts: test programs have nothing else to do meanwhile. */
 	public function open(id:String, done:(Null<OpenedService>, Null<String>) -> Void):Void {
@@ -54,7 +54,7 @@ class DirectService {
 		var log = Path.join([stateOf(id), "service.log"]);
 		var before = FileSystem.exists(log) ? File.getContent(log).length : 0;
 		var child = sys.io.Process.spawn(Sys.executablePath(), [launcher].concat(target.serviceArguments()), target.root(),
-			[suit.SuitClient.libraryVariable()], [suit.SuitClient.nativePath(launcher)], true);
+			[exohost.ExohostClient.libraryVariable()], [exohost.ExohostClient.nativePath(launcher)], true);
 		var deadline = Sys.time() + START_SECONDS;
 		while (Sys.time() < deadline) {
 			// Negative while it runs (ChildProcess.pollExit).

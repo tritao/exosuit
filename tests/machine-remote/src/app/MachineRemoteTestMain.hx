@@ -59,10 +59,10 @@ private class Link {
 
 /**
 	Headless integration test for machine-level remote access (M19 Phase 9). scripts/test-machine-remote.py starts a
-	local relay Worker and an isolated suit, then runs this program. It is the owner's editor (suit control ops through
+	local relay Worker and an isolated exohost, then runs this program. It is the owner's editor (exohost control ops through
 	MachineClient) and a fake phone (Noise over the relay):
 
-	  two workspaces under one suit; the device pairs once, is granted workspace A only, sees A (not B) in the
+	  two workspaces under one exohost; the device pairs once, is granted workspace A only, sees A (not B) in the
 	  directory, opens A and reads its catalog; granting B makes B appear and openable; dropping B closes its stream;
 	  the device reconnects with its saved credentials; revoking it closes the channel and refuses a new one.
 **/
@@ -108,7 +108,7 @@ class MachineRemoteTestMain {
 		Sys.println("ok: " + what);
 	}
 
-	/** Runs a control op against suit and waits for its reply: `{reply, error}`. */
+	/** Runs a control op against exohost and waits for its reply: `{reply, error}`. */
 	static function ctl(what:String, start:((Null<Dynamic>, Null<String>) -> Void) -> Void):Dynamic {
 		var done = false, reply:Null<Dynamic> = null, error:Null<String> = null;
 		start(function(value, problem) {
@@ -197,7 +197,7 @@ class MachineRemoteTestMain {
 			throw "--origin, --folder-a and --folder-b are required";
 		runtime = Runtime.start();
 		hub = new NativeRpcHub(runtime.events);
-		machine = new MachineClient(suit.SuitLink.start(runtime.events));
+		machine = new MachineClient(exohost.ExohostLink.start(runtime.events));
 		var code = 0;
 		try
 			run(origin, folderA, folderB)
@@ -205,7 +205,7 @@ class MachineRemoteTestMain {
 			Sys.stderr().writeString("machine remote test failed: " + Std.string(error) + "\n");
 			code = 1;
 		}
-		suit.SuitLink.instance.dispose();
+		exohost.ExohostLink.instance.dispose();
 		hub.dispose();
 		runtime.dispose();
 		if (code == 0)
@@ -306,7 +306,7 @@ class MachineRemoteTestMain {
 		check(true, "the pairing code matches on both sides (" + shown + ")");
 		var before = ctlOk("devices", function(done) machine.remoteDevices(done));
 		var choices:Array<Dynamic> = before.workspaces;
-		check(choices.length == 2, "suit lists both workspaces for the owner to pick from");
+		check(choices.length == 2, "exohost lists both workspaces for the owner to pick from");
 
 		// Approval grants only workspace A. The device reads the approval and confirms it.
 		var approval:Null<Dynamic> = null;

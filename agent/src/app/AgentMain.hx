@@ -13,9 +13,9 @@ import workspace.service.WorkspaceLifetime;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.ServiceLog;
 import workspace.runtime.WorkspaceTerminalManager;
-import suit.SuitServiceLink;
+import exohost.ExohostServiceLink;
 
-/** The workspace a service serves: its id in suit's machine catalog and its folders, as suit passed them. */
+/** The workspace a service serves: its id in exohost's machine catalog and its folders, as exohost passed them. */
 typedef ServiceTarget = {
 	var workspace:String;
 	var folders:Array<String>;
@@ -37,14 +37,14 @@ typedef ProviderPrograms = {
 }
 
 /**
-	A workspace's service: one process per running workspace, which suit starts
+	A workspace's service: one process per running workspace, which exohost starts
 	(`exosuit-agent.hl --workspace ID [--folder F]... [--scratch S]`). It takes its state folder's lock, listens on its
-	pipe and then reports to suit (SuitServiceLink): that report is how suit learns it is ready and which pipe to hand
-	out, and its connection closing is how suit learns that it stopped. It stops by itself after
-	`EXOSUIT_SERVICE_IDLE_SECONDS` (600 by default) with no client and no busy agent turn, or when suit asks.
+	pipe and then reports to exohost (ExohostServiceLink): that report is how exohost learns it is ready and which pipe to hand
+	out, and its connection closing is how exohost learns that it stopped. It stops by itself after
+	`EXOSUIT_SERVICE_IDLE_SECONDS` (600 by default) with no client and no busy agent turn, or when exohost asks.
 
-	`exosuit-agent.hl --spare` is the warm spare suit keeps while an editor is linked: loaded and linked to suit, it
-	serves the workspace suit hands it (`adopt`) the moment one is opened, so an idle workspace opens without a process
+	`exosuit-agent.hl --spare` is the warm spare exohost keeps while an editor is linked: loaded and linked to exohost, it
+	serves the workspace exohost hands it (`adopt`) the moment one is opened, so an idle workspace opens without a process
 	start.
 **/
 class AgentMain {
@@ -64,7 +64,7 @@ class AgentMain {
 				return;
 			}
 		var runtime = Runtime.start(), hub = new NativeRpcHub(runtime.events);
-		var report = new SuitServiceLink(hub);
+		var report = new ExohostServiceLink(hub);
 		var code = 0;
 		var programs:Null<ProviderPrograms> = null;
 		if (spare)
@@ -120,14 +120,14 @@ class AgentMain {
 	}
 
 	/**
-		The spare's wait: linked to suit, it idles until suit hands it a workspace (whose target it returns), asks it to
+		The spare's wait: linked to exohost, it idles until exohost hands it a workspace (whose target it returns), asks it to
 		stop, or goes (null either way). It then runs in the first folder, as a started service does.
 	**/
-	static function awaitAdoption(runtime:Runtime, report:SuitServiceLink):Null<ServiceTarget> {
+	static function awaitAdoption(runtime:Runtime, report:ExohostServiceLink):Null<ServiceTarget> {
 		report.offerSpare();
-		// Listed as the spare (suit lists registered processes even when it does not scan); the record becomes the
+		// Listed as the spare (exohost lists registered processes even when it does not scan); the record becomes the
 		// service's once a workspace adopts it.
-		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceSpare, {root: Sys.getCwd(), stateDir: "", generation: null, workspace: null});
+		exohost.ExohostClient.registerWorkspaceService(exohost.ExohostKind.WorkspaceSpare, {root: Sys.getCwd(), stateDir: "", generation: null, workspace: null});
 		while (true) {
 			runtime.events.wait(1.0);
 			for (_ in 0...128)
@@ -144,7 +144,7 @@ class AgentMain {
 				return target;
 			}
 			if (report.abandoned || report.stopRequest != null) {
-				suit.SuitClient.unregister();
+				exohost.ExohostClient.unregister();
 				return null;
 			}
 		}
@@ -190,8 +190,8 @@ class AgentMain {
 		return Std.int((Math.isNaN(configured) || configured < 1 ? IDLE_SECONDS : configured) * 1000);
 	}
 
-	/** Serves `target` until it is idle or suit asks it to stop; the exit status. */
-	static function serve(target:ServiceTarget, programs:Null<ProviderPrograms>, runtime:Runtime, hub:NativeRpcHub, report:SuitServiceLink):Int {
+	/** Serves `target` until it is idle or exohost asks it to stop; the exit status. */
+	static function serve(target:ServiceTarget, programs:Null<ProviderPrograms>, runtime:Runtime, hub:NativeRpcHub, report:ExohostServiceLink):Int {
 		var stateDirectory = AgentState.directoryOf(target.workspace);
 		AgentState.prepare(stateDirectory);
 		ServiceLog.open(Path.join([stateDirectory, "service.log"]));
@@ -210,7 +210,7 @@ class AgentMain {
 	}
 
 	static function serveLocked(target:ServiceTarget, programs:Null<ProviderPrograms>, stateDirectory:String, runtime:Runtime, hub:NativeRpcHub,
-			report:SuitServiceLink):Int {
+			report:ExohostServiceLink):Int {
 		var workspaceId = target.workspace;
 		var identity = AgentState.claim(stateDirectory, workspaceId, target.folders, target.scratch);
 		var root = identity.primaryRoot();
@@ -224,7 +224,7 @@ class AgentMain {
 			stableLease = Path.join([stableBundle, ".running-daemon-" + Sys.getPid()]);
 			AtomicFile.create(stableLease, Std.string(Sys.getPid()) + "\n");
 		}
-		// Listen, open the catalog and report before the rest starts: suit answers the editor that waits on this start,
+		// Listen, open the catalog and report before the rest starts: exohost answers the editor that waits on this start,
 		// and its connection (and Hello) waits in the pipe while the terminals and agents come up. The server takes the
 		// connections that came meanwhile once it exists.
 		var socket = AgentState.endpointOf(workspaceId, stateDirectory);
@@ -234,17 +234,17 @@ class AgentMain {
 		var accept:NativeRpcTransport->Void = function(transport) early.push(transport);
 		hub.listen(NativeRpcHub.local(socket), function(transport) accept(transport));
 		var directories = new workspace.runtime.WorkspaceDirectories(root);
-		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
+		exohost.ExohostClient.registerWorkspaceService(exohost.ExohostKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
 			generation: instance, workspace: workspaceId});
 		// The catalog opens before the report (about 3 ms): a catalog that cannot be opened (damaged, or of a newer build)
-		// ends the service before suit hands its pipe out, so suit answers the open with the reason service.log names.
+		// ends the service before exohost hands its pipe out, so exohost answers the open with the reason service.log names.
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it. A new catalog has no groups:
 		// the workspace itself holds sessions and terminals until groups are made.
 		var database = Path.join([stateDirectory, "catalog.sqlite"]);
 		var seedEpoch = AgentNative.randomToken().substr(0, 32);
 		var seed = new WorkspaceService("workspace", seedEpoch, []);
 		var store = new WorkspaceSqliteStore(database, "workspace", seed.snapshot(), AgentStateIdentity.catalogOwner(workspaceId));
-		// Listening: suit hands this pipe out from now on, and lists the service until this connection closes.
+		// Listening: exohost hands this pipe out from now on, and lists the service until this connection closes.
 		report.serve(workspaceId, socket, instance, directories.root);
 		var lifetime = new WorkspaceLifetime(idleMilliseconds());
 		var processes = new process.ProcessManager();
@@ -319,10 +319,10 @@ class AgentMain {
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();
-			// suit asked: at once, or (a restart onto another build) once no agent turn runs.
+			// exohost asked: at once, or (a restart onto another build) once no agent turn runs.
 			var asked = report.stopRequest;
 			if (asked == "now" || asked == "turn" && agents.activeCount() == 0) {
-				reason = asked == "now" ? "suit asked it to stop" : "suit restarts it on another build";
+				reason = asked == "now" ? "exohost asked it to stop" : "exohost restarts it on another build";
 				break;
 			}
 			if (AgentNative.stopRequested()) {
@@ -335,7 +335,7 @@ class AgentMain {
 		}
 		catalogSnapshot.write();
 		ServiceLog.note("service stopped: " + reason + ", " + terminals.activeCount() + " terminal(s) kept running by their hosts");
-		suit.SuitClient.unregister();
+		exohost.ExohostClient.unregister();
 		agents.dispose();
 		processes.shutdown();
 		terminals.dispose();

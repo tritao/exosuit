@@ -1,14 +1,14 @@
-"""Drives a real editor window over suit's control plane and checks what the app says afterwards.
+"""Drives a real editor window over exohost's control plane and checks what the app says afterwards.
 
-Everything goes through suit's pipe (docs/design/suitctl/TDD-exosuit-ctl.md §8.4): `exosuit.ui.snapshot` gives every
+Everything goes through exohost's pipe (docs/design/exohostctl/TDD-exosuit-ctl.md §8.4): `exosuit.ui.snapshot` gives every
 labelled element with its bounds and the app's state (context, workspaces, groups, tabs, the persisted session lines,
 ...); clicks, keys and text are `exosuit.ui.*` calls the window turns into synthetic events in its own input queue;
 dialogs wait for `exosuit.dialog.answer`. The real mouse and keyboard are never touched, and the window need not be in
 front. Nothing here uses a fixed pixel.
 
 A scenario is a Python file with `def run(gui)`; see gui_scenarios/. Run it through measure.ps1 -Drive, which launches
-the editor with isolated state and an isolated suit, and a deadline. Directly, with EXOSUIT_SUIT_HOME set to the
-editor's suit home:
+the editor with isolated state and an isolated exohost, and a deadline. Directly, with EXOSUIT_EXOHOST_HOME set to the
+editor's exohost home:
 
     python -I gui_scenarios/<name>.py --pid HLPID --out RESULT_DIR [--wait-window S]
 
@@ -56,13 +56,13 @@ class ControlError(Failure):
         super().__init__("%s: %s" % (self.code, error.get("message", "")))
 
 
-class Suit:
-    """suit's main pipe: one connection per call, HMPK frames carrying JSON (src/suit/SuitControl.hx does the same)."""
+class Exohost:
+    """exohost's main pipe: one connection per call, HMPK frames carrying JSON (src/exohost/ExohostControl.hx does the same)."""
 
     def __init__(self, home=None):
-        self.home = home or os.environ.get("EXOSUIT_SUIT_HOME")
+        self.home = home or os.environ.get("EXOSUIT_EXOHOST_HOME")
         if not self.home:
-            raise Failure("EXOSUIT_SUIT_HOME is not set: the driver talks to the editor's own, isolated suit")
+            raise Failure("EXOSUIT_EXOHOST_HOME is not set: the driver talks to the editor's own, isolated exohost")
 
     def endpoint(self, timeout=30.0):
         end = time.monotonic() + timeout
@@ -72,7 +72,7 @@ class Suit:
                     return json.load(f)["endpoint"]
             except (OSError, ValueError, KeyError):
                 if time.monotonic() > end:
-                    raise Failure("suit is not running in " + self.home)
+                    raise Failure("exohost is not running in " + self.home)
                 time.sleep(0.2)
 
     def request(self, message, timeout=15.0):
@@ -84,7 +84,7 @@ class Suit:
                 break
             except OSError:  # every instance of the pipe is busy for a moment
                 if time.monotonic() > end:
-                    raise Failure("cannot connect to suit")
+                    raise Failure("cannot connect to exohost")
                 time.sleep(0.05)
         with pipe:
             pipe.write(b"HMPK\x01\x00" + len(data).to_bytes(4, "big") + data)
@@ -98,12 +98,12 @@ class Suit:
                         return json.loads(buffer[10:10 + length])
                 count = wt.DWORD(0)
                 if not kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(count), None):
-                    raise Failure("suit closed the connection")
+                    raise Failure("exohost closed the connection")
                 if count.value:
                     buffer += pipe.read(count.value)
                     continue
                 if time.monotonic() > end:
-                    raise Failure("suit did not answer %s in %.0f s" % (message.get("method", message.get("op")), timeout))
+                    raise Failure("exohost did not answer %s in %.0f s" % (message.get("method", message.get("op")), timeout))
                 time.sleep(0.005)
 
     def control(self, method, params=None, target=None, timeout=15.0):
@@ -128,21 +128,21 @@ class Gui:
         self.deadline = self.started + deadline_seconds
         self.results = []
         self.shots = 0
-        self.suit = Suit()
+        self.exohost = Exohost()
         self.instance = self._wait_instance(time.monotonic() + wait_window)
         self.hwnd = None
 
-    # ---- the window over suit -------------------------------------------------------------------------------------
+    # ---- the window over exohost -------------------------------------------------------------------------------------
     def _wait_instance(self, deadline):
         while True:
             try:
-                found = self.suit.instance_of(self.pid)
+                found = self.exohost.instance_of(self.pid)
                 if found:
                     return found
             except Failure:
                 pass
             if time.monotonic() > deadline:
-                raise Failure("the editor (pid %d) did not link to suit" % self.pid)
+                raise Failure("the editor (pid %d) did not link to exohost" % self.pid)
             time.sleep(0.3)
 
     def call(self, method, params=None, timeout=15.0):
@@ -150,7 +150,7 @@ class Gui:
         while True:
             self._check_deadline()
             try:
-                return self.suit.control(method, params, {"instance_id": self.instance}, timeout)
+                return self.exohost.control(method, params, {"instance_id": self.instance}, timeout)
             except ControlError as error:
                 if not error.retryable or error.code != "busy":
                     raise

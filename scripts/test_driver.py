@@ -11,9 +11,9 @@ Windows, where the agent uses EXOSUIT_AGENT_STATE_HOME or %LOCALAPPDATA%\\Exosui
 Claude Code and Codex read and write their configuration folders (CLAUDE_CONFIG_DIR, CODEX_HOME), else the user's
 ~/.claude and ~/.codex: `isolated_environment` points them under `state` too (`agent_homes`).
 
-Services: `start_service` runs a workspace service as suit does (`--workspace ID --folder ROOT`) and waits until its
-service.log says it is ready. A service stops when idle (EXOSUIT_SERVICE_IDLE_SECONDS) or when suit asks over its link;
-without suit, `stop_services` stops what is left (SIGTERM first on POSIX, a kill on Windows)."""
+Services: `start_service` runs a workspace service as exohost does (`--workspace ID --folder ROOT`) and waits until its
+service.log says it is ready. A service stops when idle (EXOSUIT_SERVICE_IDLE_SECONDS) or when exohost asks over its link;
+without exohost, `stop_services` stops what is left (SIGTERM first on POSIX, a kill on Windows)."""
 from __future__ import annotations
 
 import atexit
@@ -68,27 +68,27 @@ def launcher_path(root: Path) -> Path:
     return runtime_paths(root)[1]
 
 
-_SUIT_HOME: str | None = None
+_EXOHOST_HOME: str | None = None
 
 
-def isolated_suit(environment: dict[str, str] | None = None) -> dict[str, str]:
-    """EXOSUIT_SUIT_HOME and EXOSUIT_SUIT_AUTOSTART for a test: a suit home of the run's own, which is never started.
-    An inherited EXOSUIT_SUIT_HOME may be the user's, so it is never used; the test runners name the run's home with
-    EXOSUIT_TEST_HOME (its `suit` folder), else a temporary one is made and removed when the driver exits."""
-    global _SUIT_HOME
+def isolated_exohost(environment: dict[str, str] | None = None) -> dict[str, str]:
+    """EXOSUIT_EXOHOST_HOME and EXOSUIT_EXOHOST_AUTOSTART for a test: an exohost home of the run's own, which is never started.
+    An inherited EXOSUIT_EXOHOST_HOME may be the user's, so it is never used; the test runners name the run's home with
+    EXOSUIT_TEST_HOME (its `exohost` folder), else a temporary one is made and removed when the driver exits."""
+    global _EXOHOST_HOME
     environment = os.environ if environment is None else environment
     if environment.get("EXOSUIT_TEST_HOME"):
-        return {"EXOSUIT_SUIT_HOME": str(Path(environment["EXOSUIT_TEST_HOME"]) / "suit"), "EXOSUIT_SUIT_AUTOSTART": "0"}
-    if _SUIT_HOME is None:
-        temporary = tempfile.mkdtemp(prefix="exosuit-test-suit-")
+        return {"EXOSUIT_EXOHOST_HOME": str(Path(environment["EXOSUIT_TEST_HOME"]) / "exohost"), "EXOSUIT_EXOHOST_AUTOSTART": "0"}
+    if _EXOHOST_HOME is None:
+        temporary = tempfile.mkdtemp(prefix="exosuit-test-exohost-")
         atexit.register(shutil.rmtree, temporary, True)
-        _SUIT_HOME = str(Path(temporary) / "suit")
-    return {"EXOSUIT_SUIT_HOME": _SUIT_HOME, "EXOSUIT_SUIT_AUTOSTART": "0"}
+        _EXOHOST_HOME = str(Path(temporary) / "exohost")
+    return {"EXOSUIT_EXOHOST_HOME": _EXOHOST_HOME, "EXOSUIT_EXOHOST_AUTOSTART": "0"}
 
 
 def service_environment(root: Path, launcher: Path | None = None) -> dict[str, str]:
     """The environment of a workspace service (and of a test program that starts one): the runtime's and the agent's
-    native libraries on the library path, and a suit home of the test's own that is never started."""
+    native libraries on the library path, and an exohost home of the test's own that is never started."""
     runtime, bytecode = runtime_paths(root)
     environment = os.environ.copy()
     agent_root = (launcher or bytecode).parent
@@ -100,8 +100,8 @@ def service_environment(root: Path, launcher: Path | None = None) -> dict[str, s
     libraries = [str(path.resolve()) for path in libraries if path.is_dir()]
     inherited = environment.get(LIBRARY_VARIABLE, "")
     environment[LIBRARY_VARIABLE] = os.pathsep.join(libraries + ([inherited] if inherited else []))
-    # Test services talk only to a suit in a home of their own and do not start it (see suit/README.md).
-    environment.update(isolated_suit(environment))
+    # Test services talk only to an exohost in a home of their own and do not start it (see exohost/README.md).
+    environment.update(isolated_exohost(environment))
     return environment
 
 
@@ -198,8 +198,8 @@ def assert_private(path: Path) -> None:
 
 def isolated_environment(state: Path, launcher: Path | None = None, test: str | None = None) -> dict[str, str]:
     """The environment of a service and of a test program that starts services, with all state under `state` and the
-    native packages of the agent (and of tests/<test>) loadable. Services reach only a suit home of their own and do not
-    start suit."""
+    native packages of the agent (and of tests/<test>) loadable. Services reach only an exohost home of their own and do not
+    start exohost."""
     environment = service_environment(ROOT, launcher)
     environment.update(
         XDG_STATE_HOME=str(state),
@@ -285,7 +285,7 @@ IN_USE = 3
 
 def start_service(environment: dict[str, str], state: Path, root: Path, idle_seconds: float | None = None,
                   timeout: float = 90, workspace: str | None = None, **options) -> Service:
-    """Starts the service of the test workspace of `root` (as suit does) and returns it once ready. `idle_seconds` sets
+    """Starts the service of the test workspace of `root` (as exohost does) and returns it once ready. `idle_seconds` sets
     its idle limit (EXOSUIT_SERVICE_IDLE_SECONDS). When one already runs (exit 3: it holds the lock) that one is returned."""
     workspace = workspace or workspace_id(root)
     log = service_log(state, workspace)

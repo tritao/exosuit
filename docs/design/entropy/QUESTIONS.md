@@ -23,24 +23,24 @@ do not want it on the phone, A is the larger clean-up and I would take it.
 ## E2. Remote access from a web browser
 
 A phone can reach your workspaces in two ways: the Android app, and a web page in a browser. They use different
-machinery. The app goes through suit. The web page makes each workspace service connect out by itself, which is the
+machinery. The app goes through exohost. The web page makes each workspace service connect out by itself, which is the
 older design. Keeping the web page means keeping that older design alive, or rebuilding the page on the new one.
 
 - ➡️ A. Drop the browser client. The Android app is the remote client. Removes about 2,400 lines of product code,
   about 1,200 more of the older hosting design, and about 950 lines of tests.
-- B. Keep it and rebuild it on suit, like the app. About 500 lines of new work; the older design still goes.
+- B. Keep it and rebuild it on exohost, like the app. About 500 lines of new work; the older design still goes.
 - C. Keep both designs.
 
 ## E3. Workspace files (`.exosuit-workspace`) and "Recent workspaces"
 
-There are two things called a workspace. One is the list suit keeps, which the Workbench shows. The other is a file
+There are two things called a workspace. One is the list exohost keeps, which the Workbench shows. The other is a file
 you save with "Save Workspace As…" and reopen from the welcome page. The file kind predates the Workbench. With both,
 a window can be in four different states, and several menus exist twice.
 
 - ➡️ A. Remove the file kind: the save and open commands, the welcome-page buttons and the recent list. A workspace is
   what the Workbench lists. `exosuit <folder>` still opens a folder: it becomes a workspace named after the folder.
   Removes about 400 lines.
-- B. Keep the files as a way to export and import a workspace from suit's list. About 150 lines stay.
+- B. Keep the files as a way to export and import a workspace from exohost's list. About 150 lines stay.
 - C. Keep both kinds.
 
 ## E4. When a workspace service is from a different build than the editor
@@ -51,7 +51,7 @@ Today a service can keep running across editor builds. To support that there is 
 
 Once terminals always live in their own host programs (Step 1), restarting a service loses nothing you can see.
 
-- ➡️ A. Remove all of it. When an editor opens a workspace whose service is from another build, suit restarts that
+- ➡️ A. Remove all of it. When an editor opens a workspace whose service is from another build, exohost restarts that
   service at once, unless an agent turn is running in it; then it restarts when the turn ends. Terminals carry on.
 - B. Keep the "another build" notice and a manual Restart button. Remove the per-workspace build choice.
 - C. Leave it as it is.
@@ -85,7 +85,7 @@ of tests, and 1,726 lines in haxeon packages.
 them, and five have no caller at all. They cover editor decorations, the workspace UI, the language server in the UI
 and the terminal cursor: about 5,500 lines of tests plus the scripts.
 
-- ➡️ A. Delete them. After Step 9 the editor can be driven through suit on any system, so the checks worth keeping are
+- ➡️ A. Delete them. After Step 9 the editor can be driven through exohost on any system, so the checks worth keeping are
   rewritten once in that form and run on Windows too. Linux keeps building and keeps the non-window tests.
 - B. Keep them until Step 9 is done, then port all of them.
 - C. Keep them; Linux window tests are a goal of their own.
@@ -105,9 +105,9 @@ Why not C: it starts many agent programs at login for sessions you may not look 
 ## Owner answers, round 1 (2026-11-15)
 
 - **E1: keep the chat view, made lazy (B).** The owner wants the first-class chat UI fleshed out later for Claude and Pi as well as Codex, and will use it more once Exosuit is stable and fast. So it costs nothing until a chat session opens, and the three near-copies per provider merge into one base. Nothing is removed.
-- **E2: B.** Exosuit in the browser stays and is rebuilt on suit. The Android app is a different kind of remote client. The service's own outbound hosting still goes.
+- **E2: B.** Exosuit in the browser stays and is rebuilt on exohost. The Android app is a different kind of remote client. The service's own outbound hosting still goes.
 - **E3: A.** Workspace files and the Recent workspaces list are removed.
-- **E4: A.** suit restarts a service from another build at once (after a running agent turn), and terminals carry on. The notice, the update offer and the Machine panel go.
+- **E4: A.** exohost restarts a service from another build at once (after a running agent turn), and terminals carry on. The notice, the update offer and the Machine panel go.
 - **E5: A.** Pre-10-31 state readers and the conversion are removed.
 - **E6: A.** AgentKit is removed from Exosuit. The haxeon-agentkit packages stay in haxeon for its own pass. Its removal and E5's are pure deletions, so both move into step 0.
 - **E7: A.**

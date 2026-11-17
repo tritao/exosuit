@@ -5,7 +5,7 @@ import haxeon.ui.core.View;
 import haxeon.ui.widgets.collections.TreeViewModel;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
 import haxeon.ui.widgets.text.Text;
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import workspace.service.WorkspaceProtocol;
 import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 import ui.WorkbenchRows.WorkbenchRowSource;
@@ -14,7 +14,7 @@ import ui.WorkbenchRows.WorkbenchRowSource;
 	Projection only: grouping/status belong to the service, expansion/selection to TreeView.
 
 	The tree is one tree (docs/architecture/0006-workspaces-without-folders.md): the machine's workspaces, status lines
-	and, where the window may make workspaces, New Workspace…. The machine is this one's suit on the desktop and a paired
+	and, where the window may make workspaces, New Workspace…. The machine is this one's exohost on the desktop and a paired
 	machine's directory on a device (WorkbenchMachine). Every workspace's groups, sessions and terminals nest under its
 	row by one rule (WorkbenchRows), keyed by workspace and item: the open workspace's always, another's while its row is
 	expanded, from its link's lists or a copy of its catalog. An expanded workspace with nothing to show says so in a
@@ -340,12 +340,12 @@ class WorkbenchTreeModel implements TreeViewModel {
 
 	/**
 		Whether another editor window (not this one) has the workspace focused, or its group `group` when given
-		(M19 Phase 8). Suit lists every window's focus; this window's own is left out of the view.
+		(M19 Phase 8). Exohost lists every window's focus; this window's own is left out of the view.
 	**/
 	public function anotherWindow(workspaceId:Null<String>, ?group:String):Bool {
 		var view = machine;
 		if (view == null || view.windows == null || workspaceId == null) return false;
-		return suit.WindowFocus.WindowFocuses.elsewhere(view.windows, null, workspaceId, group).length > 0;
+		return exohost.WindowFocus.WindowFocuses.elsewhere(view.windows, null, workspaceId, group).length > 0;
 	}
 
 	function machineItem(key:String):View {

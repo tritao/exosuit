@@ -478,7 +478,7 @@ class RpcCompatibilityTests {
 		}
 		require(full && page.terminals.length > 0 && page.removedTerminals.length > 0, "Worst-case catalog page did not hold every kind");
 		require(WorkspaceCatalogProtocol.fits(page) && envelope(page) <= relayBound, "Worst-case catalog page exceeds the relay message bound");
-		// suit's sixteen folders at the path bound do not fit one page; a reset splits them.
+		// exohost's sixteen folders at the path bound do not fit one page; a reset splits them.
 		var folders = header();
 		folders.folders = [for (_ in 0...16) wideFolder];
 		require(!WorkspaceCatalogProtocol.fits(folders), "Sixteen maximum folders unexpectedly fit one catalog page");

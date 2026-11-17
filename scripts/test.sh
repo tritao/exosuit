@@ -8,8 +8,8 @@
 # On Windows run scripts/test-windows.ps1 instead: the suites and drivers that run there, each behind the dialog guard
 # with state of its own (-List says what it leaves out and why).
 set -euo pipefail
-# Everything the tests start keeps its state in a home of the run's own, removed at the end: never the user's suit
-# (which is not started either, see suit/README.md), editor or agent state, ~/.claude or ~/.codex. Variables inherited
+# Everything the tests start keeps its state in a home of the run's own, removed at the end: never the user's exohost
+# (which is not started either, see exohost/README.md), editor or agent state, ~/.claude or ~/.codex. Variables inherited
 # from the user's session are replaced, not reused. EXOSUIT_TEST_HOME names a folder to use instead (kept).
 test_home=${EXOSUIT_TEST_HOME:-}
 remove_test_home=0
@@ -17,8 +17,8 @@ if [[ -z $test_home ]]; then
 	test_home=$(mktemp -d)
 	remove_test_home=1
 fi
-export EXOSUIT_SUIT_HOME="$test_home/suit" EXOSUIT_SUIT_AUTOSTART=0 PRAGTICAL_PORTABLE="$test_home/portable" 	EXOSUIT_AGENT_STATE_HOME="$test_home/agent-state" CLAUDE_CONFIG_DIR="$test_home/claude-config" CODEX_HOME="$test_home/codex-home"
-mkdir -p "$EXOSUIT_SUIT_HOME" "$PRAGTICAL_PORTABLE" "$EXOSUIT_AGENT_STATE_HOME" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"
+export EXOSUIT_EXOHOST_HOME="$test_home/exohost" EXOSUIT_EXOHOST_AUTOSTART=0 PRAGTICAL_PORTABLE="$test_home/portable" 	EXOSUIT_AGENT_STATE_HOME="$test_home/agent-state" CLAUDE_CONFIG_DIR="$test_home/claude-config" CODEX_HOME="$test_home/codex-home"
+mkdir -p "$EXOSUIT_EXOHOST_HOME" "$PRAGTICAL_PORTABLE" "$EXOSUIT_AGENT_STATE_HOME" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"
 # Headless UI tests check, on every frame that did work, that the retained tree equals a fresh build and that no
 # submitted node was edited in place without BuildContext.willEditRetained (UiContext.verifyRetentionEvery). 0 turns it off.
 export HAXEON_UI_VERIFY_RETENTION=${HAXEON_UI_VERIFY_RETENTION:-1}

@@ -113,13 +113,13 @@ private class WorkspaceStreamConnector implements RpcConnector {
 	service starting or stopping), and again every REFRESH_MS, which also finds a relay session that died unnoticed.
 
 	`openService(id, start)` makes the device's ServiceOpener for WorkspaceLink: it opens a stream to the workspace and
-	names the service suit forwarded it to; its connector issues OPEN again on every reconnect, never starting the service. A reconnect of the channel ends
+	names the service exohost forwarded it to; its connector issues OPEN again on every reconnect, never starting the service. A reconnect of the channel ends
 	every stream, so the links above reconnect through OPEN again; nothing replays.
 **/
 class DeviceMachine {
 	public static inline final REFRESH_MS = 15000.0;
 	static inline final CALL_TIMEOUT = 8000;
-	/** OPEN starts an idle workspace's service, which suit gives SuitServices.START_SECONDS (30 s); the answer gets more. */
+	/** OPEN starts an idle workspace's service, which exohost gives ExohostServices.START_SECONDS (30 s); the answer gets more. */
 	public static inline final OPEN_TIMEOUT = 40000;
 
 	/** The id the device pairs under: the machine's relay id (32 hex digits), which the directory names in `relay`. */
@@ -178,7 +178,7 @@ class DeviceMachine {
 	}
 
 	/**
-		A ServiceOpener (WorkspaceLink) for the workspaces of this machine: opens a stream to workspace `id` (suit starts
+		A ServiceOpener (WorkspaceLink) for the workspaces of this machine: opens a stream to workspace `id` (exohost starts
 		its service when idle and `start` is true, else answers `workspace_unavailable`) and gives the service's
 		generation and root with a connector whose first connect takes that stream.
 	**/
@@ -281,7 +281,7 @@ class DeviceMachine {
 
 	/**
 		Whether a directory comes from the machine this device paired with under `relayId`. A machine that names its relay
-		id (`relay`) must name this one, and its own id is then free (suit gives each relay its own id). An older machine
+		id (`relay`) must name this one, and its own id is then free (exohost gives each relay its own id). An older machine
 		names none: its id must then be the relay id, or `machine-` and the relay id. Once `pinned` (the first accepted
 		answer's id), every later answer must keep it.
 	**/

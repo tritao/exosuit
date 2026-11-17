@@ -90,5 +90,5 @@ workspace-catalog-pool    all      haxeon   300      -                  tests/wo
 project-scan-yield        all      haxeon   300      -                  tests/project-scan-yield/haxeon.json
 # Source compilation, compatible patches, structural reloads and failure rollback.
 dynamic-plugin-test       all      haxeon   300      dynamic-plugin     tests/dynamic-plugin-test/haxeon.json
-# suit itself, with its own isolated home and a real workspace service; not the editor window (--editor).
-suit                      windows  python   600      -                  scripts/test-suit.py                         --real-service
+# exohost itself, with its own isolated home and a real workspace service; not the editor window (--editor).
+exohost                      windows  python   600      -                  scripts/test-exohost.py                         --real-service

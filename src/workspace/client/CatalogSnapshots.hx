@@ -27,7 +27,7 @@ class CatalogSnapshots {
 	/** Changes whenever a snapshot is read or goes. */
 	public var revision(default, null):Int = 0;
 
-	/** `base` is the folder holding `workspaces/<id>` (suit.MachineCatalog.agentStateBase()); null reads nothing. */
+	/** `base` is the folder holding `workspaces/<id>` (exohost.MachineCatalog.agentStateBase()); null reads nothing. */
 	public function new(base:Null<String>, clock:Void->Float) {
 		this.base = base;
 		this.clock = clock;

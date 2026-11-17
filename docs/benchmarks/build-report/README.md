@@ -7,11 +7,11 @@ cost. Given a baseline, every section shows before and after, led by a "What cha
 
 ## What it measures
 
-One run is one build of the three apps (agent, suit, graphical) in an already bootstrapped checkout:
+One run is one build of the three apps (agent, exohost, graphical) in an already bootstrapped checkout:
 
 - `cold`: the apps' build folders do not exist (a fresh checkout). With a fresh `-CcacheDir`, nothing is cached.
 - `noop`: the same command right after a build.
-- `warm`: deletes `agent/build`, `suit/build` and `graphical/build`, then builds. CMake configures again and the
+- `warm`: deletes `agent/build`, `exohost/build` and `graphical/build`, then builds. CMake configures again and the
   compiles come from the ccache the previous build filled (Windows ccache reuses objects of the same build tree only).
 
 During a run, `sampler.ps1` records every build tool process every ~0.5 s (parent, command line, CPU time),
@@ -47,7 +47,7 @@ idle timeout, or stop it.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `-Worktree` | (required) | The Exosuit checkout to build. Its `haxeon` must be bootstrapped (`haxeon/out/haxeon-cli.hl`). |
-| `-Kind` | `cold` | `cold`: no app build folders may exist. `noop`: a build right after another. `warm`: deletes `agent/build`, `suit/build` and `graphical/build` first. |
+| `-Kind` | `cold` | `cold`: no app build folders may exist. `noop`: a build right after another. `warm`: deletes `agent/build`, `exohost/build` and `graphical/build` first. |
 | `-Name` | the kind | The run's name: the prefix of its files, so several runs of one kind can share a folder. |
 | `-Out` | `%TEMP%\exosuit-build-reports\<checkout folder name>` | The run folder. Keep it out of the repository: a cold run's process samples are several MB. |
 | `-CcacheDir` | the user's cache | ccache's directory for this build. A separate one keeps other builds out of the counters; an empty one makes a cold build cold. |

@@ -157,7 +157,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					row.step();
 				});
 			// Older catalogs of schema 8 also hold workspace_terminal_history, which nothing reads now (a terminal's screen
-			// is its host's, TerminalHosts), and workspace_devices (devices pair with suit, MachineDeviceStore).
+			// is its host's, TerminalHosts), and workspace_devices (devices pair with exohost, MachineDeviceStore).
 			db.exec("PRAGMA user_version=8");
 		});
 	}

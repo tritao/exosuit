@@ -1,7 +1,7 @@
 package workspace.client;
 
 /**
-	When the steps of connecting to a workspace happen, in seconds since the process began: suit's reply, the helper
+	When the steps of connecting to a workspace happen, in seconds since the process began: exohost's reply, the helper
 	processes, the handshake, the first catalog read. Kept in memory (the last MAX events) and shown in the
 	automation state, so a scenario can time a connection without parsing logs. With EXOSUIT_CONNECT_LOG set, each
 	event is also printed to stderr. Marking is a push to an array: cheap enough for every frame's edge, never on its hot path.

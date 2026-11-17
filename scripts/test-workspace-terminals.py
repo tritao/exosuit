@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix='extty-',ignore_cleanup_errors=True) as 
             print('PASS: the shell outlives the idle service in its host; the next service takes it back for another client process',flush=True)
             service=start_service(environment,state,root)
             client('history-create')
-            # Without suit there is no polite stop on Windows: the service stops when it idles out.
+            # Without exohost there is no polite stop on Windows: the service stops when it idles out.
             assert service.wait(IDLE_EXIT)==0,'The service did not idle out after history-create'
             service=start_service(environment,state,root)
             client('history-restore')

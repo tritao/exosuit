@@ -91,7 +91,7 @@ import scm.ScmSource;
  * via `overlayView()`), and `CommandBridge` for how `application.commands`
  * reaches this shell's command picker through `ui.commands`.
  */
-@:allow(ui.WorkbenchActions, ui.SuitWorkbenchMachine, ui.ScmPanelController, ui.AgentTabs, ui.TerminalTabs, ui.RemoteFileTabs, ui.ExosuitDiagnostics, ui.ExplorerPanelController, ui.ServedFolders, ui.SettingsTab, ui.ResponsiveLayout, ui.ContextSwitching, ui.DeviceWorkbenchMachine)
+@:allow(ui.WorkbenchActions, ui.ExohostWorkbenchMachine, ui.ScmPanelController, ui.AgentTabs, ui.TerminalTabs, ui.RemoteFileTabs, ui.ExosuitDiagnostics, ui.ExplorerPanelController, ui.ServedFolders, ui.SettingsTab, ui.ResponsiveLayout, ui.ContextSwitching, ui.DeviceWorkbenchMachine)
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 
@@ -116,9 +116,9 @@ class ExosuitApp implements DesktopUiApplication {
 	public var workbenchClient(default, null):Null<workspace.client.WorkspaceWorkbenchClient>;
 	var remoteAccessPanel:Null<RemoteAccessPanel>;
 	var machineClient:Null<workspace.client.MachineClient>;
-	/** The desktop's Workbench machine: suit's list of this machine's workspaces and the window's links to them. */
-	var suitWorkbench:Null<SuitWorkbenchMachine>;
-	/** What the Workbench's rows do to workspaces, on the machine the window is given (suit's, or a device's paired one). */
+	/** The desktop's Workbench machine: exohost's list of this machine's workspaces and the window's links to them. */
+	var exohostWorkbench:Null<ExohostWorkbenchMachine>;
+	/** What the Workbench's rows do to workspaces, on the machine the window is given (exohost's, or a device's paired one). */
 	final workbenchActions:WorkbenchActions;
 	/** The Source Control view, the Changes tab and the editor's and sessions' source control. */
 	final sourceControl:ScmPanelController;
@@ -140,15 +140,15 @@ class ExosuitApp implements DesktopUiApplication {
 	final responsive:ResponsiveLayout;
 	/** Moving the window between workspaces and groups. */
 	public final contexts:ContextSwitching;
-	/** The context last told to suit over the window's link, so other windows can mark it (M19 Phase 8). */
+	/** The context last told to exohost over the window's link, so other windows can mark it (M19 Phase 8). */
 	var presenceRevision = -1;
 	var presenceWorkspace:Null<String>;
 	var presenceMachine:Null<String>;
 	var machineClientRevision = -1;
-	/** The folder this window last asked suit to open as a workspace (`openFolderWorkspace`); it is asked once. */
+	/** The folder this window last asked exohost to open as a workspace (`openFolderWorkspace`); it is asked once. */
 	var folderOpening:Null<String>;
-	/** A quit suit asked for over the link: its answer, and whether it keeps unsaved work for the next start. */
-	var quitAnswer:Null<(Null<Dynamic>, Null<suit.control.ControlError>) -> Void>;
+	/** A quit exohost asked for over the link: its answer, and whether it keeps unsaved work for the next start. */
+	var quitAnswer:Null<(Null<Dynamic>, Null<exohost.control.ControlError>) -> Void>;
 	var quitRecovering = false;
 	/**
 		The window's links, one per workspace in use (desktop): the one it shows (`focus`), the running workspaces whose
@@ -383,7 +383,7 @@ class ExosuitApp implements DesktopUiApplication {
 			settingsPanel.select("editor/keyboard");
 		};
 		if (hostContext != null) hostContext.onCloseRequested = function(close) {
-			// A quit suit asked for with `recover` closes at once: unsaved work stays in the recovery store for the next start.
+			// A quit exohost asked for with `recover` closes at once: unsaved work stays in the recovery store for the next start.
 			if (quitRecovering) {
 				answerQuit();
 				close();
@@ -393,10 +393,10 @@ class ExosuitApp implements DesktopUiApplication {
 				answerQuit();
 				close();
 			}, function() {
-				// The user chose Cancel in a save prompt: the window stays, and suit is told so.
+				// The user chose Cancel in a save prompt: the window stays, and exohost is told so.
 				var answer = quitAnswer;
 				quitAnswer = null;
-				if (answer != null) answer(null, new suit.control.ControlError("permission_denied", "the user cancelled the quit"));
+				if (answer != null) answer(null, new exohost.control.ControlError("permission_denied", "the user cancelled the quit"));
 			});
 			requestFrame();
 		};
@@ -1204,7 +1204,7 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	/** The Remote Access panel: this machine's relay, pairing and devices, from suit (ADR 0005 section 4). */
+	/** The Remote Access panel: this machine's relay, pairing and devices, from exohost (ADR 0005 section 4). */
 	function attachRemoteAccess(machine:workspace.client.MachineClient):Void {
 		if (remoteAccessPanel != null) return;
 		remoteAccessPanel = new RemoteAccessPanel(new workspace.client.MachineRemoteAccess(machine, requestFrame), requestFrame, function(value) {
@@ -1225,17 +1225,17 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/**
-		This machine's workspaces as the Workbench tree's top level, from suit (docs/architecture/0006-workspaces-without-folders.md),
-		and the window's link to suit, over which suit pushes them and asks the window to quit. Needs the window's links
+		This machine's workspaces as the Workbench tree's top level, from exohost (docs/architecture/0006-workspaces-without-folders.md),
+		and the window's link to exohost, over which exohost pushes them and asks the window to quit. Needs the window's links
 		(`attachLinks`) first.
 	**/
 	public function attachMachineWorkspaces(machine:workspace.client.MachineClient):Void {
 		var all = links;
-		if (all == null) throw "The window's workspace links are needed before suit's machine";
+		if (all == null) throw "The window's workspace links are needed before exohost's machine";
 		machineClient = machine;
 		attachRemoteAccess(machine);
-		var shown = new SuitWorkbenchMachine(this, machine, all);
-		suitWorkbench = shown;
+		var shown = new ExohostWorkbenchMachine(this, machine, all);
+		exohostWorkbench = shown;
 		workbenchActions.attach(shown);
 		requestFrame();
 	}
@@ -1247,23 +1247,23 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/**
-		suit asks the window to quit (`exosuit.quit`, docs/design/suitctl/TDD-exosuit-ctl.md Q4): `prompt` asks about
+		exohost asks the window to quit (`exosuit.quit`, docs/design/exohostctl/TDD-exosuit-ctl.md Q4): `prompt` asks about
 		unsaved work as closing the window does, `recover` keeps it for the next start and closes at once, `save` saves
 		every document first. `answer` gets `{closing: true}` once the window has committed to closing, or why not.
 	**/
-	public function quitWindow(mode:String, answer:(Null<Dynamic>, Null<suit.control.ControlError>) -> Void):Void {
+	public function quitWindow(mode:String, answer:(Null<Dynamic>, Null<exohost.control.ControlError>) -> Void):Void {
 		var context = hostContext;
 		if (context == null) {
-			answer(null, new suit.control.ControlError("unsupported", "this window cannot be closed"));
+			answer(null, new exohost.control.ControlError("unsupported", "this window cannot be closed"));
 			return;
 		}
 		if (mode != "prompt" && mode != "recover" && mode != "save") {
-			answer(null, new suit.control.ControlError("invalid_argument", 'unknown quit mode "$mode"'));
+			answer(null, new exohost.control.ControlError("invalid_argument", 'unknown quit mode "$mode"'));
 			return;
 		}
 		if (mode == "save") {
 			application.files.saveAll(function(saved) {
-				if (!saved) answer(null, new suit.control.ControlError("permission_denied", "a document was not saved; the window stays open"));
+				if (!saved) answer(null, new exohost.control.ControlError("permission_denied", "a document was not saved; the window stays open"));
 				else quitWindow("recover", answer);
 			});
 			requestFrame();
@@ -1275,7 +1275,7 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	/** The window has committed to closing: suit's quit request, if one asked, is answered. */
+	/** The window has committed to closing: exohost's quit request, if one asked, is answered. */
 	function answerQuit():Void {
 		var answer = quitAnswer;
 		quitAnswer = null;
@@ -1309,7 +1309,7 @@ class ExosuitApp implements DesktopUiApplication {
 		A workspace's service follows its folders at once, with no restart, when the window holds a link to it: file roots,
 		watchers and repositories; the window's own file roots follow for the workspace it shows.
 	**/
-	function serveFolders(entry:suit.MachineCatalog.MachineWorkspace):Void {
+	function serveFolders(entry:exohost.MachineCatalog.MachineWorkspace):Void {
 		var link = linkOf(entry.id);
 		if (link == null) return;
 		var skipped = workspace.WorkspaceFolders.select(entry.folders).skipped;
@@ -1338,7 +1338,7 @@ class ExosuitApp implements DesktopUiApplication {
 	**/
 	public function attachLinks(all:workspace.client.WorkspaceLinks):Void {
 		links = all;
-		snapshots = new workspace.client.CatalogSnapshots(suit.MachineCatalog.agentStateBase(), function() return Sys.time() * 1000);
+		snapshots = new workspace.client.CatalogSnapshots(exohost.MachineCatalog.agentStateBase(), function() return Sys.time() * 1000);
 		focus = all.none;
 		attachWorkspace(all.none);
 		attachWorkbench(all.none);
@@ -1401,26 +1401,26 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/** The focus of every editor window but this one. */
-	function otherWindows():Array<suit.WindowFocus>
-		return machineClient == null ? [] : suit.WindowFocus.WindowFocuses.others(machineClient.windows, windowId());
+	function otherWindows():Array<exohost.WindowFocus>
+		return machineClient == null ? [] : exohost.WindowFocus.WindowFocuses.others(machineClient.windows, windowId());
 
-	/** This window's id in suit (`w<pid>-<seconds>`); null on a host without suit (the phone). */
+	/** This window's id in exohost (`w<pid>-<seconds>`); null on a host without exohost (the phone). */
 	function windowId():Null<String> {
-		var link = suit.SuitLink.instance;
+		var link = exohost.ExohostLink.instance;
 		return link == null ? null : link.windowId;
 	}
 
 	/**
 		The service the window attaches to by workspace id: the open machine workspace's, else the one that holds the active
-		project's folder. `target` is null when suit knows no workspace for it (the folder is then opened as one:
-		`openFolderWorkspace`). `waiting` is true while suit's answer is awaited.
+		project's folder. `target` is null when exohost knows no workspace for it (the folder is then opened as one:
+		`openFolderWorkspace`). `waiting` is true while exohost's answer is awaited.
 	**/
 	function workspaceServiceTarget(projectRoot:Null<String>):{target:Null<workspace.client.WorkspaceServiceTarget>, waiting:Bool} {
 		var open = application.savedWorkspaces.current, machine = machineClient;
 		var none:{target:Null<workspace.client.WorkspaceServiceTarget>, waiting:Bool} = {target: null, waiting: false};
 		if (machine == null) return none;
 		if (machine.machine == null) return {target: null, waiting: machine.error == null && (open != null || projectRoot != null)};
-		var known:Null<suit.MachineCatalog.MachineWorkspace> = open == null ? null : machine.workspaceById(open.id);
+		var known:Null<exohost.MachineCatalog.MachineWorkspace> = open == null ? null : machine.workspaceById(open.id);
 		if (known == null && projectRoot != null) known = machine.workspaceHolding(projectRoot);
 		if (known == null) return none;
 		if (known.folders.length == 0 && machine.scratchOf(known) == null) {
@@ -1537,7 +1537,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var meter = frameRateMeter();
 		if (meter.sample(now)) requestFrame();
 		if (now < nextBackgroundPoll) {
-			// While a workspace connects, its attachment (and suit's link, which answers the open) is polled on every turn;
+			// While a workspace connects, its attachment (and exohost's link, which answers the open) is polled on every turn;
 			// everything else keeps its cadence.
 			if (now < eagerPollUntil) {
 				var machine = machineClient;
@@ -1613,7 +1613,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workspace.transport.FineTimer.hold(eagerPollUntil - now);
 	}
 
-	/** Moves the window's connection along now: an open asks suit for its workspace's service at once. */
+	/** Moves the window's connection along now: an open asks exohost for its workspace's service at once. */
 	public function connectNow():Void {
 		pollWorkspaceAttachment();
 	}
@@ -1737,14 +1737,14 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchActions.poll();
 		remoteFileSearch.update(Sys.time());
 		// O(1) per frame: the key (strings built and escaped) is made only when the context, workspace or machine id changed.
-		var shown = application.activeContext, link = suit.SuitLink.instance;
+		var shown = application.activeContext, link = exohost.ExohostLink.instance;
 		if (link != null && (shown.revision != presenceRevision || shown.contextWorkspaceId != presenceWorkspace || shown.machineId != presenceMachine)) {
 			presenceRevision = shown.revision; presenceWorkspace = shown.contextWorkspaceId; presenceMachine = shown.machineId;
 			link.setContext(shown.key());
 		}
-		var workspaces = machineClient, shownMachine = suitWorkbench;
+		var workspaces = machineClient, shownMachine = exohostWorkbench;
 		if (workspaces != null && shownMachine != null) {
-			// suit pushes every change to the machine over the link; polling only moves the link along.
+			// exohost pushes every change to the machine over the link; polling only moves the link along.
 			var panel = workbenchPanel;
 			if (shownMachine.poll(panel == null ? [] : panel.expandedWorkspaceIds())) requestFrame();
 			contexts.applyStartContext();

@@ -13,10 +13,10 @@ Configuration and state paths are documented in `docs/configuration.md`.
 Set `PRAGTICAL_PORTABLE` to keep both under one chosen directory. The launcher
 sets `HAXEON_LSP` to the bundled server unless explicitly overridden.
 
-Opening a workspace asks suit for its service, which suit starts when none runs: one process per running workspace
+Opening a workspace asks exohost for its service, which exohost starts when none runs: one process per running workspace
 (`tools/hl tools/exosuit-agent.hl --workspace ID --folder F...`). Busy agent turns keep it up; otherwise it stops ten
 minutes after its last client leaves (`EXOSUIT_SERVICE_IDLE_SECONDS` changes that), retaining its SQLite catalog.
 Terminals keep running in their terminal hosts and the next service takes them back. Its state, with its
-`service.log`, lives below `$XDG_STATE_HOME/exosuit/workspaces/<id>`. suit stops a service with `suit kill <pid>`.
+`service.log`, lives below `$XDG_STATE_HOME/exosuit/workspaces/<id>`. exohost stops a service with `exohost kill <pid>`.
 
 Native Claude Code session naming uses a pinned Claude Agent SDK metadata adapter. Build preparation installs only that package with optional executables and peer dependencies omitted; the release includes the SDK and its upstream README/legal notice under `tools/claude-naming`. Node.js 18.14 or newer is required on the workspace host for this optional feature. The daemon does not download dependencies, launch Claude, or send model requests to read or rename a session. Without the adapter/runtime, the UI offers an explicitly local Workbench label instead.

@@ -8,4 +8,4 @@
 *.py text eol=lf
 tests/** text=auto eol=lf
 plugins/** text=auto eol=lf
-scripts/suitctl text eol=lf
+scripts/exohostctl text eol=lf

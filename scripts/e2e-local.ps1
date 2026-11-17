@@ -1,6 +1,6 @@
 <#
-The whole product on this machine, end to end, with no cloud account and nothing shared with the real editor, suit or
-relay: a local relay Worker (wrangler dev) behind a locally generated CA, an isolated desktop (suit, workspace service
+The whole product on this machine, end to end, with no cloud account and nothing shared with the real editor, exohost or
+relay: a local relay Worker (wrangler dev) behind a locally generated CA, an isolated desktop (exohost, workspace service
 and the real graphical editor, running in live mode) and the Android app on a headless emulator, paired through the
 editor's Remote Access panel. docs/mobile/e2e-local.md explains the pieces.
 
@@ -98,7 +98,7 @@ function Invoke-Build {
 
 function Assert-Built {
     $missing = @()
-    foreach ($path in $apk, $admin, (Join-Path $RepoRoot 'graphical\build\host\main.hl'), (Join-Path $RepoRoot 'suit\build\host\main.hl'),
+    foreach ($path in $apk, $admin, (Join-Path $RepoRoot 'graphical\build\host\main.hl'), (Join-Path $RepoRoot 'exohost\build\host\main.hl'),
         (Join-Path $RepoRoot 'agent\build\host\main.hl')) {
         if (-not (Test-Path $path)) { $missing += $path }
     }
@@ -169,20 +169,20 @@ function Start-Editor {
     $envFile = Join-Path $editorDir 'ENV.json'
     $env:EXOSUIT_E2E_CONFIG = $configPath
     if (-not (Test-Path $envFile)) {
-        Say 'first start: creating the editor''s isolated state (suit, workspaces Alpha and Beta)'
+        Say 'first start: creating the editor''s isolated state (exohost, workspaces Alpha and Beta)'
         New-Item -ItemType Directory -Force $editorDir | Out-Null
         & $python -I (Join-Path $harness 'gui_fixture.py') --root $RepoRoot --out $editorDir --scenario e2e_pair
         if ($LASTEXITCODE -ne 0) { throw 'the fixture failed' }
     }
     $cfg = Get-Content $envFile -Raw | ConvertFrom-Json
-    $extra = @{ EXOSUIT_E2E_CONFIG = $configPath; EXOSUIT_SUIT_IDLE_SECONDS = '86400' }
+    $extra = @{ EXOSUIT_E2E_CONFIG = $configPath; EXOSUIT_EXOHOST_IDLE_SECONDS = '86400' }
     foreach ($property in $cfg.env.PSObject.Properties) { if (-not $extra.ContainsKey($property.Name)) { $extra[$property.Name] = $property.Value } }
     Say 'starting the editor in live mode (scripts/run.py --live)'
     $arguments = '"' + (Join-Path $RepoRoot 'scripts\run.py') + '" --live ' + ((@($cfg.appArgs) + @($cfg.open) | Where-Object { $_ } | ForEach-Object { '"' + $_ + '"' }) -join ' ')
     $launcher = Start-Child $python $arguments (Join-Path $RunDir 'editor.log') $extra $RepoRoot
     $state.editorLauncher = $launcher.Id
     Save-State $state
-    # Ready once the window has linked to the rig's suit (suitctl list names its process).
+    # Ready once the window has linked to the rig's exohost (exohostctl list names its process).
     $deadline = (Get-Date).AddSeconds(600)
     $editor = $null
     $ready = $false
@@ -246,21 +246,21 @@ function Start-App {
     Say ("app launch to workspaces listed: {0:N1} s ({1})" -f $timer.Elapsed.TotalSeconds, $line)
 }
 
-# suitctl against the rig's suit (its EXOSUIT_SUIT_HOME from the fixture): the output, or $null when it failed.
-function Invoke-SuitCtl([string[]]$Arguments) {
+# exohostctl against the rig's exohost (its EXOSUIT_EXOHOST_HOME from the fixture): the output, or $null when it failed.
+function Invoke-ExohostCtl([string[]]$Arguments) {
     $cfg = Get-Content (Join-Path $editorDir 'ENV.json') -Raw | ConvertFrom-Json
-    $saved = $env:EXOSUIT_SUIT_HOME
+    $saved = $env:EXOSUIT_EXOHOST_HOME
     try {
-        $env:EXOSUIT_SUIT_HOME = $cfg.env.EXOSUIT_SUIT_HOME
-        $output = & $python -I (Join-Path $RepoRoot 'scripts\suit.py') --ctl @Arguments 2>$null
+        $env:EXOSUIT_EXOHOST_HOME = $cfg.env.EXOSUIT_EXOHOST_HOME
+        $output = & $python -I (Join-Path $RepoRoot 'scripts\exohost.py') --ctl @Arguments 2>$null
         if ($LASTEXITCODE -ne 0) { return $null }
         return ($output -join "`n")
-    } finally { $env:EXOSUIT_SUIT_HOME = $saved }
+    } finally { $env:EXOSUIT_EXOHOST_HOME = $saved }
 }
 
-# The window id suit knows the editor process `$ProcessId` by, or $null while it has not linked.
+# The window id exohost knows the editor process `$ProcessId` by, or $null while it has not linked.
 function Get-EditorInstance([int]$ProcessId) {
-    $listed = Invoke-SuitCtl @('--output', 'json', 'list')
+    $listed = Invoke-ExohostCtl @('--output', 'json', 'list')
     if (-not $listed) { return $null }
     $found = @(($listed | ConvertFrom-Json).instances | Where-Object { $_.pid -eq $ProcessId })
     if ($found.Count -eq 0) { return $null }
@@ -268,7 +268,7 @@ function Get-EditorInstance([int]$ProcessId) {
 }
 
 # A real editor restart, for the `restart-editor` step: asks the editor to quit the way closing its window does
-# (`suitctl quit --mode prompt`, no mouse),
+# (`exohostctl quit --mode prompt`, no mouse),
 # waits for the process to go, then starts the editor again exactly as `up` does. The request and the answer are files in the
 # run folder; the answer holds the epoch seconds of the close and of the moment the editor was ready again.
 function Restart-Editor {
@@ -278,16 +278,16 @@ function Restart-Editor {
     if ([int]$state.editorPid -gt 0) { $editor = Get-Process -Id ([int]$state.editorPid) -ErrorAction SilentlyContinue }
     if ($editor) {
         $instance = Get-EditorInstance $editor.Id
-        if ($instance) { Invoke-SuitCtl @('--instance', $instance, '--timeout', '20', 'quit', '--mode', 'prompt') | Out-Null }
+        if ($instance) { Invoke-ExohostCtl @('--instance', $instance, '--timeout', '20', 'quit', '--mode', 'prompt') | Out-Null }
         if (-not $editor.WaitForExit(20000)) { Say 'the editor did not quit in 20 s; ending it'; $editor.Kill() }
     }
     $closed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
     if (Test-Alive $state.editorLauncher) { & taskkill /T /F /PID $state.editorLauncher 2>&1 | Out-Null }
     # The launcher's resident compiler worker and live host belong to the old watch session; a new launcher cannot reuse them.
-    # The suit and the workspace services stay up, as they do when a user closes the window.
+    # The exohost and the workspace services stay up, as they do when a user closes the window.
     $root = ($RepoRoot -replace '\\', '/')
     Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object {
-        $_.CommandLine -and ($_.CommandLine -replace '\\', '/').Contains($root) -and ($_.CommandLine -replace '\\', '/') -notmatch 'suit/build|agent/build' } |
+        $_.CommandLine -and ($_.CommandLine -replace '\\', '/').Contains($root) -and ($_.CommandLine -replace '\\', '/') -notmatch 'exohost/build|agent/build' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $state.editorPid = 0
     Save-State $state
@@ -406,7 +406,7 @@ function Stop-Rig {
     foreach ($id in $state.editorPid, $state.editorLauncher, $state.host) {
         if (Test-Alive $id) { & taskkill /T /F /PID $id 2>&1 | Out-Null }
     }
-    # What the editor run left: suit, workspace services, the compiler worker of this checkout (never other checkouts).
+    # What the editor run left: exohost, workspace services, the compiler worker of this checkout (never other checkouts).
     $root = ($RepoRoot -replace '\\', '/')
     Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -replace '\\', '/').Contains($root) } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

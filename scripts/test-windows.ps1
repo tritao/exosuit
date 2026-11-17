@@ -10,11 +10,11 @@ Each suite runs
 - through the dialog guard (docs/benchmarks/perf-harness/run-guarded.ps1) with a timeout of its own, so a crash dialog
   or a hang ends as a FAIL line (exit 125: a dialog appeared; 124: timeout; -1073741515: a DLL was not on PATH);
 - with state of its own, made new for the run: EXOSUIT_TEST_HOME is <run folder>\<suite>, and PRAGTICAL_PORTABLE,
-  EXOSUIT_AGENT_STATE_HOME, EXOSUIT_SUIT_HOME, CLAUDE_CONFIG_DIR and CODEX_HOME point into it. A session another suite
+  EXOSUIT_AGENT_STATE_HOME, EXOSUIT_EXOHOST_HOME, CLAUDE_CONFIG_DIR and CODEX_HOME point into it. A session another suite
   left behind makes tests fail (terminal-context-menu: "Tab keys must be unique"), and nothing reaches
   %LOCALAPPDATA%\Exosuit. TEMP stays where it is: the drivers make their fixtures there, and workspace-terminals
   reads a fixture's path off an 80-column terminal line, which a longer path wraps;
-- with EXOSUIT_SUIT_AUTOSTART=0 beside that EXOSUIT_SUIT_HOME, so nothing reaches the user's suit or starts one.
+- with EXOSUIT_EXOHOST_AUTOSTART=0 beside that EXOSUIT_EXOHOST_HOME, so nothing reaches the user's exohost or starts one.
 Afterwards the processes the suite left running are stopped (a workspace service or a terminal host of a failed test): those
 that descend from the suite's guard process (found by parent process id with start-time checks, polled while the suite
 runs, so a child whose parent has exited is still known) and those started during the suite whose command line names the
@@ -135,10 +135,10 @@ New-Item -ItemType Directory -Force $Run | Out-Null
 $env:HAXEON_ROOT = $Haxeon
 $env:HAXEON_HOME = $Haxeon
 $env:PATH = "$Haxeon\out;$Haxeon\.tools\hashlink;$env:PATH"
-$env:EXOSUIT_SUIT_AUTOSTART = '0'
+$env:EXOSUIT_EXOHOST_AUTOSTART = '0'
 if (-not $env:HAXEON_UI_VERIFY_RETENTION) { $env:HAXEON_UI_VERIFY_RETENTION = '1' }
 foreach ($name in 'EXOSUIT_PROJECT_ROOT', 'EXOSUIT_AGENT_LAUNCHER', 'EXOSUIT_SERVICE_IDLE_SECONDS', 'XDG_STATE_HOME') { Remove-Item "env:$name" -ErrorAction SilentlyContinue }
-$Isolated = 'EXOSUIT_TEST_HOME', 'PRAGTICAL_PORTABLE', 'EXOSUIT_AGENT_STATE_HOME', 'EXOSUIT_SUIT_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME'
+$Isolated = 'EXOSUIT_TEST_HOME', 'PRAGTICAL_PORTABLE', 'EXOSUIT_AGENT_STATE_HOME', 'EXOSUIT_EXOHOST_HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME'
 # The python3 shim: some tests start their fake language server by the name `python3`, which Windows has only as the Microsoft
 # Store alias (it offers the Store when Python came from elsewhere). A virtual environment's launcher, renamed python3.exe
 # in a folder of its own that comes first on PATH, runs this Python under that name; nothing else changes on PATH.
@@ -202,12 +202,12 @@ $results = @()
 foreach ($suite in $chosen) {
     $home_ = Join-Path $Run $suite.Name
     $fixture = Join-Path $home_ 'fixture'
-    foreach ($folder in 'portable', 'agent-state', 'suit', 'claude-config', 'codex-home', 'fixture') { New-Item -ItemType Directory -Force (Join-Path $home_ $folder) | Out-Null }
+    foreach ($folder in 'portable', 'agent-state', 'exohost', 'claude-config', 'codex-home', 'fixture') { New-Item -ItemType Directory -Force (Join-Path $home_ $folder) | Out-Null }
     $saved = @{}
     foreach ($name in $Isolated) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
     $env:PRAGTICAL_PORTABLE = Join-Path $home_ 'portable'
     $env:EXOSUIT_AGENT_STATE_HOME = Join-Path $home_ 'agent-state'
-    $env:EXOSUIT_SUIT_HOME = Join-Path $home_ 'suit'
+    $env:EXOSUIT_EXOHOST_HOME = Join-Path $home_ 'exohost'
     $env:EXOSUIT_TEST_HOME = $home_
     $env:CLAUDE_CONFIG_DIR = Join-Path $home_ 'claude-config'
     $env:CODEX_HOME = Join-Path $home_ 'codex-home'

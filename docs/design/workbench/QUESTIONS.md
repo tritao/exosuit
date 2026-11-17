@@ -47,8 +47,8 @@ only when you create something in that workspace or open one of its items.
 ❓ **Q4** - **One process per workspace, or one for all**: Today an idle workspace starts as a chain of three
 HashLink processes (launcher, manager, service), each loading 12.6 MB of bytecode. That chain plus the connect
 measures about 0.8 to 1 s on this machine. To get to milliseconds:
-- (a) One process per running workspace, as today, started as one process instead of three. suit keeps one spare
-  process already loaded, and that spare takes over the workspace you start; suit then loads the next spare. This
+- (a) One process per running workspace, as today, started as one process instead of three. exohost keeps one spare
+  process already loaded, and that spare takes over the workspace you start; exohost then loads the next spare. This
   costs one extra idle process. A crash or an update affects one workspace only. Expected about 50 to 200 ms (not
   measured yet).
 - (b) One resident process serves every running workspace. Adding a workspace takes milliseconds and uses the
@@ -66,7 +66,7 @@ close the last editor window, because every window keeps a connection to every r
 workspace stops after a period during which no window shows or uses it (no tab open, row not expanded) and none of
 its sessions or terminals is active. Busy agents and live terminals keep it up.
 - (a) Stop after N minutes of that. Which N? (Today's setting is 60 s with no clients.)
-- (b) Never stop on its own; only Quit or Stop in suit ends it.
+- (b) Never stop on its own; only Quit or Stop in exohost ends it.
 - (c) Stop as soon as the last window closes its tabs.
 
 ➡️ (a) with N = 10 minutes. With a fast start (Q4), stopping costs little, and a session's history comes back when it
@@ -74,15 +74,15 @@ resumes.
 
 ---
 
-❓ **Q6** - **Remove the suit-off and single-folder modes**: The Workbench has a second code path for every decision,
-for running without suit (`EXOSUIT_SUIT=off`, folder-only windows), plus rules that guess which workspace a window
-opened on a bare folder belongs to. Proposed: suit is always on. Opening a folder opens the workspace that holds it, or
+❓ **Q6** - **Remove the exohost-off and single-folder modes**: The Workbench has a second code path for every decision,
+for running without exohost (`EXOSUIT_EXOHOST=off`, folder-only windows), plus rules that guess which workspace a window
+opened on a bare folder belongs to. Proposed: exohost is always on. Opening a folder opens the workspace that holds it, or
 creates one for it.
 - (a) Remove both.
-- (b) Keep suit-off for tests only.
+- (b) Keep exohost-off for tests only.
 - (c) Keep both.
 
-➡️ (a). It deletes the most code and leaves one model. Tests use an isolated suit home, as they already can.
+➡️ (a). It deletes the most code and leaves one model. Tests use an isolated exohost home, as they already can.
 
 ---
 
@@ -121,10 +121,10 @@ submenu is one step away when you want another provider.
 ---
 
 ❓ **Q9** - **When the warm spare exists**: Q4 adds one pre-started spare process, so starting an idle workspace
-takes milliseconds. suit holds it. Nothing starts at login (your earlier rule), and suit exits when nothing needs it.
+takes milliseconds. exohost holds it. Nothing starts at login (your earlier rule), and exohost exits when nothing needs it.
 - (a) The spare exists while at least one editor window is open. The first start after you launch the editor can
   find the spare still loading, which costs a fraction of a second once.
-- (b) The spare exists whenever suit runs, also with no editor open, for example while only suitctl or the phone uses
+- (b) The spare exists whenever exohost runs, also with no editor open, for example while only exohostctl or the phone uses
   the machine.
 - (c) A spare exists only after the first workspace start of the session, to be ready for the next one.
 

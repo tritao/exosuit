@@ -3,7 +3,7 @@
 Every time comes from the editor's ConnectTimeline (src/workspace/client/ConnectTimeline.hx, the automation state's
 `timeline`, milliseconds since the process began), so the driver's polling is not in it. Cases:
   startup   process start to first frame, by phase (startup-main ... app-built, first-frame);
-  suit      each suit `machine` request to its reply (suit-reply carries the milliseconds);
+  exohost      each exohost `machine` request to its reply (exohost-reply carries the milliseconds);
   expand    a click expanding an idle workspace (Gamma): start-requested to the first frame showing its rows;
   open      a double click opening an idle workspace (Beta): open-workspace to the first frame of its rows;
   back      a double click opening a running workspace (Alpha) again: the same;
@@ -109,8 +109,8 @@ def run(gui):
     finish(gui, "agent", look, 30)
 
     tl = timeline(gui)
-    record(gui, "suit machine", {"reply %d" % n: int(e["detail"].split()[-2]) for n, e in
-                                 enumerate([e for e in tl if e["event"] == "suit-reply" and e["detail"].startswith("machine ok")])})
+    record(gui, "exohost machine", {"reply %d" % n: int(e["detail"].split()[-2]) for n, e in
+                                 enumerate([e for e in tl if e["event"] == "exohost-reply" and e["detail"].startswith("machine ok")])})
     with open(os.path.join(gui.out, "timeline.json"), "w") as f:
         json.dump(tl, f, indent=1)
     gui.shot("end")

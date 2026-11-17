@@ -11,7 +11,7 @@ import workspace.client.OpenedService.ServiceOpener;
 	connected.
 
 	`keep` in `use` says the window needs the service itself (it shows the workspace, or has its terminals): only such
-	a link asks suit again when its service stops, which starts a new one. A link kept only for rows ends with its
+	a link asks exohost again when its service stops, which starts a new one. A link kept only for rows ends with its
 	service instead.
 **/
 class WorkspaceLinks {

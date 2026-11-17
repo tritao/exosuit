@@ -51,7 +51,7 @@ class WebMain {
 			var redraw = function() {
 				if (browserApp == null) context.requestFrame(); else browserApp.requestFrame();
 			};
-			// The browser is a paired device like the phone: RemoteMachines over suit's machine relay, its pairings in IndexedDB.
+			// The browser is a paired device like the phone: RemoteMachines over exohost's machine relay, its pairings in IndexedDB.
 			var store = new BrowserPairedMachines();
 			pairedMachines = store;
 			var remote = new RemoteMachines(context.events, function() return NativeKit.nk_time_seconds() * 1000, store, redraw);

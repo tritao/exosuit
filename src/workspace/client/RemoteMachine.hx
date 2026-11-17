@@ -12,7 +12,7 @@ import workspace.transport.StreamMultiplexer;
 /**
 	One paired machine on a device (the phone, the browser): the relay route (DeviceRpcConnector, pinned Noise identity), the machine client on
 	stream 0, and the device's links to its workspaces (WorkspaceLinks over `DeviceMachine.openService`, the same links the
-	desktop editor holds over suit's pipe). The open workspace's link is kept, and starts its service when idle; each
+	desktop editor holds over exohost's pipe). The open workspace's link is kept, and starts its service when idle; each
 	running granted workspace whose row is expanded has a link for its rows, which never starts a service, so a stopped
 	or idle service stays stopped. Each link is a stream of the machine's channel, so a device with many granted
 	workspaces still holds one relay connection (and at most STREAMS - 2 row links).
@@ -38,7 +38,7 @@ class RemoteMachine {
 	/**
 		Moves the machine client and the links along. `open` is the workspace the phone has open on this machine, if any:
 		its link is kept (and asks again when its stream ends). Of the workspaces in `expanded` (the tree's expanded rows),
-		those running get links for their rows, as the desktop's do (SuitWorkbenchMachine.poll).
+		those running get links for their rows, as the desktop's do (ExohostWorkbenchMachine.poll).
 	**/
 	public function poll(open:Null<String>, expanded:Array<String>):Null<WorkspaceLink> {
 		machine.poll();

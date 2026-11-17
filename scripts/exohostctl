@@ -1,0 +1,3 @@
+#!/bin/sh
+# exohostctl: exohost's control-plane command line (docs/design/exohostctl/TDD-exosuit-ctl.md section 8.2); exohost run with --ctl.
+exec python3 "$(dirname "$0")/exohost.py" --ctl "$@"

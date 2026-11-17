@@ -20,8 +20,8 @@ class ProfilerProcess {
 		var bridge = Sys.getEnv("HAXEON_DEVTOOLS_BRIDGE");
 		var runtime = Sys.getEnv("HAXEON_DEVTOOLS_RUNTIME");
 		if (bridge == null || runtime == null) throw "Launch with scripts/devtools.py to prepare the profiler adapter";
-		// The marker lets suit recognise the bridge (suit.SuitKinds.HELPER_MARKER); the bridge reads no arguments.
-		process = sys.io.Process.spawn(runtime, [bridge, suit.SuitKind.SuitKinds.HELPER_MARKER + "profiler-bridge"]);
+		// The marker lets exohost recognise the bridge (exohost.ExohostKinds.HELPER_MARKER); the bridge reads no arguments.
+		process = sys.io.Process.spawn(runtime, [bridge, exohost.ExohostKind.ExohostKinds.HELPER_MARKER + "profiler-bridge"]);
 		if (port > 0) command("connect", {port:port, host:"127.0.0.1", maxEntries:20, leafCapacity:128, eventCapacity:128});
 	}
 

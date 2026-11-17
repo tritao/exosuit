@@ -1,7 +1,7 @@
 # Exosuit
 
-Exosuit is an editor and agent workbench written in Haxeon. Its parts are the desktop editor (`graphical/`), suit,
-the per-user daemon that owns the machine's workspaces and is the control plane (`suit/`), one workspace service
+Exosuit is an editor and agent workbench written in Haxeon. Its parts are the desktop editor (`graphical/`), exohost,
+the per-user daemon that owns the machine's workspaces and is the control plane (`exohost/`), one workspace service
 process per running workspace with terminal hosts that outlive it (`agent/`), and remote clients on the phone
 (`android/`) and in the browser (`web/`) that reach a machine through a relay (`relay/worker/`). How they fit together:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -55,7 +55,7 @@ python scripts/build.py
 python scripts/run.py
 ```
 
-Tests: `./scripts/test.sh` (Linux) or `scripts/test-windows.ps1`. They run against an isolated suit home and state,
+Tests: `./scripts/test.sh` (Linux) or `scripts/test-windows.ps1`. They run against an isolated exohost home and state,
 never the user's (see "Tests and isolation" in the architecture page). On Windows, launch programs and tests through
 `docs/benchmarks/perf-harness/run-guarded.ps1` (`CLAUDE.md`).
 
@@ -216,12 +216,12 @@ pixels and do not require the image-generation dependencies.
 
 | Document | What |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | suit, the editor, workspace services, terminal hosts, devices, the control plane, tests |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | exohost, the editor, workspace services, terminal hosts, devices, the control plane, tests |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | open work |
 | [docs/architecture/](docs/architecture/) | decision records |
-| [docs/design/](docs/design/) | the Workbench and suitctl designs, terminal hosts, agent sessions, the sessions UI |
+| [docs/design/](docs/design/) | the Workbench and exohostctl designs, terminal hosts, agent sessions, the sessions UI |
 | [docs/RPC-VECTORS.md](docs/RPC-VECTORS.md) | the workspace protocol's frozen wire vectors |
-| [suit/README.md](suit/README.md), [agent/README.md](agent/README.md) | suit and the workspace service |
+| [exohost/README.md](exohost/README.md), [agent/README.md](agent/README.md) | exohost and the workspace service |
 | [docs/mobile/](docs/mobile/) | the phone app, its local end-to-end rig, the relay |
 | [docs/getting-started.md](docs/getting-started.md), [docs/configuration.md](docs/configuration.md), [docs/recovery.md](docs/recovery.md), [docs/build-tasks.md](docs/build-tasks.md), [docs/plugin-development.md](docs/plugin-development.md), [docs/plugin-api.md](docs/plugin-api.md) | using and extending the editor |
 | [docs/nativekit.md](docs/nativekit.md), [docs/native-bindings.md](docs/native-bindings.md) | the native layer |

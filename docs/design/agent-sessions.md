@@ -9,7 +9,7 @@ a chat session (the service runs the CLI and the chat panel draws it).
 ## Provider terminals
 
 Terminals live in hosts that outlive the service, so most restarts never end the program. When it did end (Windows
-restart, suit's full quit, a crash, the user quitting the CLI), the terminal's row stays, labelled "resumable".
+restart, exohost's full quit, a crash, the user quitting the CLI), the terminal's row stays, labelled "resumable".
 
 - **Each provider reports its conversation.** The terminal's program is started with a reporter of its own extension
   point, writing to `sessions.log` in the terminal's folder of the service's state (`AgentTerminalIdentity`):

@@ -10,12 +10,12 @@ import sys.io.File;
 	A workspace's state folder, as its service uses it: `workspaces/<id>` under the state base, private to this user.
 	It holds the lock that makes the service the only one of its workspace, `workspace.json` (whose state it is), the
 	catalog database and `service.log`. Nothing in it says how to reach the
-	service: suit started it and answers `workspace.open` with the pipe the service reported.
+	service: exohost started it and answers `workspace.open` with the pipe the service reported.
 **/
 class AgentState {
 	/** The per-user folder holding `workspaces` (each workspace's state) and `terminal-host` (the hosts' runtime copies). */
 	public static function base():String
-		return suit.MachineCatalog.agentStateBase();
+		return exohost.MachineCatalog.agentStateBase();
 
 	/** Workspace `id`'s state folder, spelled the same before and after it exists. */
 	public static function directoryOf(id:String):String
@@ -59,7 +59,7 @@ class AgentState {
 	}
 
 	/**
-		The workspace this state folder serves, with the folders it serves now: `folders` and `scratch` as suit passed them,
+		The workspace this state folder serves, with the folders it serves now: `folders` and `scratch` as exohost passed them,
 		else (a start by id alone) those recorded at its last start that still exist. Records them for the next start.
 	**/
 	public static function claim(directory:String, id:String, folders:Array<String>, scratch:Null<String>):AgentStateIdentity {

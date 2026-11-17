@@ -1,7 +1,7 @@
 r"""Workspace open time: how long a double click on a workspace row takes to show it, in a state shaped like daily use.
 
 The fixture makes that state in the run's own folders (gui_fixture.py, which calls `prepare` here), nothing copied
-from the user's: suit's workspaces (WORKSPACES), each a git repository with a tree of source files, and in each
+from the user's: exohost's workspaces (WORKSPACES), each a git repository with a tree of source files, and in each
 workspace's catalog the groups, agent sessions and terminals SHAPES lists, made through a service of the workspace with
 the RPCs the editor sends (tests/mobile-pairing's admin tool, `--seed`). The editor's tabs per group and its
 session.conf are written by the editor's own session code (tests/context-snapshots, `seed`); the window starts in
@@ -90,13 +90,13 @@ def seed_spec(item):
     return spec
 
 
-def prepare(out, root, env, suit):
+def prepare(out, root, env, exohost):
     """Fills the workspaces gui_fixture made: their folders, their catalogs (through a service of each, which idles out
-    after) and the editor's tabs. `env` is the environment of the run's suit; `suit(*args)` runs suit's CLI."""
+    after) and the editor's tabs. `env` is the environment of the run's exohost; `exohost(*args)` runs exohost's CLI."""
     sys.path.insert(0, str(root / "scripts"))
     from test_driver import build_test, kill_tree, ready_services, service_command, service_environment, with_libraries
 
-    machine = json.loads(suit("machine", "--json").stdout)
+    machine = json.loads(exohost("machine", "--json").stdout)
     by_name = {entry["name"]: entry for entry in machine["workspaces"]}
     admin = build_test("mobile-pairing")
     contexts_tool = build_test("context-snapshots")
@@ -177,7 +177,7 @@ def opened(gui, name, wid, case):
     ok = "connected" in times and "rows" in times and max(times.values()) <= BUDGETS[case]
     gui.results.append({"check": "time %s %s" % (case, name), "ok": ok, "ms": times, "budget_ms": BUDGETS[case],
                         "events": ["%d %s %s %s" % (e["t"] - base, e["event"], e["workspace"][-8:], e["detail"][:300]) for e in tl[begin:]
-                                   if e["event"] not in ("suit-queued",)]})
+                                   if e["event"] not in ("exohost-queued",)]})
     print("%s time %s %s %s" % ("PASS" if ok else "FAIL", case, name, times), flush=True)
     gui._save()
     gui.shot_window("%s-%s" % (case, name))

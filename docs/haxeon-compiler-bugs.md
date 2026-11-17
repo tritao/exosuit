@@ -33,7 +33,7 @@ and the status.
 - **Workaround:** none in exosuit. The browser client (web/src/app: `WebMain`, `BrowserPairedMachines`) is written
   against the shared device client (`DevicePairing`, `RemoteMachines`, `RemoteMachine`, `WorkspaceLink`), which the
   phone build compiles; the browser-only files are checked by reading only.
-- **Found:** 2026-11-16, entropy Step 8 (browser rebuilt on suit). Also needs Emscripten in the worktree to link.
+- **Found:** 2026-11-16, entropy Step 8 (browser rebuilt on exohost). Also needs Emscripten in the worktree to link.
 
 ### An empty `package;` declaration is a parse error
 
@@ -57,10 +57,10 @@ and the status.
   `ConnectNamedPipe` error other than `ERROR_PIPE_CONNECTED` and `ERROR_PIPE_LISTENING` as fatal. A client that
   connected and closed before the call gives `ERROR_NO_DATA`; the listener emits a failure and its thread returns, so
   no new pipe instance is created. That case should disconnect the instance and listen again.
-- **Found:** 2026-11-15, entropy Step 9 (suit's Pragtical pipes).
+- **Found:** 2026-11-15, entropy Step 9 (exohost's Pragtical pipes).
 - **Why it is hit every time:** the pipe is PIPE_NOWAIT and the listener polls `ConnectNamedPipe` every 5 ms, while
   pragtical-ctl's health check connects and closes in well under a millisecond.
-- **Workaround (partial):** suit starts a stopped listener again (PragticalPipes.listen, SuitDaemon.listen use the
+- **Workaround (partial):** exohost starts a stopped listener again (PragticalPipes.listen, ExohostDaemon.listen use the
   `failed` callback of NativeRpcHub.listen/listenBytes), so the pipe does not stay dead. It cannot close the gap: the
   new listener's first instance is made with FILE_FLAG_FIRST_PIPE_INSTANCE, so it can start only after the stopped
   listener's handle is closed, and pragtical-ctl connects again at once, into that gap ("failed to connect to local
@@ -219,7 +219,7 @@ and the status.
 
 ### Nested `Map<String, Map<String, Array<String>>>` misbehaved in a store: lookups failed, once an access violation
 
-- **Symptom:** in `MachineDeviceStore` (suit), a `Map<String, Map<String, Array<String>>>` filled and read back
+- **Symptom:** in `MachineDeviceStore` (exohost), a `Map<String, Map<String, Array<String>>>` filled and read back
   inside one process gave wrong answers (a grant set just stored was not found) and, intermittently, `Access violation`
   in the unit test run. Not isolated to a small reproduction; the same logic over an `Array<{device, workspace, grants}>`
   passed every run.
@@ -491,9 +491,9 @@ These are stricter than stock Haxe. Each needs a decision, and a better message 
 ## Generated helper code names an enum abstract value without its type
 
 `haxeon/src/compiler/types/typing/EnumEqualityGenerator.hx:98` writes `originKind: Helper`. When a program that also
-compiles the haxeon compiler (the editor does) declares another enum abstract with a value named `Helper` (`suit.SuitKind`
+compiles the haxeon compiler (the editor does) declares another enum abstract with a value named `Helper` (`exohost.ExohostKind`
 did), the build fails with E1005 "Ambiguous enum abstract value "Helper"". An abstract in another package should not make
-an unqualified value inside the compiler's own package ambiguous. Workaround in exosuit: the suit kind is `HelperProcess`.
+an unqualified value inside the compiler's own package ambiguous. Workaround in exosuit: the exohost kind is `HelperProcess`.
 Fix in haxeon: qualify the value (`FunctionOriginKind.Helper`), or prefer the abstract of the expected type.
 
 ## UIKit: TreeView.focusItem on a restored context

@@ -10,7 +10,7 @@ import workspace.transport.RelaySocketLink;
 import workspace.transport.RelaySocketTicket;
 
 /**
-	suit's machine socket to the relay (MachineRemote): it dials with the machine's bearer, keeps the socket and dials
+	exohost's machine socket to the relay (MachineRemote): it dials with the machine's bearer, keeps the socket and dials
 	again with backoff when it drops. Inbound device channels go to `onChannel`, where the pairing manager binds Noise.
 	Pairing calls (HTTPS with the same bearer) go through it too.
 **/

@@ -4,7 +4,7 @@ import haxe.crypto.Sha256;
 import haxe.io.Bytes;
 
 /**
-	Values derived from a machine's Noise static public key (32 bytes). suit, the phone and the relay Worker
+	Values derived from a machine's Noise static public key (32 bytes). exohost, the phone and the relay Worker
 	(`relay/worker/src/index.ts`) compute the same ones; `docs/mobile/relay-identity.md` describes them.
 
 	- `fingerprint`: what an invitation carries (`#mk=` in its URL) so the phone can check, after the handshake, that it

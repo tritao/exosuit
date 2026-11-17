@@ -4,7 +4,7 @@ import workspace.transport.RelayMachineEndpoint;
 
 /**
 	Where relay secrets live: the OS credential store, shared by the workspace daemon (which writes the
-	machine bearer and the Noise static key) and suit (which reads the bearer to hold the machine socket).
+	machine bearer and the Noise static key) and exohost (which reads the bearer to hold the machine socket).
 
 	`EXOSUIT_RELAY_TEST_CREDENTIALS_DIR` switches both to a file store in that directory, but only together
 	with `EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1`, the local-Worker development switch, so a test never

@@ -1,6 +1,6 @@
 package workspace.client;
 
-/** What the Remote Access panel shows of this machine's relay identity (suit's `remote-status`). */
+/** What the Remote Access panel shows of this machine's relay identity (exohost's `remote-status`). */
 typedef MachineRemoteStatus = {
 	var enabled:Bool;
 	var connected:Bool;
@@ -44,7 +44,7 @@ typedef MachineWorkspacePick = {
 /** One-time pairing invitation: the address to give the device. */
 typedef MachineInvitation = {
 	var pairingSocketUrl:String;
-	/** What the owner gives the device: the socket URL with the machine key's fingerprint (`#mk=`), or the socket URL alone from an older suit. */
+	/** What the owner gives the device: the socket URL with the machine key's fingerprint (`#mk=`), or the socket URL alone from an older exohost. */
 	var invitationUrl:String;
 	var deviceId:String;
 	var expiresInSeconds:Int;
@@ -52,14 +52,14 @@ typedef MachineInvitation = {
 
 /**
 	Remote access for the whole machine (ADR 0005 section 4): paired devices and the workspaces each may use. The panel
-	reads this; MachineRemoteAccess implements it over suit's control ops, tests fake it.
+	reads this; MachineRemoteAccess implements it over exohost's control ops, tests fake it.
 **/
 interface MachineRemoteView {
 	function status():Null<MachineRemoteStatus>;
 	function devices():Null<MachineRemoteDevices>;
 	function busy():Bool;
 	function error():Null<String>;
-	/** Asks suit for the current status and devices, at most every few seconds unless `force`. */
+	/** Asks exohost for the current status and devices, at most every few seconds unless `force`. */
 	function refresh(force:Bool):Void;
 	function enable(origin:String, done:Null<String>->Void):Void;
 	/** Stops using the relay so another can be enabled. Paired devices stay listed but cannot connect. */
@@ -186,7 +186,7 @@ class MachineRemoteAccess implements MachineRemoteView {
 		run(function(finish) machine.remoteInvite(ttlSeconds, finish), function(reply, problem) {
 			var value:Dynamic = reply == null ? null : reply.invitation;
 			if (value == null) {
-				done(null, problem == null ? "suit sent no invitation" : problem);
+				done(null, problem == null ? "exohost sent no invitation" : problem);
 				return;
 			}
 			var socketUrl = Std.string(value.pairingSocketUrl);

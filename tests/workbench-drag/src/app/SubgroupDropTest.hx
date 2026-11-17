@@ -11,7 +11,7 @@ import workspace.client.RpcWorkspaceWorkbenchClient;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
-/** A suit-on Workbench: dragging a terminal and a session out of a sub-group into a top-level group sends the menu's move calls. */
+/** An exohost-on Workbench: dragging a terminal and a session out of a sub-group into a top-level group sends the menu's move calls. */
 class SubgroupDropTest {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
  public static function run():Void {

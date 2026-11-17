@@ -7,8 +7,8 @@
               so this one is coarse). With the shell up, keystroke -> echo comes from the terminal's own timeline marks
               (terminal-key -> terminal-echo, the frame that shows it), with no state read while it waits.
   switch      Alpha <-> Beta, both running, three times: the status never reads "connecting" (a switch is a focus change).
-  services    suit's `machine` lists one process per running workspace (read by the driver from suit's CLI when
-              EXOSUIT_ENTROPY_SUIT names the suit bytecode).
+  services    exohost's `machine` lists one process per running workspace (read by the driver from exohost's CLI when
+              EXOSUIT_ENTROPY_EXOHOST names the exohost bytecode).
   snapshot    Gamma's service stops; a second window shows Gamma's rows from its snapshot without a link to it. (The
               first window has Gamma's terminal open, so it starts Gamma again by design.)
 
@@ -79,8 +79,8 @@ def statuses(gui, start):
     return [(e["t"], e["workspace"][:8], e["detail"]) for e in tl[start:] if e["event"] == "status"]
 
 
-class Suit:
-    """The run's isolated suit, from the driver: its CLI list, its pipe, and second editor windows."""
+class Exohost:
+    """The run's isolated exohost, from the driver: its CLI list, its pipe, and second editor windows."""
 
     def __init__(self, gui):
         self.gui = gui
@@ -89,19 +89,19 @@ class Suit:
         self.hl = self.launch[0]
         program = next(x for x in self.launch if x.lower().endswith(".hl"))
         self.root = os.path.abspath(os.path.join(os.path.dirname(program), "..", "..", ".."))
-        self.bytecode = os.path.join(self.root, "suit", "build", "host", "main.hl")
-        self.env = dict(os.environ, EXOSUIT_SUIT_HOME=os.path.join(self.out, "suit-home"))
+        self.bytecode = os.path.join(self.root, "exohost", "build", "host", "main.hl")
+        self.env = dict(os.environ, EXOSUIT_EXOHOST_HOME=os.path.join(self.out, "exohost-home"))
         native = os.path.join(os.path.dirname(self.bytecode), "native")
         self.env["PATH"] = os.pathsep.join([os.path.join(native, d) for d in sorted(os.listdir(native))] + [os.path.dirname(self.hl), self.env.get("PATH", "")])
         self.started = []
 
     def services(self):
-        """suit's workspace processes as (kind, pid, workspace); raises when `suit list` fails, so no check reads a failed
+        """exohost's workspace processes as (kind, pid, workspace); raises when `exohost list` fails, so no check reads a failed
         listing as an empty one."""
         result = subprocess.run([self.hl, self.bytecode, "list", "--json"], env=self.env, capture_output=True, text=True,
                                 timeout=30, creationflags=0x08000000)
         if result.returncode != 0:
-            raise RuntimeError("suit list failed (exit %d): %s" % (result.returncode, (result.stderr or result.stdout)[-500:]))
+            raise RuntimeError("exohost list failed (exit %d): %s" % (result.returncode, (result.stderr or result.stdout)[-500:]))
         listed = json.loads(result.stdout)
         found = []
         def walk(value):
@@ -117,7 +117,7 @@ class Suit:
         return sorted(set(found), key=str)
 
     def request(self, message):
-        endpoint = json.load(open(os.path.join(self.out, "suit-home", "daemon.json")))["endpoint"]
+        endpoint = json.load(open(os.path.join(self.out, "exohost-home", "daemon.json")))["endpoint"]
         data = json.dumps(message).encode()
         with open(endpoint, "r+b", buffering=0) as pipe:
             pipe.write(bytes([72, 77, 80, 75, 1, 0]) + len(data).to_bytes(4, "big") + data)
@@ -176,14 +176,14 @@ def run(gui):
     opened = after(tl, mark, lambda e: e["event"] == "open-workspace" and e["workspace"] == beta)
     connected = after(tl, mark, lambda e: e["event"] == "status" and e["detail"] == "Workspace connected" and e["workspace"] == beta)
     ready = after(tl, mark, lambda e: e["event"] == "ready" and e["workspace"] == beta)
-    reply = after(tl, mark, lambda e: e["event"] == "suit-reply" and e["detail"].startswith("workspace.open"))
+    reply = after(tl, mark, lambda e: e["event"] == "exohost-reply" and e["detail"].startswith("workspace.open"))
     events = [] if opened is None else ["%d %s %s %s" % (e["t"] - tl[opened]["t"], e["event"], e["workspace"][:8], e["detail"])
                                         for e in tl[opened:(connected or opened) + 1]]
     gui.results.append({"check": "open idle events", "ok": opened is not None and connected is not None, "events": events})
     record(gui, "open idle -> connected", None if opened is None or connected is None else tl[connected]["t"] - tl[opened]["t"],
            int(os.environ.get("EXOSUIT_ENTROPY_OPEN_BUDGET", "1000")))
     if reply is not None:
-        gui.results.append({"check": "suit workspace.open reply", "ok": True, "note": tl[reply]["detail"]})
+        gui.results.append({"check": "exohost workspace.open reply", "ok": True, "note": tl[reply]["detail"]})
     if ready is not None and opened is not None:
         gui.results.append({"check": "open idle -> ready", "ok": True, "ms": tl[ready]["t"] - tl[opened]["t"]})
 
@@ -224,28 +224,28 @@ def run(gui):
                         "statuses": seen})
     print("%s switch statuses %s" % ("PASS" if not connecting else "FAIL", seen), flush=True)
 
-    gui.step("services: one process per running workspace (suit's own list)")
-    suit = Suit(gui)
-    found = suit.services()
+    gui.step("services: one process per running workspace (exohost's own list)")
+    exohost = Exohost(gui)
+    found = exohost.services()
     hosts = [f for f in found if f[0] == "workspace-host"]
     spares = [f for f in found if f[0] == "workspace-spare"]
-    gui.results.append({"check": "suit lists one process per running workspace (Alpha, Beta, Gamma)", "ok": len(hosts) == 3, "note": found})
-    gui.results.append({"check": "suit holds %s spare" % ("one" if os.environ.get("EXOSUIT_SUIT_SPARE") != "0" else "no"),
-                        "ok": len(spares) == (0 if os.environ.get("EXOSUIT_SUIT_SPARE") == "0" else 1), "note": spares})
+    gui.results.append({"check": "exohost lists one process per running workspace (Alpha, Beta, Gamma)", "ok": len(hosts) == 3, "note": found})
+    gui.results.append({"check": "exohost holds %s spare" % ("one" if os.environ.get("EXOSUIT_EXOHOST_SPARE") != "0" else "no"),
+                        "ok": len(spares) == (0 if os.environ.get("EXOSUIT_EXOHOST_SPARE") == "0" else 1), "note": spares})
     print("services:", found, flush=True)
 
     gui.step("snapshot: Gamma's service stops; a new window shows its rows with nothing started")
     gamma_host = next((f for f in hosts if f[2] and "gamma" in str(f[2]).lower()), None)
     stopped = False
     if gamma_host:
-        suit.request({"op": "service-stop", "pid": gamma_host[1]})
+        exohost.request({"op": "service-stop", "pid": gamma_host[1]})
         end = time.monotonic() + 15
         while time.monotonic() < end and not stopped:
-            stopped = not [f for f in suit.services() if f[0] == "workspace-host" and f[1] == gamma_host[1]]
+            stopped = not [f for f in exohost.services() if f[0] == "workspace-host" and f[1] == gamma_host[1]]
             time.sleep(0.3)
     gui.results.append({"check": "Gamma's service stopped", "ok": stopped, "note": gamma_host})
     if stopped:
-        second = suit.editor("r")
+        second = exohost.editor("r")
         try:
             second.wait("rows in the second window", lambda s: len(s["state"]["machineWorkspaces"]) == 3 and second.find(s, pattern="^w:"), 40)
             def gamma_rows(s):
@@ -260,7 +260,7 @@ def run(gui):
             gui.results.extend(second.results)
             second.results = []
         finally:
-            suit.close_editors()
+            exohost.close_editors()
 
     if os.environ.get("EXOSUIT_ENTROPY_IDLE") == "1":
         gui.step("idle: Beta collapsed and not shown; its link closes after 30 s, then its service idles out")
@@ -280,13 +280,13 @@ def run(gui):
         gone_at = None
         end = time.monotonic() + idle + 25
         while time.monotonic() < end:
-            if not [f for f in suit.services() if f[0] == "workspace-host" and f[2] and "beta" in str(f[2]).lower()]:
+            if not [f for f in exohost.services() if f[0] == "workspace-host" and f[2] and "beta" in str(f[2]).lower()]:
                 gone_at = time.monotonic()
                 break
             time.sleep(1)
-        gui.results.append({"check": "the unused workspace left suit's list after its idle time (%.0f s)" % idle, "ok": gone_at is not None,
+        gui.results.append({"check": "the unused workspace left exohost's list after its idle time (%.0f s)" % idle, "ok": gone_at is not None,
                             "note": None if gone_at is None else "%.0f s after its link closed" % (gone_at - left_at - 30)})
-        print("idle: Beta's service %s" % ("left suit's list" if gone_at else "still listed"), flush=True)
+        print("idle: Beta's service %s" % ("left exohost's list" if gone_at else "still listed"), flush=True)
 
     with open(os.path.join(gui.out, "timeline.json"), "w") as f:
         json.dump(gui.state()["timeline"], f, indent=1)

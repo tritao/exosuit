@@ -408,7 +408,7 @@ static size_t environment_block_length(const wchar_t *text, size_t count) {
  * The requested variables of a 64-bit process's environment block, read from its PEB
  * (see the offsets above). Needs PROCESS_VM_READ. Returns NULL (unreadable) for a block
  * that is not well formed. A 32-bit processkit does not read environments: it cannot
- * follow a 64-bit process's PEB, so every process reads as unreadable there, and suit,
+ * follow a 64-bit process's PEB, so every process reads as unreadable there, and exohost,
  * which adopts only processes whose environment it read, adopts nothing.
  */
 static char *read_environment(HANDLE process, const char *variables) {

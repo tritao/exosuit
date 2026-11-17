@@ -28,7 +28,7 @@ param(
 	[string[]]$UiPreviewArgs = @(),
 	[string]$UiPreviewTitle = 'Exosuit UI exploration',
 	# Drive the editor with a GUI scenario (gui_scenarios/<Drive>.py, gui_driver.py) instead of the profiler scenario:
-	# over suit's control plane (synthetic input, the app's ui.snapshot), isolated state and suit; no trace or metrics.
+	# over exohost's control plane (synthetic input, the app's ui.snapshot), isolated state and exohost; no trace or metrics.
 	[string]$Drive = '',
 	[int]$DriveSeconds = 100
 )
@@ -42,7 +42,7 @@ $editorSeconds = 120
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $root = if ($Root) { (Resolve-Path $Root).Path } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 $out = Join-Path $PSScriptRoot "runs\$Name"
-# A stopped run's manager or suit can hold its files for a moment; retry before giving up.
+# A stopped run's manager or exohost can hold its files for a moment; retry before giving up.
 for ($attempt = 0; (Test-Path $out) -and $attempt -lt 30; $attempt++) {
 	try { Remove-Item -Recurse -Force $out -ErrorAction Stop } catch { Start-Sleep -Seconds 2 }
 }
@@ -177,7 +177,7 @@ public static class PreviewWindowBounds {
 		$result = Invoke-Guarded -FilePath python -ArgumentList $runArgs -WorkingDirectory $root -TimeoutSeconds $DeadlineSeconds -LogPath $log -OnTick $tickDrive
 		Format-GuardResult $result | Set-Content (Join-Path $out 'guard.txt')
 		Note (Format-GuardResult $result)
-		# A scenario may end the editor itself (suitctl quit) and still have checks to record: it gets 20 s to finish.
+		# A scenario may end the editor itself (exohostctl quit) and still have checks to record: it gets 20 s to finish.
 		if ($state.scenario -and -not $state.scenario.HasExited -and $result.ExitCode -notin 124, 125) { [void]$state.scenario.WaitForExit(20000) }
 		if ($state.scenario -and -not $state.scenario.HasExited) { Stop-Process -Id $state.scenario.Id -Force -ErrorAction SilentlyContinue }
 		if ($state.scenario) { Get-Content (Join-Path $out 'scenario.log') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ } }
@@ -193,14 +193,14 @@ public static class PreviewWindowBounds {
 	"cpu_before_launch=$load" | Set-Content (Join-Path $out 'cpu.txt')
 	Note "measuring $root ($Profile$(if ($Live) { ', live' }), file $File)"
 	# All state of the run is its own (as gui_fixture.py sets it for -Drive): the editor's, the workspace services' and
-	# suit's, so the editor neither reaches the user's suit nor writes under %LOCALAPPDATA%\Exosuit.
+	# exohost's, so the editor neither reaches the user's exohost nor writes under %LOCALAPPDATA%\Exosuit.
 	$env:PRAGTICAL_PORTABLE = Join-Path $out 'state'
 	$env:EXOSUIT_AGENT_STATE_HOME = Join-Path $out 'agent-state'
 	$env:EXOSUIT_SCRATCH_HOME = Join-Path $out 'scratch'
-	$env:EXOSUIT_SUIT_HOME = Join-Path $out 'suit-home'
-	$env:EXOSUIT_SUIT_SCAN = '0'
-	$env:EXOSUIT_SUIT_TRAY = '0'
-	$env:EXOSUIT_SUIT_LAUNCHER = Join-Path $root 'suit\build\host\main.hl'
+	$env:EXOSUIT_EXOHOST_HOME = Join-Path $out 'exohost-home'
+	$env:EXOSUIT_EXOHOST_SCAN = '0'
+	$env:EXOSUIT_EXOHOST_TRAY = '0'
+	$env:EXOSUIT_EXOHOST_LAUNCHER = Join-Path $root 'exohost\build\host\main.hl'
 	$runArgs = @('scripts/run.py')
 	if ($Live) { $runArgs += '--live' }
 	$runArgs += @("--profile=$Profile", $root, (Join-Path $root $File))

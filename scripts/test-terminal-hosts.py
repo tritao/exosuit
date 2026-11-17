@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A terminal in a terminal host survives its workspace service: same shell, same screen, after the service is stopped and started again and after it is killed and started again. Then, with its own suit: the host is listed, kept by the polite quit (`suit quit --keep-terminals`) and part of `kill --all`, `suit terminals end` ends it, and a service start cleans up what no terminal needs. Last, with several terminals in two workspaces: each comes back to its own view with its scrollback, a full-screen program keeps its modes, a broken connection to a host is opened again, and a program that ends while no service runs keeps its last screen and exit code."""
+"""A terminal in a terminal host survives its workspace service: same shell, same screen, after the service is stopped and started again and after it is killed and started again. Then, with its own exohost: the host is listed, kept by the polite quit (`exohost quit --keep-terminals`) and part of `kill --all`, `exohost terminals end` ends it, and a service start cleans up what no terminal needs. Last, with several terminals in two workspaces: each comes back to its own view with its scrollback, a full-screen program keeps its modes, a broken connection to a host is opened again, and a program that ends while no service runs keeps its last screen and exit code."""
 import hashlib
 import json
 import os
@@ -35,7 +35,7 @@ def begin(environment,state,root,idle=8):
     """Starts the service of `root`'s test workspace with idle limit `idle` and returns it once ready."""
     return start_service(environment,state,root,idle_seconds=idle)
 def stop(service,idle=8):
-    """Stops a service the clean way there is without suit: its clients are gone, so it idles out."""
+    """Stops a service the clean way there is without exohost: its clients are gone, so it idles out."""
     assert service.wait(idle+20)==0,'the service did not idle out'
 def kill(service):
     subprocess.run(['taskkill','/F','/PID',str(service.pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             handle=kernel.OpenProcess(0x1000,False,hosts[0])
             assert handle,'the terminal host could not be opened'
             assert list(state.glob('exosuit/terminal-host/*/complete')),'the host does not run from a private runtime copy'
-            # The service stops cleanly (it idles out, as when suit stops it); the terminal's shell must outlive it.
+            # The service stops cleanly (it idles out, as when exohost stops it); the terminal's shell must outlive it.
             stop(service)
             shell=int((root/'shell-pid').read_text().strip())
             time.sleep(2)
@@ -92,24 +92,24 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             kill(service)
             for pid in hosts_of(fixture): subprocess.run(['taskkill','/F','/T','/PID',str(pid)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
-# ---- suit and the kill switches (docs/design/terminal-host-status.md): a host is listed by suit under its workspace, is
-# kept by Quit and by bulk stops, and ends on `suit terminals end`; a service start ends no host, removes dead hosts'
+# ---- exohost and the kill switches (docs/design/terminal-host-status.md): a host is listed by exohost under its workspace, is
+# kept by Quit and by bulk stops, and ends on `exohost terminals end`; a service start ends no host, removes dead hosts'
 # folders and unused runtime copies.
-from suit import library_path, library_variable
-SUIT=ROOT/'suit/build/host/main.hl'
-assert SUIT.is_file(),'build suit first: %s'%SUIT
+from exohost import library_path, library_variable
+EXOHOST=ROOT/'exohost/build/host/main.hl'
+assert EXOHOST.is_file(),'build exohost first: %s'%EXOHOST
 with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as temporary:
     fixture=Path(temporary); root=fixture/'project'; root.mkdir(); state=fixture/'state'
-    # Its own suit: hosts register in this home only, and suit reads no other process (EXOSUIT_SUIT_SCAN=0).
-    environment=environment_of(state,EXOSUIT_SUIT_HOME=str(fixture/'suit-home'),EXOSUIT_SUIT_AUTOSTART='0',
-        EXOSUIT_SUIT_TRAY='0',EXOSUIT_SUIT_SCAN='0',EXOSUIT_TERMINAL_HOST_CHECK_SECONDS='1')
-    suit_environment=dict(environment,EXOSUIT_SUIT_LAUNCHER=str(SUIT))
-    suit_environment[library_variable()]=library_path(SUIT,Path(RUNNER[0]),HAXEON_ROOT,environment['PATH'])
-    def suit(*arguments):
-        result=subprocess.run([RUNNER[0],str(SUIT),*arguments],env=suit_environment,capture_output=True,text=True,timeout=60)
-        assert result.returncode==0,'suit %s failed (%d): %s%s'%(' '.join(arguments),result.returncode,result.stderr,result.stdout)
+    # Its own exohost: hosts register in this home only, and exohost reads no other process (EXOSUIT_EXOHOST_SCAN=0).
+    environment=environment_of(state,EXOSUIT_EXOHOST_HOME=str(fixture/'exohost-home'),EXOSUIT_EXOHOST_AUTOSTART='0',
+        EXOSUIT_EXOHOST_TRAY='0',EXOSUIT_EXOHOST_SCAN='0',EXOSUIT_TERMINAL_HOST_CHECK_SECONDS='1')
+    exohost_environment=dict(environment,EXOSUIT_EXOHOST_LAUNCHER=str(EXOHOST))
+    exohost_environment[library_variable()]=library_path(EXOHOST,Path(RUNNER[0]),HAXEON_ROOT,environment['PATH'])
+    def exohost(*arguments):
+        result=subprocess.run([RUNNER[0],str(EXOHOST),*arguments],env=exohost_environment,capture_output=True,text=True,timeout=60)
+        assert result.returncode==0,'exohost %s failed (%d): %s%s'%(' '.join(arguments),result.returncode,result.stderr,result.stdout)
         return result.stdout
-    def planned(*arguments): return {int(line.split()[0]) for line in suit(*arguments,'--dry-run').splitlines() if line.endswith('would stop')}
+    def planned(*arguments): return {int(line.split()[0]) for line in exohost(*arguments,'--dry-run').splitlines() if line.endswith('would stop')}
     def start(idle=8):
         service=begin(environment,state,root,idle)
         time.sleep(1)
@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
         text=service_logs(state)
         for path in state.glob('exosuit/workspaces/*/terminal-hosts/*/host.log'): text+='\n== '+str(path)+'\n'+path.read_text(errors='replace')[-4000:]
         return text
-    suit('status')
+    exohost('status')
     if True:
         manager=start()
         try:
@@ -131,20 +131,20 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             assert json.loads((folder/'terminal.json').read_text())['terminal']=='test-terminal','the service did not say which terminal the host keeps'
             assert list(copies.glob('*/host-%d.lease'%host)),'the host holds no lease in its runtime copy'
             stop(manager)
-            # 1. suit knows the host, with no service running: its own kind, under its workspace, not orphaned, in `kill --all`.
-            listing=json.loads(suit('list','--json'))
+            # 1. exohost knows the host, with no service running: its own kind, under its workspace, not orphaned, in `kill --all`.
+            listing=json.loads(exohost('list','--json'))
             entry=next((process for process in listing['processes'] if process['pid']==host),None)
-            assert entry is not None,'suit does not list the terminal host: %r'%listing
+            assert entry is not None,'exohost does not list the terminal host: %r'%listing
             assert entry['kind']=='terminal-host' and entry['source']=='registered' and not entry['orphaned'],entry
             assert entry['terminal']['terminal']=='test-terminal' and entry['workspace']==root.name,entry
             assert listing['terminals']==1 and '1 terminal' in listing['summary'],listing
             assert host in planned('kill','--all') and host not in planned('kill','--orphans'),'`kill --all` must include the host and the orphan sweep must not'
-            assert planned('terminals','end','--all')=={host} and planned('terminals','end',str(root))=={host},'`suit terminals end` does not select the host'
-            menu=suit('menu')
-            assert str(host) in suit('terminals') and 'End all terminals (1)' in menu and 'Quit Exosuit and end everything (1 terminal)' in menu and 'Quit, keep terminals running (1)' in menu,menu
-            # 2. The polite quit keeps the terminal and says so (the full quit is covered by scripts/test-suit.py).
-            said=suit('quit','--keep-terminals')
-            assert '1 terminal keeps running' in said and 'suit terminals end --all' in said,said
+            assert planned('terminals','end','--all')=={host} and planned('terminals','end',str(root))=={host},'`exohost terminals end` does not select the host'
+            menu=exohost('menu')
+            assert str(host) in exohost('terminals') and 'End all terminals (1)' in menu and 'Quit Exosuit and end everything (1 terminal)' in menu and 'Quit, keep terminals running (1)' in menu,menu
+            # 2. The polite quit keeps the terminal and says so (the full quit is covered by scripts/test-exohost.py).
+            said=exohost('quit','--keep-terminals')
+            assert '1 terminal keeps running' in said and 'exohost terminals end --all' in said,said
             assert pid_runs(host) and pid_runs(shell),'the polite quit ended the terminal'
             # 3. Planted: a host folder with no terminal record that holds a last screen, an old one with no host and nothing
             # to collect, an old runtime copy nothing runs from and a young one.
@@ -177,11 +177,11 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             assert pid_runs(host) and pid_runs(shell),'a service with an empty terminal catalog ended the terminal'
             for path in workspace.glob('catalog.sqlite*'): path.unlink()
             for path in moved: (aside/path.name).rename(workspace/path.name)
-            # The host with no service attached (it checks every second here): suit's list of workspaces is emptied, then lists
+            # The host with no service attached (it checks every second here): exohost's list of workspaces is emptied, then lists
             # only another workspace. Neither is a removal of the host's workspace: the program keeps running.
             identity=folder/'terminal.json'; written=identity.read_text()
             identity.write_text(json.dumps(dict(json.loads(written),workspace='workspace-lifecycle-test'))+'\n')
-            catalog=fixture/'suit-home'/'machine.json'; kept=catalog.read_text() if catalog.exists() else None
+            catalog=fixture/'exohost-home'/'machine.json'; kept=catalog.read_text() if catalog.exists() else None
             catalog.write_text(json.dumps({'version':2,'id':'machine-test','name':'test','workspaces':[]})+'\n')
             time.sleep(4)
             assert pid_runs(host) and pid_runs(shell),'an empty machine.json ended an unattached host'
@@ -209,15 +209,15 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             run_tree([*RUNNER,'host-type',str(root),str(SERVICE),'test-terminal','attach',"'RESUMED_'+'SHELL'",'RESUMED_SHELL'],environment,timeout=150)
             assert hosts_of(fixture)==[host] and pid_runs(shell),'the terminal was not taken back from the same host'
             kill(manager)  # its idle limit is long
-            # 4. The kill switch: `suit terminals end --all` kills the host and its program.
+            # 4. The kill switch: `exohost terminals end --all` kills the host and its program.
             assert planned('terminals','end','--all')=={host}
-            ended=suit('terminals','end','--all')
+            ended=exohost('terminals','end','--all')
             assert str(host) in ended,ended
             deadline=time.monotonic()+15
             while pid_runs(host) or pid_runs(shell):
-                assert time.monotonic()<deadline,'`suit terminals end --all` left the host or its shell running: %s'%ended
+                assert time.monotonic()<deadline,'`exohost terminals end --all` left the host or its shell running: %s'%ended
                 time.sleep(.2)
-            assert json.loads(suit('list','--json'))['terminals']==0 and 'No terminal is kept running' in suit('terminals')
+            assert json.loads(exohost('list','--json'))['terminals']==0 and 'No terminal is kept running' in exohost('terminals')
             # 5. A host that fails to start (its runtime copy's bytecode is broken here) leaves no spec.bin: it holds the
             # program's environment and the pipe's token.
             manager=start()
@@ -233,7 +233,7 @@ with tempfile.TemporaryDirectory(prefix='exhost-',ignore_cleanup_errors=True) as
             assert broken_folder.is_dir() and not (broken_folder/'spec.bin').exists(),'spec.bin was left behind by a host that failed to start'
             assert 'exited before it was ready' in logs(),'the host did not fail the way this check expects'
             stop(manager)
-            print('PASS: suit lists a terminal host, the polite quit keeps it, kill --all includes it, `suit terminals end` ends it; a service start ends no host (an empty terminal catalog included), keeps a folder with a last screen and removes dead folders and unused runtime copies; an empty or partial machine.json ends no unattached host; a host that does not answer is not ended and is taken back once it answers; a host that fails to start leaves no spec.bin',flush=True)
+            print('PASS: exohost lists a terminal host, the polite quit keeps it, kill --all includes it, `exohost terminals end` ends it; a service start ends no host (an empty terminal catalog included), keeps a folder with a last screen and removes dead folders and unused runtime copies; an empty or partial machine.json ends no unattached host; a host that does not answer is not ended and is taken back once it answers; a host that fails to start leaves no spec.bin',flush=True)
         except Exception:
             print(logs(),file=sys.stderr)
             raise

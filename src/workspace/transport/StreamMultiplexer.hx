@@ -79,7 +79,7 @@ class MuxStream implements MessageTransport {
 
 /**
 	Either end of the stream frames a paired Noise channel carries (`MachineStreamFrame`, ADR 0005 section 4): the
-	device's, and suit's (`MachineDeviceSession`). `machineStream()` is stream 0, always open; `open(id)` registers a
+	device's, and exohost's (`MachineDeviceSession`). `machineStream()` is stream 0, always open; `open(id)` registers a
 	stream the machine made for an OPEN. Each stream is a `MessageTransport` for an ordinary RPC connection, so the
 	machine directory and every workspace connection run over one channel.
 

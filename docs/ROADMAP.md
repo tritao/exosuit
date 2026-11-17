@@ -77,12 +77,12 @@ Compiler bugs are in [haxeon-compiler-bugs.md](haxeon-compiler-bugs.md).
 - In automated phone acceptance the Read only strip sometimes did not repaint after another viewer took control; the
   script warns instead of failing.
 
-## suit
+## exohost
 
 - The tray tooltip is cut at 128 characters. Terminate is offered on processes exosuit did not start.
 - An orphaned compiler worker can be missed for up to 10 s after its parent exits. The daemon's client list has no
   bound. In the adoption sweep a process whose environment cannot be read counts as included.
-- NativeKit's tray menu: `SuitTray.show` clears its actions even when a menu is already open; a cancelled menu's thread
+- NativeKit's tray menu: `ExohostTray.show` clears its actions even when a menu is already open; a cancelled menu's thread
   can post its close message to a newer menu; the menu window class is registered under the exe's `HINSTANCE`.
 - macOS process listing is not implemented; the Linux and macOS C changes (chunked `/proc/environ` read) have not been
   compiled there.
@@ -101,7 +101,7 @@ Compiler bugs are in [haxeon-compiler-bugs.md](haxeon-compiler-bugs.md).
 
 ## Build
 
-- NativeKit is configured and built three times (agent, suit, editor); libwebsockets' configure checks cost about
+- NativeKit is configured and built three times (agent, exohost, editor); libwebsockets' configure checks cost about
   30 s in each. Share one CMake tree, then build the apps side by side.
 - A compiler cache shared across worktrees on Windows needs paths under 260 characters.
 - Profile the editor's Haxe compile (about 50 s).

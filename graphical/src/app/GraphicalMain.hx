@@ -23,7 +23,7 @@ class GraphicalMain {
 	static var workspaceLinks:Null<workspace.client.WorkspaceLinks> = null;
 	static var allocationProfile:Null<String> = null;
 	static var inspection:Null<devtools.InspectionAgent> = null;
-	/** The window's side of suit's control plane: the methods suit routes here, and synthetic input. */
+	/** The window's side of exohost's control plane: the methods exohost routes here, and synthetic input. */
 	static var control:Null<ui.control.EditorControl> = null;
 	static var devtoolsProcess:Null<sys.io.ChildProcess> = null;
 	static final devtoolsOutput:haxe.io.Bytes = haxe.io.Bytes.alloc(4096);
@@ -57,8 +57,8 @@ class GraphicalMain {
 		session = null;
 		app = null;
 		if (control != null) { control.dispose(); control = null; }
-		// suit learns that this window closed from its link closing.
-		var link = suit.SuitLink.instance;
+		// exohost learns that this window closed from its link closing.
+		var link = exohost.ExohostLink.instance;
 		if (link != null) link.dispose();
 		if (inspection != null) {
 			var target:devtools.InspectionAgent = cast inspection;
@@ -208,7 +208,7 @@ class GraphicalMain {
 			placementReader = context.windowPlacement;
 			workspace.client.ConnectTimeline.mark("window-open");
 			var dark = prefersDark(themeChoice);
-			// Input and dialogs a program driving this window over suit's control plane goes through (EditorControl).
+			// Input and dialogs a program driving this window over exohost's control plane goes through (EditorControl).
 			var input = new ui.control.SyntheticInput(context.events, context.window);
 			var dialogs = new ui.control.DrivenDialogs(new NativeDesktopServices(context), input.driven);
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
@@ -220,9 +220,9 @@ class GraphicalMain {
 			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows") {
 				try {
 					var clock = function() return NativeKit.nk_time_seconds() * 1000;
-					// The window's link to suit (the tray daemon), which it starts when it does not answer; never blocks. suit
+					// The window's link to exohost (the tray daemon), which it starts when it does not answer; never blocks. exohost
 					// starts the workspaces' services and names their pipes (`workspace.open`).
-					var link = suit.SuitLink.start(context.events);
+					var link = exohost.ExohostLink.start(context.events);
 					var machine = new workspace.client.MachineClient(link);
 					// One link per workspace the window uses: the one it shows, expanded rows, terminals.
 					workspaceLinks = new workspace.client.WorkspaceLinks(context.events, clock, machine.open);

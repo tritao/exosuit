@@ -369,7 +369,7 @@ def bootstrap(root: Path) -> list:
 def main() -> int:
     root = Path(sys.argv[1])
     trees = []
-    for app in ("agent", "suit", "graphical"):
+    for app in ("agent", "exohost", "graphical"):
         native = root / app / "build" / "host" / "native"
         if not native.is_dir():
             continue
@@ -383,7 +383,7 @@ def main() -> int:
                 record.update({"app": app, "package": package.name, "outputs": outputs})
                 trees.append(record)
     haxe = []
-    for app in ("agent", "suit", "graphical"):
+    for app in ("agent", "exohost", "graphical"):
         host = root / app / "build" / "host"
         for name in ("main.hl", "main.hl.functions", "main.hl.live.json"):
             path = host / name

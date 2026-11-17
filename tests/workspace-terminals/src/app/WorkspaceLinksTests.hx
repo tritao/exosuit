@@ -3,7 +3,7 @@ package app;
 import workspace.client.WorkspaceLinks;
 import workspace.client.WorkspaceServiceTarget;
 
-/** WorkspaceLinks, with a suit stand-in that records which workspaces were asked for and never answers. */
+/** WorkspaceLinks, with an exohost stand-in that records which workspaces were asked for and never answers. */
 class WorkspaceLinksTests {
 	static function require(value:Bool, message:String):Void {
 		if (!value) throw message;

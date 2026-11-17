@@ -74,7 +74,7 @@ class ContextSwitching {
 		var client = app.workbenchClient, catalog = client == null ? null : client.terminalCatalog();
 		if (catalog != null && Lambda.exists(catalog.groups, function(group) return group.id == id)) app.focusGroupById(id);
 	}
-	/** The editor window `--context=` asked for: once suit lists the machine's workspaces, opens that workspace and group. */
+	/** The editor window `--context=` asked for: once exohost lists the machine's workspaces, opens that workspace and group. */
 	public function startInContext(key:Null<String>):Void {
 		var parsed = key == null ? null : workspace.ContextKey.parse(key);
 		if (parsed != null) startContext = new workspace.ContextInfo(parsed.machine, parsed.workspace, parsed.group, "", "", "");

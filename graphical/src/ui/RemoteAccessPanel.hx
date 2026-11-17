@@ -26,7 +26,7 @@ import workspace.client.MachineRemoteAccess.MachineRemoteView;
 import workspace.client.MachineRemoteAccess.MachineWorkspacePick;
 
 /**
-	Remote access for the whole machine (ADR 0005 section 4), from suit: the relay, pairing, and the devices with the
+	Remote access for the whole machine (ADR 0005 section 4), from exohost: the relay, pairing, and the devices with the
 	workspaces each may use.
 **/
 class RemoteAccessPanel implements View {

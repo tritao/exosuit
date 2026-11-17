@@ -6,7 +6,7 @@ Status: accepted (2026-10-29; agreed with tritao), built. Refines [ADR 0005](000
 
 A folder used to do three jobs:
 
-1. **Identity.** A service's state folder, pipe, suit record and relay identity were keyed by a hash of its folder.
+1. **Identity.** A service's state folder, pipe, exohost record and relay identity were keyed by a hash of its folder.
 2. **Working directory.** Agent sessions and terminals start in their group's folder, or else the service's.
 3. **File features.** Files, Search and Changes (source control) are rooted at it.
 
@@ -29,7 +29,7 @@ a folder was chosen, and a workspace with several folders needed a service per f
   1. the directory chosen for the session;
   2. else its group's folder, or the nearest ancestor group's (`GroupFolders`);
   3. else the workspace's first attached folder;
-  4. else the workspace's **scratch folder**, a visible folder `~/Exosuit/<workspace name>`, made on demand by suit
+  4. else the workspace's **scratch folder**, a visible folder `~/Exosuit/<workspace name>`, made on demand by exohost
      and recorded in `machine.json`, so renaming the workspace does not move it. A name already taken gets a numeric
      suffix.
 
@@ -48,7 +48,7 @@ The service's identity is the **workspace id**:
 - Its state folder and pipe are named after the workspace id (`workspaces/<workspace id>/`).
 - Attached folders are roots inside that service. File search, file watching and source control serve several roots,
   each labelled; `workspace.folders.manage` (method 153) changes them.
-- suit stays the only machine-level process. It lists the workspaces, starts their services, holds the machine's
+- exohost stays the only machine-level process. It lists the workspaces, starts their services, holds the machine's
   identity and devices, and routes each device to a workspace service by workspace id.
 - Isolation stays per workspace: a crash, a hang or a garbage collection pause affects one workspace.
 

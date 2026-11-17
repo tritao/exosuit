@@ -2,18 +2,18 @@
 
 The workspace service is one process per running workspace. It holds the workspace's groups, agent sessions and
 terminal records in SQLite, serves its files and source control, and listens only on a same-user local pipe. It has no
-UIKit or GPU dependency. How it fits with suit, the editor and devices is in
+UIKit or GPU dependency. How it fits with exohost, the editor and devices is in
 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
-The program is `agent/src/app/AgentMain.hx`. suit starts it when an editor opens the workspace (`workspace.open` on the
-editor's suit link) or a paired device needs it. By hand:
+The program is `agent/src/app/AgentMain.hx`. exohost starts it when an editor opens the workspace (`workspace.open` on the
+editor's exohost link) or a paired device needs it. By hand:
 
 ```sh
 python3 scripts/build.py
 haxeon/.tools/hashlink/hl agent/build/host/main.hl --workspace ID [--folder F]... [--scratch S]
 ```
 
-suit finds the bytecode through `EXOSUIT_AGENT_LAUNCHER`, or beside its own (a checkout's `agent/build/host/main.hl`,
+exohost finds the bytecode through `EXOSUIT_AGENT_LAUNCHER`, or beside its own (a checkout's `agent/build/host/main.hl`,
 a bundle's `exosuit-agent.hl`).
 
 ## State and start
@@ -23,22 +23,22 @@ a bundle's `exosuit-agent.hl`).
   `workspace.json` (which workspace and folders), `catalog.sqlite`, `service.log`, `catalog-snapshot.bin` and the
   terminal hosts' folders.
 - **One service per workspace.** The service takes `agent.lock` and exits with status 3 when another holds it.
-- **Ready.** It listens on its pipe at once and reports to suit (`service-attach`: workspace, pipe, pid, generation,
-  root, build; `src/suit/SuitServiceLink.hx`). suit hands that pipe to editors and devices; nothing about how to
+- **Ready.** It listens on its pipe at once and reports to exohost (`service-attach`: workspace, pipe, pid, generation,
+  root, build; `src/exohost/ExohostServiceLink.hx`). exohost hands that pipe to editors and devices; nothing about how to
   reach the service is written to disk. Connections that arrive while the catalog, terminals and agents come up wait
   in the pipe.
-- **Warm spare.** `main.hl --spare` loads, links to suit (`service-spare`) and waits. suit hands it a workspace
-  (`adopt`) when an idle one is opened, so the open needs no process start. suit keeps one spare while an editor is
+- **Warm spare.** `main.hl --spare` loads, links to exohost (`service-spare`) and waits. exohost hands it a workspace
+  (`adopt`) when an idle one is opened, so the open needs no process start. exohost keeps one spare while an editor is
   linked.
 - **Pipe.** A Windows named pipe whose DACL grants only the current user; a private `agent.sock` in the state folder
   elsewhere. Clients check the service's identity (generation and root) before they watch its catalog.
-- **Devices.** The service never dials a relay. suit forwards a paired device's stream to the pipe, sending first an
+- **Devices.** The service never dials a relay. exohost forwards a paired device's stream to the pipe, sending first an
   intro with the device's grants (`ForwardedStream`); the service serves that connection with only those grants.
   Folder changes and source-control trust stay local only.
 
 ## Stop
 
-- suit asks over the link (`stop`, now or after the running agent turn). A service of another build is restarted that
+- exohost asks over the link (`stop`, now or after the running agent turn). A service of another build is restarted that
   way when its workspace is next opened.
 - It stops by itself after `EXOSUIT_SERVICE_IDLE_SECONDS` (600 by default) with no client and no busy agent turn.
   Running terminals do not keep it: they live in terminal hosts, which outlive it. Idle chat processes lengthen the
@@ -72,10 +72,10 @@ and builds a provider only when it is first needed. How a session continues afte
 ## Tests
 
 - `python3 scripts/test-workspace-terminals.py`: permissions, open retry, input order, bounded replay, reattachment.
-- `python3 scripts/test-terminal-hosts.py`: a terminal survives its service; suit lists, keeps and ends hosts.
+- `python3 scripts/test-terminal-hosts.py`: a terminal survives its service; exohost lists, keeps and ends hosts.
 - `python3 scripts/test-workspace-agents.py`, `test-claude-agents.py`, `test-pi-agents.py`: sessions through the
   service with fake CLIs.
 - `python3 scripts/test-agent-idle.py`: the idle stop.
-- `python3 scripts/test-machine-remote.py`: a device reaching a workspace through suit and a local relay.
+- `python3 scripts/test-machine-remote.py`: a device reaching a workspace through exohost and a local relay.
 - `python3 scripts/test-workspace-attachment.py`, `bash scripts/test-workspace-persistence.sh`, `test-workspace-transport.sh`:
   identity and reuse, storage, real transports.

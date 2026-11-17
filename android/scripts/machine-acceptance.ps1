@@ -1,5 +1,5 @@
 <#
-Acceptance run for Phase 9 on the phone (ADR 0005 section 4): the emulator app pairs ONCE with a machine (suit),
+Acceptance run for Phase 9 on the phone (ADR 0005 section 4): the emulator app pairs ONCE with a machine (exohost),
 then sees the workspaces the owner grants it, with their groups and sessions, without pairing again.
 
   pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-x86_64] [-Port 5554] [-OutDir dir] [-SkipBuild]
@@ -23,9 +23,9 @@ Steps (screenshots in -OutDir; LOOK at each one, the logcat waits only prove the
 Taps use fixed pixel positions of the 1080x2400 emulator screen (the AVD in docs/mobile/android.md); the screenshots show
 whether they hit. Terminal assertions read the fake TUI's log (tests/workspace-terminals/fake-claude-tui.py), not pixels.
 
-Everything it starts it stops: the desktop test host (scripts/mobile-machine-host.py: local relay, isolated suit, two
+Everything it starts it stops: the desktop test host (scripts/mobile-machine-host.py: local relay, isolated exohost, two
 workspaces with fake Codex sessions) and the emulator. Prerequisites: the Android toolchain variables
-(docs/mobile/android.md), `python scripts/build.py --only agent`, suit and tests/mobile-pairing built (see the host script).
+(docs/mobile/android.md), `python scripts/build.py --only agent`, exohost and tests/mobile-pairing built (see the host script).
 Resume steps (-Step resume-home,resume-back,resume-screen,resume-kill,resume-network,resume-desktop | resume-all): the paired phone comes
 back connected and drawn without pairing again. The run pairs ONCE (or, with -Reuse, uses the pairing stored on an already running
 rig), opens Alpha's Claude terminal, then for each step does the thing and measures the seconds until the phone shows its machine
@@ -38,7 +38,7 @@ esume	imes.log per step. Steps share one run, so they are listed in one -Step.
   resume-kill     am force-stop, relaunch: reconnects from the stored credentials
   resume-network  the phone's network goes away (wifi and data off, the adb reverse to the relay removed, adb transport reset)
                   and comes back: a disconnected state is shown while offline, then it reconnects by itself
-  resume-desktop  the desktop restarts (suit stops 8 s, starts again on the same home): the phone reconnects by itself
+  resume-desktop  the desktop restarts (exohost stops 8 s, starts again on the same home): the phone reconnects by itself
 #>
 param(
     [string]$Avd = 'exosuit-x86_64',
@@ -283,25 +283,25 @@ function Step-Desktop {
     $log = Join-Path $hostDir 'host.log'
     $mark = @(Get-Content $log).Count
     $from = Get-Date
-    Host-Command @('restart-suit', '--down-seconds', '8')
+    Host-Command @('restart-exohost', '--down-seconds', '8')
     $secs = Wait-ResumeStatus { param($s) -not $s.Online } 60
     Shot (Join-Path $resumeDir 'resume-desktop-offline.png')
     if ($null -eq $secs) { Resume-Note 'resume-desktop    NOTE the phone never showed the machine offline' }
     else { Resume-Note ("resume-desktop    offline state shown {0:N1} s after the restart began" -f ((Get-Date) - $from).TotalSeconds) }
     $deadline = (Get-Date).AddSeconds(90)
-    while (-not (@(Get-Content $log | Select-Object -Skip $mark) -match 'suit-restarted') -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    while (-not (@(Get-Content $log | Select-Object -Skip $mark) -match 'exohost-restarted') -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
     $from = Get-Date
-    Resume-Note 'resume-desktop    suit is back, waiting for the phone'
+    Resume-Note 'resume-desktop    exohost is back, waiting for the phone'
     Finish-Resume 'resume-desktop' $from 120
     # "Online" in the phone's state can be a dead channel the phone has not noticed yet: prove the live link by a round trip through
-    # the NEW suit. The owner takes Beta back; the phone's directory must lose it (then it is granted again).
+    # the NEW exohost. The owner takes Beta back; the phone's directory must lose it (then it is granted again).
     $probe = Get-Date
     Host-Command @('revoke-grant', 'Beta')
     $secs = Wait-ResumeStatus { param($s) $s.Online -and -not $s.Beta } 150
     Shot (Join-Path $resumeDir 'resume-desktop-probe.png')
     Host-Command @('grant', 'Beta:read')
-    if ($null -eq $secs) { throw 'resume-desktop: the phone never saw the new suit''s directory change (dead channel after the desktop restarted)' }
-    Resume-Note ("resume-desktop    live again {0:N1} s after the restart finished (owner's change reached the phone through the new suit)" -f ((Get-Date) - $from).TotalSeconds)
+    if ($null -eq $secs) { throw 'resume-desktop: the phone never saw the new exohost''s directory change (dead channel after the desktop restarted)' }
+    Resume-Note ("resume-desktop    live again {0:N1} s after the restart finished (owner's change reached the phone through the new exohost)" -f ((Get-Date) - $from).TotalSeconds)
 }
 function Invoke-ResumeSteps($info) {
     New-Item -ItemType Directory -Force $resumeDir | Out-Null

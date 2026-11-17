@@ -26,7 +26,7 @@ import workspace.transport.NativeRpcTransport;
 	shown when the host is gone. It ends when a service tells it to end over its pipe (END), or when the program has
 	ended and no service is attached to hear of it.
 
-	It registers with suit as a terminal host, so the tray and `suit terminals` list it under its workspace; suit ends
+	It registers with exohost as a terminal host, so the tray and `exohost terminals` list it under its workspace; exohost ends
 	it by killing it.
 **/
 class TerminalHostMain {
@@ -40,7 +40,7 @@ class TerminalHostMain {
 	**/
 	static inline final WORKSPACE_CHECK_SECONDS = 30.0;
 	/**
-		How long a workspace may be missing from suit's list of this machine's workspaces before its unattached host ends
+		How long a workspace may be missing from exohost's list of this machine's workspaces before its unattached host ends
 		the program (its last screen is kept). Only an explicit removal ends a host sooner.
 	**/
 	static inline final ABSENT_SECONDS = 6 * 3600.0;
@@ -49,7 +49,7 @@ class TerminalHostMain {
 
 	/**
 		Why the workspace this host belongs to is gone for certain, or null. Gone means: the host's folder or the
-		workspace's state folder was removed, or suit removed the workspace (`MachineCatalog.removed`: the workspace was
+		workspace's state folder was removed, or exohost removed the workspace (`MachineCatalog.removed`: the workspace was
 		removed while its service was stopped, so no service will come back for the terminal). A list of workspaces that
 		lacks this one is not enough: a catalog that was reset, rewritten badly or emptied says the same
 		(`WorkspaceAbsence`).
@@ -59,7 +59,7 @@ class TerminalHostMain {
 		if (!FileSystem.exists(stateDirectory)) return "the workspace's state folder was removed";
 		if (workspace == null || catalogFile == null) return null;
 		try {
-			if (suit.MachineCatalog.removed(catalogFile, workspace)) return "workspace " + workspace + " was removed from this machine";
+			if (exohost.MachineCatalog.removed(catalogFile, workspace)) return "workspace " + workspace + " was removed from this machine";
 		} catch (_:Dynamic) {}
 		return null;
 	}
@@ -155,18 +155,18 @@ class TerminalHostMain {
 				return false;
 			}
 		}
-		// The service wrote which terminal of which workspace this is; suit shows the host by it. Never fatal.
-		var identity = suit.TerminalHostFolder.read(directory);
+		// The service wrote which terminal of which workspace this is; exohost shows the host by it. Never fatal.
+		var identity = exohost.TerminalHostFolder.read(directory);
 		var stateDirectory = Path.directory(Path.directory(directory));
-		try suit.SuitClient.registerTerminalHost({root: identity.root == null ? stateDirectory : identity.root, stateDir: stateDirectory,
+		try exohost.ExohostClient.registerTerminalHost({root: identity.root == null ? stateDirectory : identity.root, stateDir: stateDirectory,
 			generation: null, workspace: identity.workspace}) catch (_:Dynamic) {}
 		// While this file names a running process, no service removes the runtime copy this host runs from.
 		var lease = workspace.runtime.TerminalHosts.TerminalHostRuntime.leasePath(Path.directory(FileSystem.fullPath(Sys.programPath())), Sys.getPid());
 		try File.saveContent(lease, Sys.executablePath() + "\n") catch (_:Dynamic) {}
 		var checkEvery = checkSeconds();
 		var workspaceCheckAt = Sys.time() + checkEvery, goneChecks = 0;
-		// suit's list of workspaces: a test's isolated suit home has its own.
-		var catalogFile = suit.MachineCatalog.file();
+		// exohost's list of workspaces: a test's isolated exohost home has its own.
+		var catalogFile = exohost.MachineCatalog.file();
 		var absence = new WorkspaceAbsence();
 		/** Nonzero once the host ended its program because its workspace was missing for long: when it did. */
 		var abandonedAt = 0.0;
@@ -289,7 +289,7 @@ class TerminalHostMain {
 			if (now >= workspaceCheckAt) {
 				workspaceCheckAt = now + checkEvery;
 				// Read again each time: the folder says which workspace the terminal belongs to.
-				var workspaceId = suit.TerminalHostFolder.read(directory).workspace;
+				var workspaceId = exohost.TerminalHostFolder.read(directory).workspace;
 				if (workspaceId == null) workspaceId = identity.workspace;
 				var gone = owner != null ? null : workspaceGone(directory, stateDirectory, workspaceId, catalogFile);
 				goneChecks = gone == null ? 0 : goneChecks + 1;
@@ -431,7 +431,7 @@ class TerminalHostMain {
 		// Only its own record: after Restart Terminal the next host for this terminal runs in the same folder and has
 		// written its `host.json` by now.
 		if (ownsFolder()) try FileSystem.deleteFile(hostPath) catch (_:Dynamic) {}
-		suit.SuitClient.unregister();
+		exohost.ExohostClient.unregister();
 		try FileSystem.deleteFile(lease) catch (_:Dynamic) {}
 		pty.close();
 		emulator.close();
@@ -444,7 +444,7 @@ class TerminalHostMain {
 }
 
 /**
-	How long a host's workspace has been missing from suit's list of this machine's workspaces (`machine.json`), counting
+	How long a host's workspace has been missing from exohost's list of this machine's workspaces (`machine.json`), counting
 	only lists that can be trusted to say so. A list that is missing, unreadable or empty, one of another machine id than
 	the last one that listed the workspace, or one with fewer workspaces than that one (a reset, a bad rewrite, a restored
 	copy) says nothing, and the count starts again.
@@ -461,9 +461,9 @@ class WorkspaceAbsence {
 
 	/** Seconds the workspace has been missing from trusted lists up to `now`; 0 while it is listed or nothing can be told. */
 	public function check(workspace:String, catalogFile:String, now:Float):Float {
-		var state:Null<suit.MachineCatalog.MachineState> = null;
+		var state:Null<exohost.MachineCatalog.MachineState> = null;
 		try {
-			if (FileSystem.exists(catalogFile)) state = suit.MachineCatalog.decode(File.getContent(catalogFile));
+			if (FileSystem.exists(catalogFile)) state = exohost.MachineCatalog.decode(File.getContent(catalogFile));
 		} catch (_:Dynamic) {}
 		if (state == null || state.workspaces.length == 0) {
 			absentSince = 0;

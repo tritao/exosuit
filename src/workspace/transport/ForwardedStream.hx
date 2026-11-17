@@ -4,17 +4,17 @@ import haxe.Json;
 import haxe.io.Bytes;
 import haxeon.rpc.MessageTransport;
 
-/** What suit tells a workspace service about a device stream it forwards: who, and what that device may do. */
+/** What exohost tells a workspace service about a device stream it forwards: who, and what that device may do. */
 typedef ForwardedIntro = {
 	var device:String;
 	var grants:Array<String>;
 }
 
 /**
-	The first message on a local connection that suit forwards a paired device's stream over (ADR 0005 section 4):
+	The first message on a local connection that exohost forwards a paired device's stream over (ADR 0005 section 4):
 	the magic `EXFW`, then JSON `{version: 1, device, grants}`. Every message after it belongs to the stream and is
 	an ordinary RPC message, so the service runs its usual handshake on the connection with exactly these grants.
-	A local peer that is not suit sends no intro and is a normal same-user client. A same-user peer could send an
+	A local peer that is not exohost sends no intro and is a normal same-user client. A same-user peer could send an
 	intro too, but only to get fewer rights than it already has.
 **/
 class ForwardedStream {

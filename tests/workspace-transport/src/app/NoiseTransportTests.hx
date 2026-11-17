@@ -82,7 +82,7 @@ class NoiseTransportTests {
             {id: "work", name: "Work", cwd: "/workspace", revision: 1}
         ]);
         var rpcServer = new WorkspaceRpcServer(service, rpcClock);
-        // suit forwards the device's stream with its grants in an intro message (ForwardedStream).
+        // exohost forwards the device's stream with its grants in an intro message (ForwardedStream).
         rpcClientTransport.send(ForwardedStream.intro("device", [WorkspaceProtocol.READ]));
         rpcServer.acceptTestLocal(cast rpcPair.server);
         var clientOptions = new RpcPeerOptions("exosuit-agent/1",

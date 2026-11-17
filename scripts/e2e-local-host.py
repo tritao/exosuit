@@ -12,7 +12,7 @@ here reads or writes the user's real state, and no private key leaves DIR (never
 - a development CA and a server certificate for localhost, 127.0.0.1 and 10.0.2.2 (openssl from Git for Windows, or
   the one on PATH). DIR/tls/ca.pem is the public CA (the phone and any dev client trust it); the keys stay in DIR/tls;
 - the relay Worker (relay/worker) under `wrangler dev --local` (workerd, no Cloudflare login) on plain
-  http://127.0.0.1:RELAY_PORT. The desktop (suit, workspace service) reaches it there: the desktop's HTTPS client is
+  http://127.0.0.1:RELAY_PORT. The desktop (exohost, workspace service) reaches it there: the desktop's HTTPS client is
   WinHTTP with the Windows trust store, which has no development CA hook, and it already permits loopback http when
   EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1;
 - scripts/e2e-tls-proxy.mjs, which serves the same Worker over https/wss on 127.0.0.1:TLS_PORT with the development

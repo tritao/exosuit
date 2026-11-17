@@ -50,7 +50,7 @@ class NativeRpcHub {
 	final listeners:Map<Int, {owned:OwnedListenerHandle, ?callback:NativeRpcTransport->Void, ?bytes:NativeKitByteStream->Void, ?failed:Void->Void}> = [];
 	final subscription:EventSubscription;
 	var disposed:Bool = false;
-	/** The most streams open at once; an accept beyond it is closed. suit holds one per editor window and running service. */
+	/** The most streams open at once; an accept beyond it is closed. exohost holds one per editor window and running service. */
 	final maxStreams:Int;
 	final maxListeners:Int;
 	/** The largest message a framed stream of this hub sends or receives. */

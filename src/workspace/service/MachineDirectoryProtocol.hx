@@ -46,7 +46,7 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 
 /**
 	The stream a successful open made: frames with this id reach the workspace's service. `generation` and `root` are
-	what that service's IDENTITY answers with (as suit's `workspace.open` names them to an editor), so the device checks
+	what that service's IDENTITY answers with (as exohost's `workspace.open` names them to an editor), so the device checks
 	it reached that service; a machine too old to send them sends none.
 **/
 @:wire typedef WorkspaceStream = {
@@ -67,11 +67,11 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 }
 
 /**
-	The machine directory a paired device reads from suit (ADR 0005 section 4, M19 Phase 9). A device pairs once with
-	the machine. Its channel carries stream frames: stream 0 is a normal RPC connection with suit
+	The machine directory a paired device reads from exohost (ADR 0005 section 4, M19 Phase 9). A device pairs once with
+	the machine. Its channel carries stream frames: stream 0 is a normal RPC connection with exohost
 	(application `exosuit-machine/1`, capability `machine.directory`, the methods below); OPEN makes a stream
 	to a granted workspace's service, over which the device speaks the workspace protocol (`exosuit-agent/1`) as if
-	it were connected to that service directly. Suit forwards frames without reading them.
+	it were connected to that service directly. Exohost forwards frames without reading them.
 
 	Errors: `machine_mismatch`, `unknown_workspace` (a ref this machine does not have, or a workspace not granted: the
 	two are the same answer, so a device cannot probe for ids), `workspace_unavailable` (the service did not start, or

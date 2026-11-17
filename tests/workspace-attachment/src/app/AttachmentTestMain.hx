@@ -7,7 +7,7 @@ import workspace.client.WorkspaceLink;
 import workspace.client.WorkspaceServiceTarget;
 
 /**
-	WorkspaceLink against a real workspace service, started the way suit starts it (testing.DirectService):
+	WorkspaceLink against a real workspace service, started the way exohost starts it (testing.DirectService):
 
 	  link ROOT LAUNCHER      two links to one workspace share its one service and both verify it; a link whose
 	                          opener names the wrong service fails closed; closing a link leaves the other connected

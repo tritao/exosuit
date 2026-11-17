@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import worker, { registrationProof, relayIdOf, x25519 } from "../src/index";
 
 // Proven registration (docs/mobile/relay-identity.md): a machine whose relay id is derived from its Noise key takes the
-// id back from whoever registered it first. The vectors are the ones suit's MachineKeys.hx computes (docs/mobile/relay-identity.md).
+// id back from whoever registered it first. The vectors are the ones exohost's MachineKeys.hx computes (docs/mobile/relay-identity.md).
 
 describe("machine key vectors", () => {
-  it("derives the relay id and the proof as suit does", async () => {
+  it("derives the relay id and the proof as exohost does", async () => {
     const key = Uint8Array.from({ length: 32 }, (_, index) => index);
     expect(await relayIdOf(key)).toBe("5ff11fa2bc5136b8ccf63b6c679d6f8d");
     const shared = new Uint8Array(32).fill(0x11);
@@ -147,7 +147,7 @@ async function machineKey(): Promise<MachineKey> {
 }
 
 function challengeRequest(id: string, client = "203.0.113.9"): Promise<Response> {
-  // suit sends "{}" as the body, as on every relay POST.
+  // exohost sends "{}" as the body, as on every relay POST.
   return call(id, "register/challenge", {
     method: "POST",
     headers: { "Content-Type": "application/json", "CF-Connecting-IP": client },
@@ -161,7 +161,7 @@ async function newChallenge(id: string, client?: string): Promise<string> {
   return (await response.json() as { challenge: string }).challenge;
 }
 
-/** What suit sends (RelayRegistrationProver.body), made here with WebCrypto. */
+/** What exohost sends (RelayRegistrationProver.body), made here with WebCrypto. */
 async function provenBody(machine: MachineKey, token: string, id = machine.id, challenge?: string): Promise<string> {
   const challengeHex = challenge ?? await newChallenge(id);
   const shared = await x25519(machine.privateKey, hexToBytes(challengeHex));

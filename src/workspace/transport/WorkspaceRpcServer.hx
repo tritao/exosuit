@@ -17,7 +17,7 @@ private typedef Peer = {var transport:MessageTransport; var probeUntil:Float; va
 class WorkspaceRpcServer {
 	/** Connections other than forwarded device streams: the owner's editors and clients. */
 	static inline final PEER_LIMIT = 16;
-	/** Device streams suit forwards, for all devices together. */
+	/** Device streams exohost forwards, for all devices together. */
 	static inline final FORWARDED_PEER_LIMIT = 16;
 
 	final service:WorkspaceService;
@@ -136,15 +136,15 @@ class WorkspaceRpcServer {
 		accept(transport);
 	}
 
-	/** In-memory transport seam for test fixtures: a local client's connection, or a forwarded device stream when its first message is suit's intro. */
+	/** In-memory transport seam for test fixtures: a local client's connection, or a forwarded device stream when its first message is exohost's intro. */
 	@:allow(app)
 	private function acceptTestLocal(transport:MessageTransport):Void {
 		accept(transport);
 	}
 
 	/**
-		What a stream suit forwards for a paired device may do on this service: the grants it names, less any this
-		build of the service does not offer (suit cannot know them while the service is idle).
+		What a stream exohost forwards for a paired device may do on this service: the grants it names, less any this
+		build of the service does not offer (exohost cannot know them while the service is idle).
 	**/
 	function forwardedOptions(grants:Array<String>):RpcPeerOptions {
 		var offered = remoteOffered(), allowed:Array<String> = [];
@@ -157,7 +157,7 @@ class WorkspaceRpcServer {
 			options.maxQueuedBytes < maxMessageBytes ? maxMessageBytes : options.maxQueuedBytes, options.protocol, options.codec);
 	}
 
-	/** Waits for a local connection's first message: suit's intro makes it a forwarded device stream; anything else is a normal client's hello. */
+	/** Waits for a local connection's first message: exohost's intro makes it a forwarded device stream; anything else is a normal client's hello. */
 	function classify(peer:Peer):Void {
 		var first = peer.transport.receive();
 		if (first == null) {
@@ -182,7 +182,7 @@ class WorkspaceRpcServer {
 	/** A connection starts as a local client's; its first message may make it a forwarded device stream (`classify`). */
 	function accept(transport:MessageTransport):Void {
 		prune();
-		// Device streams suit forwards have a pool of their own, so devices cannot take the slots the owner's editor needs.
+		// Device streams exohost forwards have a pool of their own, so devices cannot take the slots the owner's editor needs.
 		if (peers.length - forwardedCount() >= PEER_LIMIT) {
 			transport.close();
 			return;

@@ -20,7 +20,7 @@ closed, once per ended socket. `3` (machine to Worker, no payload) disconnects
 the channel: the Worker closes its device or pairing socket with close code
 `4001` and reason `disconnected_by_host`, which the app should show, and sends
 no reset back. A disconnected device may reconnect; the machine decides whether
-to accept it (suit refuses it for 60 s). Revoking the device is the permanent
+to accept it (exohost refuses it for 60 s). Revoking the device is the permanent
 cut-off.
 
 The machine service selects a channel for every outgoing frame. Pairing and
@@ -100,7 +100,7 @@ controlled workspace use; it is not a generally available public relay service.
 - There is no per-IP/global admission control or measured Cloudflare quota
   policy yet. Per-machine state and frame limits are local bounds, not a claim
   of protection from public abuse or arbitrary usage costs.
-- suit holds the machine socket (`WorkspaceRelayHost`, under `MachineRemote`); no
+- exohost holds the machine socket (`WorkspaceRelayHost`, under `MachineRemote`); no
   workspace service connects to the relay.
 - Cross-network deployment is not qualified yet.
 
@@ -125,7 +125,7 @@ restrictions, ticket exchange, machine/device WebSockets, bidirectional binary
 forwarding, invitation creation, pairing WebSockets and device revocation passed. Desktop approval,
 Noise and full browser editor pairing still need live end-to-end qualification.
 
-The native side is qualified against a local Worker by `scripts/test-machine-remote.py` (suit holds the
+The native side is qualified against a local Worker by `scripts/test-machine-remote.py` (exohost holds the
 machine socket; no workspace service dials the relay).
 Native clients omit the browser `Origin` header; browser origin restrictions
 remain enforced. This check passed against the hosted deployment on 2026-10-07.

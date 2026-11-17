@@ -79,7 +79,7 @@ class TerminalRpcTestMain {
       return;
     }
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
-    // The service of the root's test workspace, started the way suit starts it (or the one already running).
+    // The service of the root's test workspace, started the way exohost starts it (or the one already running).
     var direct = new testing.DirectService(launcher);
     var client = new WorkspaceLink(runtime.events, clock, direct.open, direct.forRoot(root));
     if (mode == "history-create" || mode == "history-restore") {

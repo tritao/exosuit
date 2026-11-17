@@ -19,7 +19,7 @@ class ServedFolders {
 
 	var reconciledClient:Null<workspace.client.WorkspaceFileClient>;
 	var reconciledWorkspace:Null<String>;
-	/** suit's catalog revision when the last reconcile started: until it changes, a settled reconcile still holds. */
+	/** exohost's catalog revision when the last reconcile started: until it changes, a settled reconcile still holds. */
 	var reconciledRevision = -1;
 	var reconcilePending = false;
 	var reconcileRetryAt = 0.0;
@@ -82,7 +82,7 @@ class ServedFolders {
 		});
 	}
 	/** The machine catalog's entry for the open workspace, when there is one. */
-	function catalogEntry():Null<suit.MachineCatalog.MachineWorkspace> {
+	function catalogEntry():Null<exohost.MachineCatalog.MachineWorkspace> {
 		var machine = app.machineClient, current = app.application.savedWorkspaces.current;
 		var state = machine == null ? null : machine.machine;
 		if (current == null || state == null) return null;
@@ -103,7 +103,7 @@ class ServedFolders {
 		}, function(_) { if (done != null) done(false); });
 	}
 	/** Whether the folders last listed are the usable ones of the catalog entry. */
-	function servedMatchesCatalog(entry:suit.MachineCatalog.MachineWorkspace):Bool {
+	function servedMatchesCatalog(entry:exohost.MachineCatalog.MachineWorkspace):Bool {
 		var served = [for (root in servedRoots) root.path];
 		return !workspace.client.FolderReconcile.differs(served, workspace.WorkspaceFolders.select(entry.folders).folders, entry.scratch);
 	}
@@ -142,7 +142,7 @@ class ServedFolders {
 		if (local == null || attached != local) return;
 		var current = app.application.savedWorkspaces.current;
 		if (current == null) return;
-		// Settled, and suit's catalog unchanged since: nothing to look at on an idle window.
+		// Settled, and exohost's catalog unchanged since: nothing to look at on an idle window.
 		if (reconciledClient == fileClient && reconciledWorkspace == current.id && reconciledRevision == machine.revision) return;
 		var entry = catalogEntry();
 		if (entry == null) return;

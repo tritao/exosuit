@@ -8,7 +8,7 @@ import sys.io.AtomicFile;
 	A state folder's `workspace.json`: whose state it holds.
 
 	- Version 1, `{root}`: a folder's service, keyed by that folder (before M19 Phase 4).
-	- Version 2, `{workspace, folders, scratch}`: a workspace's service, keyed by the workspace's id in suit's machine
+	- Version 2, `{workspace, folders, scratch}`: a workspace's service, keyed by the workspace's id in exohost's machine
 	  catalog (docs/architecture/0006-workspaces-without-folders.md). Its folders are rewritten at each start.
 **/
 class AgentStateIdentity {
@@ -55,7 +55,7 @@ class AgentStateIdentity {
 		return "workspace:" + workspace;
 
 	/**
-		A workspace id as it may appear in a state folder's name (`workspaces/<id>`). suit generates
+		A workspace id as it may appear in a state folder's name (`workspaces/<id>`). exohost generates
 		`workspace-<32 lowercase hex>` (MachineCatalog.newId). The id names a folder on file systems that ignore case
 		(Windows, macOS by default), so two ids differing only in case would share a state. Only the lower-case spelling
 		is accepted, which makes such a pair impossible rather than something to detect. Windows device names (CON,

@@ -8,7 +8,7 @@ import workspace.service.WorkspaceAgentProtocol.AgentRecord;
 import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
 
 /**
-	Names a workspace: the machine suit runs on and the workspace's id in that machine's catalog
+	Names a workspace: the machine exohost runs on and the workspace's id in that machine's catalog
 	(docs/architecture/0006-workspaces-without-folders.md). A folder is an attribute of a workspace, not its name.
 **/
 @:wire typedef WorkspaceRef = {
@@ -76,7 +76,7 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
 		client joins them. A change to the folders, name or scratch folder makes the next read a reset.
 	**/
 	@:id(7) var folders:Array<String>;
-	/** The scratch folder once suit made one. */
+	/** The scratch folder once exohost made one. */
 	@:id(8) var scratch:Null<String>;
 	@:id(9) var status:String;
 	/** Sessions and terminals in the whole workspace that need attention, not only those on this page. */

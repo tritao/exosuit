@@ -6,7 +6,7 @@ Builds Exosuit on Windows with the Visual Studio 2026 toolchain.
 Loads the x64 environment of the newest Visual Studio 2026 (18.x) install, puts its
 bundled CMake first on PATH, and pins the default CMake generator to Visual Studio 2026.
 Then it runs the Haxeon toolchain bootstrap (pinned Haxe, libffi, HashLink, ccache,
-Haxeon native) and builds the agent, suit and the graphical app.
+Haxeon native) and builds the agent, exohost and the graphical app.
 
 The apps' native packages build with Ninja in this environment, through ccache
 (Haxeon's NativeCMakeProvider). A build started without it, such as scripts/run.py

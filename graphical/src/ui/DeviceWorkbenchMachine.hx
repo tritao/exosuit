@@ -1,7 +1,7 @@
 package ui;
 
-import suit.MachineCatalog.MachineState;
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineState;
+import exohost.MachineCatalog.MachineWorkspace;
 import workspace.client.MachineClient;
 import workspace.client.RemoteMachine;
 import workspace.client.RemoteMachines;
@@ -13,7 +13,7 @@ import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 import ui.WorkbenchRows.WorkbenchRowSource;
 
 /**
-	A device's Workbench machine (the phone's, the browser's): the workspaces a paired machine's suit grants this device,
+	A device's Workbench machine (the phone's, the browser's): the workspaces a paired machine's exohost grants this device,
 	from its directory (what RemoteMachines reads), and the device's links to them. The machine shown is the one whose
 	workspace is open, else the first that listed its workspaces. Opening a row opens its workspace through that
 	machine's RemoteMachine; the open workspace's rows are the lists the window shows it through, another's its link's
@@ -31,7 +31,7 @@ class DeviceWorkbenchMachine implements WorkbenchMachine {
 		shownView = {machine: null, error: null, openWorkspace: null, revision: 0, manages: false};
 	}
 
-	public function suit():Null<MachineClient>
+	public function exohost():Null<MachineClient>
 		return null;
 
 	/**

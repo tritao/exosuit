@@ -194,7 +194,7 @@ request bounds.
 
 Frozen by `RpcCompatibilityTests.catalogVectors`.
 
-`WorkspaceRef {1 machine, 2 workspace}` names a workspace by suit's machine id and the workspace's id in that
+`WorkspaceRef {1 machine, 2 workspace}` names a workspace by exohost's machine id and the workspace's id in that
 machine's catalog ([ADR 0006](architecture/0006-workspaces-without-folders.md)). Folders are attributes of a
 workspace, not its name. Every new request carries a ref. Existing requests (methods 100–169) keep their
 `workspace:String` field 1: it carries `ref.workspace`, and `"workspace"` is an alias for the connection's own
@@ -261,9 +261,9 @@ the relay's message bound.
 
 ## The machine directory and workspace streams
 
-Frozen by `RpcCompatibilityTests.machineDirectoryVectors`; `MachineDirectoryProtocol.hx`. ADR 0005 section 4: a device pairs once with the machine (suit's relay identity), is
-granted workspaces, and reaches them through suit. Pairing itself is unchanged (invitation, Noise XX-style
-handshake, code comparison, approval) but its peer is suit and its `machineId` is the machine's.
+Frozen by `RpcCompatibilityTests.machineDirectoryVectors`; `MachineDirectoryProtocol.hx`. ADR 0005 section 4: a device pairs once with the machine (exohost's relay identity), is
+granted workspaces, and reaches them through exohost. Pairing itself is unchanged (invitation, Noise XX-style
+handshake, code comparison, approval) but its peer is exohost and its `machineId` is the machine's.
 
 **Channel framing.** After pairing (and on every reconnect) the Noise channel carries stream frames, not bare RPC
 messages: `kind:1 | stream:4 big-endian | payload`. Kind 0 is one RPC message of the stream, kind 1 closes the
@@ -271,7 +271,7 @@ stream (no payload). Stream 0 is the machine stream and is always open; other st
 payload is at most 65487 bytes, so the whole frame fits one Noise message (65492 bytes). A data frame for a stream
 that is not open is dropped and answered with a close frame. A device holds at most 16 streams.
 
-**Machine stream (stream 0).** An ordinary RPC connection with suit: application `exosuit-machine/1`, one capability,
+**Machine stream (stream 0).** An ordinary RPC connection with exohost: application `exosuit-machine/1`, one capability,
 `machine.directory`, which the pairing grants (so the device-granted list in the pairing record is just that one
 name). The methods:
 
@@ -291,7 +291,7 @@ Rules:
   a name, or a status change); `CHANGED` is a hint to list again, sent on stream 0 when it does. Status is read when
   listed; a status change alone sends no hint.
 - `relay` (field 5, added after the freeze, optional) is the relay id the device paired under: the id in the
-  invitation URL. suit gives each relay its own id, so it need not be `machine` or its hex part. A device accepts the
+  invitation URL. exohost gives each relay its own id, so it need not be `machine` or its hex part. A device accepts the
   first directory when `relay` is its relay id, or, from a machine that sends no `relay`, when `machine` is the relay id
   or `machine-` and the relay id; it then pins `machine`. Older devices ignore field 5 and keep the second rule, so
   they work only with relays set up before relay ids were separate.
@@ -322,9 +322,9 @@ Rules:
 | data frame, stream 0, payload `ab` | `0000000000ab` |
 | close frame, stream 3 | `0100000003` |
 
-### suit's `machine` reply, version 2
+### exohost's `machine` reply, version 2
 
-suit's control endpoint answers JSON, not MessagePack. `machine`, and every op that returns `machine`, replies:
+exohost's control endpoint answers JSON, not MessagePack. `machine`, and every op that returns `machine`, replies:
 
 ```json
 {"ok": true, "machine": {"version": 2, "id": "machine-…", "name": "cube", "workspaces": [
@@ -334,13 +334,13 @@ suit's control endpoint answers JSON, not MessagePack. `machine`, and every op t
    "revision": 1, "service": {"endpoint": "\\\\.\\pipe\\exosuit-…", "pid": 4242, "running": true}}]}}
 ```
 
-- `folders` may be empty. `scratch` is null until suit has made the scratch folder.
+- `folders` may be empty. `scratch` is null until exohost has made the scratch folder.
 - `revision` counts changes to that workspace (rename, folders, scratch). A version 1 file, or a reply without
   it, reads as 0.
-- `service` is the workspace's running service as it reported itself to suit, or null when none runs.
+- `service` is the workspace's running service as it reported itself to exohost, or null when none runs.
   `MachineCatalog.decodeService` reads it.
 - `version` is the reply's own version (`MachineCatalog.REPLY_VERSION`), not machine.json's.
-- Clients ignore fields they do not know. `SuitUnitTests.machineReply` freezes this shape.
+- Clients ignore fields they do not know. `ExohostUnitTests.machineReply` freezes this shape.
 
 ## Several folders in one service
 

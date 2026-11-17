@@ -3,7 +3,7 @@ start it again, and continue the conversation with one prompt.
 
 An editor (A) opens Alpha, makes an agent session from the workspace row's menu (the fake Codex,
 tests/workspace-agents/fake-codex.py), asks a first question, renames the session, closes its tab and reopens it from
-the row. A is closed (exosuit.quit, as closing it does) and the workspace service is stopped (what suit's Quit sends), so nothing of the session
+the row. A is closed (exosuit.quit, as closing it does) and the workspace service is stopped (what exohost's Quit sends), so nothing of the session
 is left running. A new editor (R) on the same state must show the row (renamed), its tab and the first reply, and a
 second prompt typed into it gets a second reply.
 

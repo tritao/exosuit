@@ -178,7 +178,7 @@ class TerminalHostRuntime {
 		}
 		var executableName = Path.withoutDirectory(executable);
 		add(executableName, executable);
-		// Not `main.hl`: suit recognizes services by that name and would stop a host with them.
+		// Not `main.hl`: exohost recognizes services by that name and would stop a host with them.
 		add("terminal-host.hl", hostProgram(agentProgram));
 		addLibraries(executableDirectory, "");
 		// A source build keeps each package's libraries in native/<package> beside the program; an installed one in ../lib.
@@ -271,7 +271,7 @@ class TerminalHosts {
 	final draining:Array<{transport:MessageTransport, messages:Array<Bytes>, until:Float}> = [];
 	/** Hosts told to end (`end`), held until they have or are killed. */
 	final ending:Array<{handle:app.AgentNative.AgentProcessIdentityHandle, pid:Int, until:Float}> = [];
-	/** The folder the service started in and the workspace's id (null for a folder's service): written beside each host for suit. */
+	/** The folder the service started in and the workspace's id (null for a folder's service): written beside each host for exohost. */
 	final root:Null<String>;
 	final workspace:Null<String>;
 
@@ -360,7 +360,7 @@ class TerminalHosts {
 	/**
 		Run once when a service starts. Ends nothing: a host whose terminal has no record here (the record was removed
 		while the host did not answer, or the workspace's catalog was replaced or recreated) keeps its program and is
-		logged; suit lists it under its workspace, and the user ends it there. A missing record is weak evidence: a
+		logged; exohost lists it under its workspace, and the user ends it there. A missing record is weak evidence: a
 		replaced database lacks every record at once.
 
 		`recorded` are the ids of the terminals the service loaded. The folder of a terminal with no record, no running
@@ -376,7 +376,7 @@ class TerminalHosts {
 			if (known.exists(name) || !FileSystem.isDirectory(directory)) continue;
 			if (runs(directory)) {
 				ServiceLog.note("terminal host folder " + name + " (host pid " + hostNumber(directory, "pid") + ") has no terminal record in this workspace: left running;"
-					+ " `suit terminals` lists it and `suit terminals end` ends it");
+					+ " `exohost terminals` lists it and `exohost terminals end` ends it");
 				continue;
 			}
 			if (recorded.length == 0) continue;
@@ -391,7 +391,7 @@ class TerminalHosts {
 	}
 
 	/**
-		Starts a host running `profile`'s program; `name` is the terminal's, for suit's list, and `prelude` what its
+		Starts a host running `profile`'s program; `name` is the terminal's, for exohost's list, and `prelude` what its
 		emulator shows before the program starts. Throws when the host cannot be started, and when a host of this terminal
 		still runs: that one is never replaced unasked.
 	**/
@@ -403,8 +403,8 @@ class TerminalHosts {
 		if (!app.AgentNative.prepareDirectory(directory)) throw "The terminal host folder is not private to this user: " + directory;
 		if (runs(directory)) throw "A terminal host of this terminal still runs";
 		try FileSystem.deleteFile(Path.join([directory, "host.json"])) catch (_:Dynamic) {}
-		// Which terminal of which workspace this host keeps: suit lists it by this, with no service running.
-		suit.TerminalHostFolder.writeTerminal(directory, terminal, name, workspace, root);
+		// Which terminal of which workspace this host keeps: exohost lists it by this, with no service running.
+		exohost.TerminalHostFolder.writeTerminal(directory, terminal, name, workspace, root);
 		// Made with the first terminal; and a service of another build may have removed this one's copy while no host ran from it.
 		var runtime = this.runtime;
 		if (runtime == null || !FileSystem.exists(runtime.executable) || !FileSystem.exists(runtime.program)) {

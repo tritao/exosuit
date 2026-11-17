@@ -10,7 +10,7 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiContext;
 import haxeon.ui.semantics.AccessibilityRole;
 import haxeon.ui.widgets.collections.TreeView;
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import ui.AgentScope;
 import ui.CatalogThrottle;
 import ui.WorkbenchMachineLabel;
@@ -125,7 +125,7 @@ class WorkbenchTreeTestMain {
 		Sys.println("workbench-tree: ok");
 	}
 
-	/** Workspaces in suit's order, then New Workspace…; groups (by order), then their terminals and sessions. */
+	/** Workspaces in exohost's order, then New Workspace…; groups (by order), then their terminals and sessions. */
 	static function ordering():Void {
 		var model = new WorkbenchTreeModel();
 		model.update(view(machineWorkspaces, "resume"), ["resume" => lists(catalog("C:/work/resume"), agents("C:/work/resume"))]);
@@ -315,16 +315,16 @@ class WorkbenchTreeTestMain {
 		require(reached == 7, "every group is reached once: " + reached);
 	}
 
-	/** No workspaces, suit still answering, and suit failing are rows of the tree, above New Workspace…. */
+	/** No workspaces, exohost still answering, and exohost failing are rows of the tree, above New Workspace…. */
 	static function emptyAndLoading():Void {
 		var model = new WorkbenchTreeModel();
 		model.update(view([], null), []);
 		require(roots(model).join(",") == "s:empty,n:new-workspace,n:folder-workspace", "empty machine: " + roots(model));
 		model.update(view(null, null), []);
 		require(roots(model).join(",") == "s:loading,n:new-workspace,n:folder-workspace", "loading: " + roots(model));
-		model.update(view(null, null, "suit is not running"), []);
-		require(roots(model).join(",") == "s:error,n:new-workspace,n:folder-workspace", "suit error: " + roots(model));
-		model.update(view(machineWorkspaces, "resume", "suit did not answer"), []);
+		model.update(view(null, null, "exohost is not running"), []);
+		require(roots(model).join(",") == "s:error,n:new-workspace,n:folder-workspace", "exohost error: " + roots(model));
+		model.update(view(machineWorkspaces, "resume", "exohost did not answer"), []);
 		require(roots(model).join(",") == "w:exo,w:resume,w:eon,s:error,n:new-workspace,n:folder-workspace",
 			"a refresh error hid the known workspaces");
 		// A folderless workspace, open on its scratch folder, nests its groups like any other.

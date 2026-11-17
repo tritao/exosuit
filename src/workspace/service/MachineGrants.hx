@@ -1,8 +1,8 @@
 package workspace.service;
 
 /**
-	What the owner can grant a device in one workspace, and the presets the Remote Access panel offers. suit keeps the
-	grants per device and workspace; a workspace service enforces them per request on the stream suit forwards, and
+	What the owner can grant a device in one workspace, and the presets the Remote Access panel offers. exohost keeps the
+	grants per device and workspace; a workspace service enforces them per request on the stream exohost forwards, and
 	drops any it does not offer. The list is the panel's former one (it lived in RemoteAccessPanel), plus the catalog
 	watch a remote client reads its workspace with.
 **/

@@ -133,7 +133,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       // A terminal whose host kept running while no service did: this generation takes it over.
       if (record.state == "running" || record.state == "starting" || record.state == "lost") adoptRecord(record);
     }
-    // No host may be left running unseen: one whose terminal has no record is logged (suit lists it; the user ends it).
+    // No host may be left running unseen: one whose terminal has no record is logged (exohost lists it; the user ends it).
     if (persistence != null) try hosts.sweep([for (id in catalog.keys()) id]) catch (_:Dynamic) {}
   }
 

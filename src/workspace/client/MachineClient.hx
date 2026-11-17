@@ -1,46 +1,46 @@
 package workspace.client;
 
 import haxe.Json;
-import suit.MachineCatalog;
-import suit.MachineCatalog.MachineService;
-import suit.MachineCatalog.MachineState;
-import suit.MachineCatalog.MachineWorkspace;
-import suit.SuitLink;
-import suit.WindowFocus;
-import suit.WindowFocus.WindowFocuses;
+import exohost.MachineCatalog;
+import exohost.MachineCatalog.MachineService;
+import exohost.MachineCatalog.MachineState;
+import exohost.MachineCatalog.MachineWorkspace;
+import exohost.ExohostLink;
+import exohost.WindowFocus;
+import exohost.WindowFocus.WindowFocuses;
 import workspace.PathKey;
 
 /**
-	This machine and its workspaces, from suit (docs/architecture/0005-machines-and-workspaces.md), over the window's
-	suit link. suit pushes the machine whenever it changes: its workspaces, the service each one runs and where every
+	This machine and its workspaces, from exohost (docs/architecture/0005-machines-and-workspaces.md), over the window's
+	exohost link. exohost pushes the machine whenever it changes: its workspaces, the service each one runs and where every
 	window is focused. Changes are requests on the same link; nothing here polls and nothing blocks the caller.
 **/
 class MachineClient {
-	final link:SuitLink;
+	final link:ExohostLink;
 
 	public var machine(default, null):Null<MachineState>;
-	/** Where each editor window is focused, as suit last pushed it (M19 Phase 8). */
+	/** Where each editor window is focused, as exohost last pushed it (M19 Phase 8). */
 	public var windows(default, null):Array<WindowFocus> = [];
 	/** Why the last push or request failed; null after one succeeds. */
 	public var error(default, null):Null<String>;
 	/** Changes whenever `machine`, `windows` or `error` does. */
 	public var revision(default, null):Int = 0;
-	/** Scratch folders suit made on request, until a push reports them. */
+	/** Scratch folders exohost made on request, until a push reports them. */
 	final scratches:Map<String, String> = [];
-	/** The running service of each workspace, as suit last pushed them. */
+	/** The running service of each workspace, as exohost last pushed them. */
 	final services:Map<String, MachineService> = [];
 	/** Changes to the workspaces sent and not answered yet. */
 	var changing = 0;
 
-	public function new(link:SuitLink) {
+	public function new(link:ExohostLink) {
 		this.link = link;
 		seedFromCatalog();
 		link.onEvent = function(name, data) { if (name == "exosuit.machine.changed") pushed(data); };
 	}
 
 	/**
-		Starts from suit's saved catalog (the file suit keeps it in), so the window can open its last workspace and show the
-		tree before suit's first push (0.45 s or more, seconds when suit must start first). The push replaces it, and with
+		Starts from exohost's saved catalog (the file exohost keeps it in), so the window can open its last workspace and show the
+		tree before exohost's first push (0.45 s or more, seconds when exohost must start first). The push replaces it, and with
 		it adds the services, which the file does not hold. A missing or unreadable file leaves the machine unknown.
 	**/
 	function seedFromCatalog():Void {
@@ -64,7 +64,7 @@ class MachineClient {
 	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
 		change("workspace-create", {name: name, folders: folders.copy()}, workspaceReply(done, false));
 
-	/** The workspace's scratch folder, which suit creates on first request; `done` gets its path, or the error. */
+	/** The workspace's scratch folder, which exohost creates on first request; `done` gets its path, or the error. */
 	public function scratch(id:String, done:(Null<String>, Null<String>) -> Void):Void
 		change("workspace-scratch", {workspace: id}, function(reply, failure) {
 			var path:Null<String> = null;
@@ -73,31 +73,31 @@ class MachineClient {
 				if (Std.isOfType(value, String) && (value : String).length > 0)
 					path = value;
 				else if (failure == null)
-					failure = "suit sent no scratch folder";
+					failure = "exohost sent no scratch folder";
 			}
 			if (path != null) scratches.set(id, path);
 			done(path, failure);
 		});
 
 	/**
-		The running service of workspace `id`, which suit starts first when the workspace is idle (`workspace.open`):
+		The running service of workspace `id`, which exohost starts first when the workspace is idle (`workspace.open`):
 		`done` gets its pipe and identity, or why there is none. A ServiceOpener for the window's workspace clients.
 	**/
 	public function open(id:String, done:(Null<OpenedService>, Null<String>) -> Void):Void {
 		var begun = Sys.time();
-		ConnectTimeline.mark("suit-queued", id, "workspace.open");
+		ConnectTimeline.mark("exohost-queued", id, "workspace.open");
 		link.call("workspace.open", {workspace: id}, function(reply, failure) {
-			ConnectTimeline.mark("suit-reply", id, "workspace.open" + (failure == null ? " ok " : " none ") + Std.int((Sys.time() - begun) * 1000) + " ms");
+			ConnectTimeline.mark("exohost-reply", id, "workspace.open" + (failure == null ? " ok " : " none ") + Std.int((Sys.time() - begun) * 1000) + " ms");
 			var endpoint:Dynamic = reply == null ? null : Reflect.field(reply, "endpoint");
 			var generation:Dynamic = reply == null ? null : Reflect.field(reply, "generation");
 			var root:Dynamic = reply == null ? null : Reflect.field(reply, "root");
 			if (failure == null && (!Std.isOfType(endpoint, String) || !Std.isOfType(generation, String) || !Std.isOfType(root, String)))
-				failure = "suit named no workspace service";
+				failure = "exohost named no workspace service";
 			done(failure == null ? {endpoint: endpoint, generation: generation, root: root} : null, failure);
 		}, OPEN_TIMEOUT);
 	}
 
-	/** How long `open` waits for suit: longer than suit's own limit for a start, so suit's answer says why one failed. */
+	/** How long `open` waits for exohost: longer than exohost's own limit for a start, so exohost's answer says why one failed. */
 	static inline final OPEN_TIMEOUT = 40.0;
 
 	public function rename(id:String, name:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
@@ -113,7 +113,7 @@ class MachineClient {
 		change("workspace-remove-folder", {workspace: id, folder: folder}, workspaceReply(done, false));
 
 	// ---- Remote access (ADR 0005 section 4): the machine's relay identity, paired devices and their workspaces.
-	// Each reply is suit's JSON as sent (docs/RPC-VECTORS.md, "suit's machine reply"); `done` gets it or the error.
+	// Each reply is exohost's JSON as sent (docs/RPC-VECTORS.md, "exohost's machine reply"); `done` gets it or the error.
 
 	/** Whether remote access is set up, its relay and whether the machine socket is connected. */
 	public function remoteStatus(done:(Null<Dynamic>, Null<String>) -> Void):Void
@@ -176,7 +176,7 @@ class MachineClient {
 		return null;
 	}
 
-	/** The workspace's scratch folder if suit already made one, as a push or a scratch request reported it. */
+	/** The workspace's scratch folder if exohost already made one, as a push or a scratch request reported it. */
 	public function scratchOf(workspace:MachineWorkspace):Null<String>
 		return workspace.scratch != null ? workspace.scratch : scratches.get(workspace.id);
 
@@ -193,7 +193,7 @@ class MachineClient {
 	public function busy():Bool
 		return changing > 0;
 
-	/** The service suit last reported for workspace `id`: null when it reported none. */
+	/** The service exohost last reported for workspace `id`: null when it reported none. */
 	public function serviceOf(id:String):Null<MachineService>
 		return services.get(id);
 
@@ -203,14 +203,14 @@ class MachineClient {
 			var workspace:Null<MachineWorkspace> = null;
 			var entry:Dynamic = reply == null ? null : Reflect.field(reply, "workspace");
 			if (entry != null)
-				try workspace = MachineCatalog.decodeWorkspace(entry) catch (error:Dynamic) failure = "suit sent an invalid workspace: " + Std.string(error);
+				try workspace = MachineCatalog.decodeWorkspace(entry) catch (error:Dynamic) failure = "exohost sent an invalid workspace: " + Std.string(error);
 			if (workspace != null && failure == null)
 				know(workspace, removed);
 			if (done != null)
 				done(workspace, failure);
 		};
 
-	/** Keeps the listing current until suit's push arrives: the service a workspace's folders belong to follows its folders. */
+	/** Keeps the listing current until exohost's push arrives: the service a workspace's folders belong to follows its folders. */
 	function know(workspace:MachineWorkspace, removed:Bool):Void {
 		var state = machine;
 		if (state == null)
@@ -231,11 +231,11 @@ class MachineClient {
 
 	function change(op:String, params:Dynamic, done:(Null<Dynamic>, Null<String>) -> Void):Void {
 		changing++;
-		ConnectTimeline.mark("suit-queued", null, op);
+		ConnectTimeline.mark("exohost-queued", null, op);
 		var begun = Sys.time();
 		link.call(op, params, function(reply, failure) {
 			changing--;
-			ConnectTimeline.mark("suit-reply", null, op + (failure == null ? " ok " : " none ") + Std.int((Sys.time() - begun) * 1000) + " ms");
+			ConnectTimeline.mark("exohost-reply", null, op + (failure == null ? " ok " : " none ") + Std.int((Sys.time() - begun) * 1000) + " ms");
 			if (failure == null && reply != null && Reflect.hasField(reply, "machine"))
 				failure = readMachine(Reflect.field(reply, "machine"));
 			if (failure == null && error != null) {
@@ -247,9 +247,9 @@ class MachineClient {
 	}
 
 	function remote(op:String, params:Dynamic, done:(Null<Dynamic>, Null<String>) -> Void):Void
-		link.call(op, params, done, SuitLink.REMOTE_TIMEOUT);
+		link.call(op, params, done, ExohostLink.REMOTE_TIMEOUT);
 
-	/** suit pushed the machine: its workspaces with their services, and the windows' focus. */
+	/** exohost pushed the machine: its workspaces with their services, and the windows' focus. */
 	function pushed(data:Dynamic):Void {
 		var failure = readMachine(data == null ? null : Reflect.field(data, "machine"));
 		if (failure == null)
@@ -258,10 +258,10 @@ class MachineClient {
 		revision++;
 	}
 
-	/** Reads a machine listing as suit sends it; returns why it is unusable, or null. */
+	/** Reads a machine listing as exohost sends it; returns why it is unusable, or null. */
 	function readMachine(listing:Dynamic):Null<String> {
 		if (listing == null)
-			return "suit sent no machine";
+			return "exohost sent no machine";
 		try machine = MachineCatalog.decode(Json.stringify({version: MachineCatalog.VERSION, id: listing.id,
 			name: listing.name, workspaces: listing.workspaces})) catch (error:Dynamic) return Std.string(error);
 		readServices(listing.workspaces);
@@ -269,7 +269,7 @@ class MachineClient {
 		return null;
 	}
 
-	/** The services suit reports in a listing; one that is malformed counts as none. */
+	/** The services exohost reports in a listing; one that is malformed counts as none. */
 	function readServices(entries:Dynamic):Void {
 		services.clear();
 		if (!Std.isOfType(entries, Array))
@@ -280,7 +280,7 @@ class MachineClient {
 				continue;
 			var service:Null<MachineService> = null;
 			try service = MachineCatalog.decodeService(entry) catch (_:Dynamic) {}
-			// The window connects to what suit reports, so only an endpoint of the agent's own shape counts.
+			// The window connects to what exohost reports, so only an endpoint of the agent's own shape counts.
 			if (service != null && service.running && WorkspaceLink.validEndpoint(service.endpoint, Sys.systemName() == "Windows"))
 				services.set(id, service);
 		}

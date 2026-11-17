@@ -2,7 +2,7 @@ package ui;
 
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import workspace.client.MachineClient;
 import workspace.client.WorkspaceLink;
 import workspace.client.WorkspaceWorkbenchClient;
@@ -12,11 +12,11 @@ import haxeon.ui.core.UiEvent;
 /**
 	What the Workbench's rows do, in one place: open a workspace, act in one, create, rename, attach and detach folders,
 	remove; and the folder picker and the text prompt every row action uses. ExosuitApp makes one for its window and
-	gives it the machine whose workspaces the Workbench shows (`attach`, WorkbenchMachine): suit's on the desktop, a
-	paired machine's on a device. Changing the machine's workspaces (create, rename, folders, remove) needs suit's.
+	gives it the machine whose workspaces the Workbench shows (`attach`, WorkbenchMachine): exohost's on the desktop, a
+	paired machine's on a device. Changing the machine's workspaces (create, rename, folders, remove) needs exohost's.
 
 	Every action takes the workspace it acts in. One on any workspace's row runs against that workspace's link
-	(`inWorkspace`), which the window makes when it holds none (suit starts an idle workspace's service); the window
+	(`inWorkspace`), which the window makes when it holds none (exohost starts an idle workspace's service); the window
 	stays where it is. Only what opens that workspace's tab takes the window there first (`goTo`; Workbench design Q2:
 	the window goes where the session is made).
 **/
@@ -37,8 +37,8 @@ class WorkbenchActions {
 	final app:ExosuitApp;
 	/** The machine the Workbench shows; null until the window has one. */
 	public var machine(default, null):Null<WorkbenchMachine>;
-	/** suit's list of this machine's workspaces, when the window may change them; null on a device. */
-	var suit(get, never):Null<MachineClient>;
+	/** exohost's list of this machine's workspaces, when the window may change them; null on a device. */
+	var exohost(get, never):Null<MachineClient>;
 	var waiting:Null<PendingAction>;
 	/** What the tree shows before the window has a machine: no workspaces yet. */
 	public static final NO_MACHINE:WorkbenchMachineView = {machine: null, error: null, openWorkspace: null, revision: 0, manages: false};
@@ -49,9 +49,9 @@ class WorkbenchActions {
 	public function attach(machine:WorkbenchMachine):Void
 		this.machine = machine;
 
-	function get_suit():Null<MachineClient> {
+	function get_exohost():Null<MachineClient> {
 		var known = machine;
-		return known == null ? null : known.suit();
+		return known == null ? null : known.exohost();
 	}
 
 	/** The tree's view of the machine. */
@@ -62,11 +62,11 @@ class WorkbenchActions {
 
 	/** The window may change the machine's workspaces: create, rename, attach and detach folders, remove. */
 	public function manages():Bool
-		return suit != null;
+		return exohost != null;
 
 	/** A change to the machine's workspaces is on its way; renames, folder changes and removals wait for it. */
 	public function busy():Bool {
-		var known = suit;
+		var known = exohost;
 		return known != null && known.busy();
 	}
 
@@ -87,7 +87,7 @@ class WorkbenchActions {
 		if (known != null) known.open(entry);
 	}
 
-	/** Opens the workspace with this id unless suit does not list it. */
+	/** Opens the workspace with this id unless exohost does not list it. */
 	public function openById(id:String):Void {
 		var entry = workspaceById(id);
 		if (entry != null) open(entry);
@@ -191,7 +191,7 @@ class WorkbenchActions {
 
 	/** Asks for a name, creates a workspace with no folders, then opens it. */
 	public function create():Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null || known.busy()) return;
 		askText("New workspace name", null, function(name) known.create(name, [], function(created, failure) {
 			if (!report(failure) && created != null) open(created);
@@ -203,7 +203,7 @@ class WorkbenchActions {
 		as its only one is opened instead of a second made.
 	**/
 	public function createFromFolder():Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null || known.busy()) return;
 		chooseFolder("Add Workspace from Folder", null, function(folder) {
 			var existing = known.workspaceHolding(folder);
@@ -215,22 +215,22 @@ class WorkbenchActions {
 	}
 
 	public function rename(entry:MachineWorkspace):Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null || known.busy()) return;
 		askText("Rename workspace " + entry.name, entry.name, function(name) known.rename(entry.id, name, function(_, failure) { report(failure); }));
 	}
 
 	/** The scratch folder stays apart from the attached folders (ADR 0006). */
 	public function attachFolder(entry:MachineWorkspace):Void {
-		if (suit == null) return;
+		if (exohost == null) return;
 		chooseFolder("Attach Folder to " + entry.name, null, function(folder) addFolder(entry, folder));
 	}
 
 	/** Adds `folder` to the workspace; `done` gets why not, or null. The control plane's `project.add` runs this too. */
 	public function addFolder(entry:MachineWorkspace, folder:String, ?done:Null<String>->Void):Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null) {
-			if (done != null) done("suit's list of workspaces is not loaded yet");
+			if (done != null) done("exohost's list of workspaces is not loaded yet");
 			return;
 		}
 		known.addFolder(entry.id, folder, function(updated, failure) {
@@ -241,7 +241,7 @@ class WorkbenchActions {
 
 	/** Asks which of the workspace's folders to detach, then detaches it. */
 	public function detachFolder(entry:MachineWorkspace):Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null || entry.folders.length == 0) return;
 		var host = app.host;
 		var entries = [for (folder in entry.folders) new CommandViewEntry(haxe.io.Path.withoutDirectory(folder), folder, folder)];
@@ -263,7 +263,7 @@ class WorkbenchActions {
 	}
 
 	public function remove(entry:MachineWorkspace):Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null) return;
 		known.delete(entry.id, function(_, failure) {
 			if (!report(failure)) app.contexts.removeWorkspaceContexts(entry.id);
@@ -275,11 +275,11 @@ class WorkbenchActions {
 		app.contexts.openContextInNewWindow(entry.id, group);
 
 	/**
-		The workspace's scratch folder, from what suit already said when it can, else asked of suit once. `done` runs
+		The workspace's scratch folder, from what exohost already said when it can, else asked of exohost once. `done` runs
 		only with a folder; a failure is reported.
 	**/
 	public function scratch(entry:MachineWorkspace, done:String->Void):Void {
-		var known = suit;
+		var known = exohost;
 		if (known == null) return;
 		var path = known.scratchOf(entry);
 		if (path != null) { done(path); return; }
@@ -290,7 +290,7 @@ class WorkbenchActions {
 
 	/** Runs `next` once a workspace with no folders has its scratch folder; at once for any other. */
 	public function scratchIfNeeded(entry:MachineWorkspace, next:Void->Void):Void {
-		var known = suit;
+		var known = exohost;
 		if (entry.folders.length > 0 || known == null || known.scratchOf(entry) != null) next();
 		else scratch(entry, function(_) next());
 	}
@@ -332,7 +332,7 @@ class WorkbenchActions {
 		app.requestFrame();
 	}
 
-	/** Reports a failed request to suit; true when there was one. */
+	/** Reports a failed request to exohost; true when there was one. */
 	function report(failure:Null<String>):Bool {
 		if (failure == null) return false;
 		app.application.reportError("workspace", failure);

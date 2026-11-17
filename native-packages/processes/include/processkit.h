@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /*
- * Same-user process inspection for the suit daemon. A process is identified by
+ * Same-user process inspection for the exohost daemon. A process is identified by
  * its pid plus its start time (milliseconds since the Unix epoch), so a reused
  * pid is never mistaken for the process that used to own it. Calls that act on
  * a process take that pair and do nothing unless the start time matches. A

@@ -5,8 +5,8 @@ extern function preparePrivateDirectory(path:String):Bool;
 
 /**
 	The phone's automation surface for its test scripts (android/scripts/phone-ui.ps1, machine-acceptance.ps1,
-	docs/benchmarks/perf-harness/gui_scenarios/e2e_pair.py). A desktop window is driven over suit's control plane
-	(`exosuit.ui.snapshot`); a phone has no suit to link to, so a debug build that a test run set up
+	docs/benchmarks/perf-harness/gui_scenarios/e2e_pair.py). A desktop window is driven over exohost's control plane
+	(`exosuit.ui.snapshot`); a phone has no exohost to link to, so a debug build that a test run set up
 	(`EXOSUIT_AUTOMATION_DIR`, see ExosuitActivity) writes the same picture, devtools.UiSnapshot plus the app's state, to
 	`snapshot.json` in that folder whenever it changes (at most ten times a second, and at least once a second so `at`
 	says how fresh it is). `seq` counts writes, so a script can wait for a snapshot newer than its last tap.

@@ -10,7 +10,7 @@ import workspace.transport.NativeRpcHub;
 	A device's attachment to the machines it is paired with (the phone's and the browser's), over the relay, using the shared desktop clients (ADR 0005
 	section 4, M19 Phase 9):
 
-	- pairing (the shared `DevicePairing`): a one-time invitation from the machine (suit), Noise XX, the code the user compares with the machine,
+	- pairing (the shared `DevicePairing`): a one-time invitation from the machine (exohost), Noise XX, the code the user compares with the machine,
 	  approval (which grants only the machine directory), then the credentials go to the device's store
 	  (`PairedMachines`: the phone's Keystore file, the browser's encrypted storage). Pairing a machine does not touch the machines already connected;
 	- each paired machine is a `RemoteMachine`: one relay channel, the directory of the workspaces the owner granted this

@@ -118,7 +118,7 @@ class RpcTerminalBackend implements TerminalBackend {
   static final CLIENT_KEY = "EXOSUIT_TERMINAL_CLIENT_KEY";
   /** Names this client process, so the service can tell a pane that replaced an old attachment from another client.
       Random and kept in the process environment: statics do not survive a live module reload, the environment does.
-      The value is `<pid>:<key>` and counts only in the process that made it: every child (suit, services, their
+      The value is `<pid>:<key>` and counts only in the process that made it: every child (exohost, services, their
       shells, an editor run from one of those) inherits the variable, and must not take terminal control as this
       editor without the takeover prompt. */
   static function clientKey():String {

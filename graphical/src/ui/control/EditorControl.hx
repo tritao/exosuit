@@ -5,8 +5,8 @@ import haxeon.platform.event.EventSubscription;
 import haxeon.ui.core.UiContext;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import suit.SuitLink;
-import suit.control.ControlError;
+import exohost.ExohostLink;
+import exohost.control.ControlError;
 import ui.TerminalPane;
 import ui.UiEditorTab;
 
@@ -20,7 +20,7 @@ private typedef Waiting = {
 }
 
 /**
-	The window's side of the control plane (docs/design/suitctl/TDD-exosuit-ctl.md §8): the methods suit routes to this
+	The window's side of the control plane (docs/design/exohostctl/TDD-exosuit-ctl.md §8): the methods exohost routes to this
 	window over its link, each one the path a user's action takes, so a program drives the product's own logic.
 
 	- Pragtical control protocol v1: `window.focus`, `editor.open {path, line?, column?}`, `editor.documents`,
@@ -42,7 +42,7 @@ private typedef Waiting = {
 	  its snapshot `element_id`, or a point by `x` and `y` in the snapshot's logical pixels; `fx`, `fy` pick a point
 	  inside an element (fractions of its size, 0.5 by default).
 
-	A method that changes something answers once it is done, under suit's 10 s request timeout. One that acts like the
+	A method that changes something answers once it is done, under exohost's 10 s request timeout. One that acts like the
 	user answers `busy` while the user's own input is recent (SyntheticInput).
 **/
 @:access(ui.ExosuitApp)
@@ -51,7 +51,7 @@ class EditorControl {
 	static inline final WAIT_SECONDS = 9.5;
 
 	final app:ExosuitApp;
-	final link:SuitLink;
+	final link:ExohostLink;
 	final input:SyntheticInput;
 	final dialogs:DrivenDialogs;
 	final ui:UiContext;
@@ -66,7 +66,7 @@ class EditorControl {
 	var terminalSequence = 0;
 	var lastTerminalCheck = 0.0;
 
-	public function new(app:ExosuitApp, link:SuitLink, input:SyntheticInput, dialogs:DrivenDialogs) {
+	public function new(app:ExosuitApp, link:ExohostLink, input:SyntheticInput, dialogs:DrivenDialogs) {
 		this.app = app;
 		this.link = link;
 		this.input = input;
@@ -75,7 +75,7 @@ class EditorControl {
 		input.requestFrame = app.requestFrame;
 		link.onRequest = handle;
 		var host = app.hostContext;
-		// The window took the OS focus: it is now the most recently used window, where suit routes calls without a target.
+		// The window took the OS focus: it is now the most recently used window, where exohost routes calls without a target.
 		focusSubscription = host == null ? null : host.events.listen(function(event) {
 			switch event {
 				case WindowStateChanged(_, flags) if ((flags & WindowStateFlags.Active) != 0):
@@ -157,7 +157,7 @@ class EditorControl {
 				if (path == null) return;
 				var folder = sys.FileSystem.exists(path) && sys.FileSystem.isDirectory(path);
 				// A folder opens as its workspace, the one that holds it or else a new one, even when the window is on
-				// another (openFolderWorkspace). Without suit's catalog the window shows it as a loose folder.
+				// another (openFolderWorkspace). Without exohost's catalog the window shows it as a loose folder.
 				if (folder && app.machineClient != null && app.machineClient.machine != null) {
 					app.folderOpening = null;
 					app.openFolderWorkspace(path, true);
@@ -243,7 +243,7 @@ class EditorControl {
 			case "exosuit.workspace.open":
 				var id = text(params, "id", null);
 				if (app.workbenchActions.workspaceById(id) == null) {
-					answer(null, new ControlError("not_found", "suit lists no workspace " + id));
+					answer(null, new ControlError("not_found", "exohost lists no workspace " + id));
 					return;
 				}
 				app.workbenchActions.openById(id);
@@ -388,7 +388,7 @@ class EditorControl {
 		}
 		var workspaceId = text(params, "workspace", null);
 		if (workspaceId != null && app.workbenchActions.workspaceById(workspaceId) == null) {
-			answer(null, new ControlError("not_found", "suit lists no workspace " + workspaceId));
+			answer(null, new ControlError("not_found", "exohost lists no workspace " + workspaceId));
 			return;
 		}
 		var before = tabKeys();
@@ -465,7 +465,7 @@ class EditorControl {
 			}
 		var entry = app.workbenchActions.workspaceById(parsed.workspace);
 		if (entry == null) {
-			answer(null, new ControlError("not_found", "suit lists no workspace " + parsed.workspace));
+			answer(null, new ControlError("not_found", "exohost lists no workspace " + parsed.workspace));
 			return;
 		}
 		if (parsed.group.length == 0)

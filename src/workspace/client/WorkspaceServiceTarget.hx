@@ -3,15 +3,15 @@ package workspace.client;
 import sys.FileSystem;
 
 /**
-	A workspace as its service is started: its id in suit's machine catalog, with one service for all of its folders
+	A workspace as its service is started: its id in exohost's machine catalog, with one service for all of its folders
 	(docs/architecture/0006-workspaces-without-folders.md), and the folders that exist.
 **/
 class WorkspaceServiceTarget {
-	/** The workspace's id in suit's catalog. */
+	/** The workspace's id in exohost's catalog. */
 	public final workspace:String;
 	/** The workspace's folders that exist, in order, as the agent spells them. */
 	public final folders:Array<String>;
-	/** Its scratch folder, when suit made one and it exists. */
+	/** Its scratch folder, when exohost made one and it exists. */
 	public final scratch:Null<String>;
 
 	function new(workspace:String, folders:Array<String>, scratch:Null<String>) {

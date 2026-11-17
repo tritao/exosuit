@@ -1,5 +1,5 @@
 """Driven over the control plane only: a window opens a workspace, gets a new agent session and a new terminal, and is
-typed into, with the real mouse and keyboard untouched (docs/design/suitctl/TDD-exosuit-ctl.md §8.4, G8).
+typed into, with the real mouse and keyboard untouched (docs/design/exohostctl/TDD-exosuit-ctl.md §8.4, G8).
 
 - `exosuit.agent.create` makes a session as the workspace row's New Agent Session does (the default provider, Claude,
   here the fake Claude Code TUI tests/workspace-terminals/fake-claude-tui.py, which logs every key it receives);
@@ -48,13 +48,13 @@ def run(gui):
     gui.shot("session")
 
     gui.step("type into the session through the window's input queue")
-    gui.type_text("typed by suitctl")
+    gui.type_text("typed by exohostctl")
     gui.chord("enter")
     gui.check("the session received the typed text and Enter", lambda s: os.path.exists(fake_log)
-              and "typed by suitctl" in open(fake_log, encoding="utf-8").read().replace("TEXT ", "").replace("\n", "")
+              and "typed by exohostctl" in open(fake_log, encoding="utf-8").read().replace("TEXT ", "").replace("\n", "")
               and "ENTER" in open(fake_log, encoding="utf-8").read(), 10,
               detail=lambda s: open(fake_log, encoding="utf-8").read()[-400:] if os.path.exists(fake_log) else "no log")
-    gui.check("the session's screen shows the text", lambda s: "typed by suitctl" in read_rows(gui, session["id"]), 10,
+    gui.check("the session's screen shows the text", lambda s: "typed by exohostctl" in read_rows(gui, session["id"]), 10,
               detail=lambda s: read_rows(gui, session["id"]))
     gui.shot("session-typed")
 

@@ -270,9 +270,9 @@ def main() -> int:
                 return p["app"]
         return None
 
-    # The app of each action: build.py builds agent, suit, graphical in order; each prints "Timings:" when it ends.
+    # The app of each action: build.py builds agent, exohost, graphical in order; each prints "Timings:" when it ends.
     timing_marks = [t for t, text in log if text.startswith("Timings:")]
-    app_order = ["agent", "suit", "graphical"]
+    app_order = ["agent", "exohost", "graphical"]
 
     def app_at(t):
         index = sum(1 for m in timing_marks if m < t)

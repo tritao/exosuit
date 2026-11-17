@@ -2,9 +2,9 @@ package workspace;
 
 /**
 	Starts another editor window on a context (M19 Phase 8, "Open in New Window"): the same program with
-	`--context=<machine/workspace/group>`, the environment of this window (so the same state folder and the same suit),
+	`--context=<machine/workspace/group>`, the environment of this window (so the same state folder and the same exohost),
 	detached so closing this window leaves it open. A window started with a context never hands its paths to another
-	window (GraphicalMain's launch forwarding), so `suitctl open --new-window` gets its own window.
+	window (GraphicalMain's launch forwarding), so `exohostctl open --new-window` gets its own window.
 **/
 class NewWindow {
 	public static inline final ARGUMENT = "--context=";

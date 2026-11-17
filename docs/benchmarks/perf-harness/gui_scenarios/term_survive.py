@@ -1,6 +1,6 @@
 """A terminal survives the editor and its workspace service. An editor (A) opens the workspace Alpha, makes a terminal
 and types a loop into it that prints a line and appends to a file every two seconds. A is closed (exosuit.quit, as closing it does), and the
-workspace service is stopped with a stop request (what suit's Stop and Quit send). The loop must keep running. A new
+workspace service is stopped with a stop request (what exohost's Stop and Quit send). The loop must keep running. A new
 editor (R) is started on the same state: the terminal must be listed as running, its tab must show lines the loop printed
 while no service ran, and the loop must still be the same process.
 
@@ -109,7 +109,7 @@ def run(gui):
         a.check("the terminal runs in one terminal host", lambda s: len(host_pids) == 1 and alive(host_pids[0]), 2, detail=lambda s: host_pids)
         a.shot_window("1-before-close")
 
-        gui.step("close the editor, then stop the workspace service (suit's stop over its link, as suit's Quit sends)")
+        gui.step("close the editor, then stop the workspace service (exohost's stop over its link, as exohost's Quit sends)")
         closed = close_window(a, a.pid)
         record(a)
         gui.results.append({"check": "editor A closed", "ok": closed, "note": ""})

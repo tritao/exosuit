@@ -5,7 +5,7 @@
   mobile-machine-host.py grant --out DIR NAME[:PRESET] ...      (PRESET: read, edit, all; default all)
   mobile-machine-host.py revoke-grant --out DIR NAME ...        (take a workspace back from the paired device)
   mobile-machine-host.py approve --out DIR                       (approve the pending device once its code matches the phone's)
-  mobile-machine-host.py restart-suit --out DIR [--down-seconds N]   (the desktop restarting: suit stops and starts again on the same home)
+  mobile-machine-host.py restart-exohost --out DIR [--down-seconds N]   (the desktop restarting: exohost stops and starts again on the same home)
   mobile-machine-host.py stop  --out DIR
 
 `start` runs everything under DIR (nothing in the user's real state) and stays in the foreground until DIR/stop
@@ -13,14 +13,14 @@ appears, Ctrl-C, or 24 minutes pass. It prints JSON lines (also to DIR/host.log)
 DIR/ready.json (invitation URL, machine id, workspace ids). Build first:
 
   python scripts/build.py --only agent
-  python scripts/haxeon_cli.py build --project suit/haxeon.json
+  python scripts/haxeon_cli.py build --project exohost/haxeon.json
   python scripts/haxeon_cli.py build --project tests/mobile-pairing/haxeon.json     (the admin tool, to make sessions)
 
 What it starts, all under DIR and all loopback:
 - the local Wrangler relay (relay/worker) on 127.0.0.1:PORT, EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1;
-- an isolated suit (its own home, agent state and a file credential store) with remote access enabled for that relay;
+- an isolated exohost (its own home, agent state and a file credential store) with remote access enabled for that relay;
 - two workspaces, "Alpha" (one session) and "Beta" (two sessions), each with a folder and a running workspace service
-  using the fake Codex (tests/workspace-agents/fake-codex.py). Suit finds the services by their state folders;
+  using the fake Codex (tests/workspace-agents/fake-codex.py). Exohost finds the services by their state folders;
 - terminals in each workspace's service: Alpha has "Terminal 1" (the shell) and "Claude Code · Terminal", which runs
   tests/workspace-terminals/fake-claude-tui.py (a deterministic Claude Code look-alike; every key it gets is logged to
   DIR/fake-claude-alpha.log). With --real-claude PATH, Beta's "Claude Code · Terminal" runs the real CLI instead, with a
@@ -28,7 +28,7 @@ What it starts, all under DIR and all loopback:
   environment reaches it), so it only shows its first-run screen;
 - the pairing: it makes an invitation and, when the phone's device is pending, compares the phone's code (DIR/pairing.json
   has the machine's pending code) and approves it with NO workspaces. `grant` then grants workspaces to the paired device
-  (the same suit control requests the desktop's Remote Access panel sends); the phone follows without pairing again.
+  (the same exohost control requests the desktop's Remote Access panel sends); the phone follows without pairing again.
 
 Files in DIR: ready.json, pairing.json ({pendingCode, deviceId, approved, granted}), host.log, *.log, commands/ (grant
 requests), stop (create it to stop). An emulator reaches the host's loopback with `adb -s emulator-N reverse tcp:PORT tcp:PORT`.
@@ -43,7 +43,7 @@ import time
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
-import suit_harness as harness  # noqa: E402
+import exohost_harness as harness  # noqa: E402
 sys.path.insert(0, str(SCRIPTS))
 from test_driver import runtime_paths, service_environment  # noqa: E402
 
@@ -93,7 +93,7 @@ def start(arguments) -> int:
     log = Log(out / "host.log")
     assert harness.WRANGLER.is_file(), f"run `npm ci` in relay/worker first ({harness.WRANGLER} is missing)"
     assert ADMIN.is_file(), "build tests/mobile-pairing first (scripts/haxeon_cli.py build --project tests/mobile-pairing/haxeon.json)"
-    for built in (harness.SUIT, harness.AGENT):
+    for built in (harness.EXOHOST, harness.AGENT):
         assert built.is_file(), f"build first: {built}"
     runtime, bytecode = runtime_paths(ROOT)
     for name in ("credentials", "agent-state", "portable"):
@@ -108,14 +108,14 @@ def start(arguments) -> int:
         "EXOSUIT_SERVICE_IDLE_SECONDS": "3000"})
 
     relay = harness.Relay(out)
-    suit = harness.Suit(out, {
-        "EXOSUIT_SUIT_IDLE_SECONDS": "3000", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1",
+    exohost = harness.Exohost(out, {
+        "EXOSUIT_EXOHOST_IDLE_SECONDS": "3000", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1",
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(out / "credentials"), "EXOSUIT_AGENT_STATE_HOME": str(out / "agent-state"),
-        "EXOSUIT_AGENT_LAUNCHER": str(harness.AGENT), "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unusedPhone9",
+        "EXOSUIT_AGENT_LAUNCHER": str(harness.AGENT), "EXOSUIT_EXOHOST_LOGIN_KEY": "HKCU\\Software\\ExosuitExohostTest\\unusedPhone9",
         "EXOSUIT_CODEX_BIN": sys.executable, "EXOSUIT_CODEX_SCRIPT": environment["EXOSUIT_CODEX_SCRIPT"],
         "EXOSUIT_CODEX_PROXY_LAUNCHER": environment["EXOSUIT_CODEX_PROXY_LAUNCHER"], "FAKE_CODEX_REPLY": "1", "EXOSUIT_SERVICE_IDLE_SECONDS": "3000"})
-    # The services report to this suit (service-attach), which then lists them as running and forwards device streams to them.
-    environment["EXOSUIT_SUIT_HOME"] = str(suit.home)
+    # The services report to this exohost (service-attach), which then lists them as running and forwards device streams to them.
+    environment["EXOSUIT_EXOHOST_HOME"] = str(exohost.home)
     exit_code = 0
     started = time.monotonic()
     ids: dict[str, str] = {}
@@ -123,11 +123,11 @@ def start(arguments) -> int:
     device_id = None
     try:
         log("relay-ready", origin=relay.origin)
-        assert "started" in suit("start")
-        log("suit-started", home=str(suit.home))
+        assert "started" in exohost("start")
+        log("exohost-started", home=str(exohost.home))
 
         def start_service(workspace: str, folder: Path, env: dict, timeout: float = 120) -> str:
-            """Starts workspace `workspace`'s service as suit does, in the background, and returns its pipe once its service.log
+            """Starts workspace `workspace`'s service as exohost does, in the background, and returns its pipe once its service.log
             says it is ready."""
             log = out / "agent-state" / "workspaces" / workspace / "service.log"
             offset = log.stat().st_size if log.exists() else 0
@@ -168,11 +168,11 @@ def start(arguments) -> int:
             folder = out / f"folder-{name.lower()}"
             folder.mkdir(exist_ok=True)
             (folder / "README.md").write_text(f"# {name}\n\nThrowaway folder for the phone's machine test.\n", encoding="utf-8")
-            reply = suit.control({"op": "workspace-create", "name": name, "folders": [str(folder)]})
+            reply = exohost.control({"op": "workspace-create", "name": name, "folders": [str(folder)]})
             assert reply.get("ok"), reply
             workspace = reply["workspace"]["id"]
             ids[name] = workspace
-            # The service suit would start on a device's OPEN, started here first so its sessions exist; suit finds it by its state folder.
+            # The service exohost would start on a device's OPEN, started here first so its sessions exist; exohost finds it by its state folder.
             local_socket = start_service(workspace, folder, claude_environment(name))
             sockets[name] = local_socket
             deadline = time.monotonic() + 90
@@ -205,19 +205,19 @@ def start(arguments) -> int:
                         time.sleep(2)
             log("workspace-ready", name=name, workspace=workspace, sessions=sessions, terminals=terminals)
 
-        reply = suit.control({"op": "remote-enable", "origin": relay.origin})
+        reply = exohost.control({"op": "remote-enable", "origin": relay.origin})
         assert reply.get("ok"), reply
         log("remote-enabled", status=reply)
         invitation = None
         for _ in range(30):
-            reply = suit.control({"op": "remote-invite", "ttl": 300})
+            reply = exohost.control({"op": "remote-invite", "ttl": 300})
             if reply.get("ok"):
                 invitation = reply["invitation"]
                 break
             time.sleep(1)
         assert invitation is not None, reply
         device_id = invitation["deviceId"]
-        status = suit.control({"op": "remote-status"})
+        status = exohost.control({"op": "remote-status"})
         write_json(out / "ready.json", {
             "relayPort": relay.port, "relayOrigin": relay.origin, "invitationUrl": invitation.get("invitationUrl") or invitation["pairingSocketUrl"], "deviceId": device_id,
             "relayMachineId": status.get("relayMachineId"), "machineId": status.get("machineId"), "workspaces": ids, "sockets": sockets, "out": str(out),
@@ -232,7 +232,7 @@ def start(arguments) -> int:
             if time.monotonic() - started > LIFETIME_SECONDS:
                 log("lifetime-exceeded", seconds=LIFETIME_SECONDS)
                 break
-            devices = suit.control({"op": "remote-devices"})
+            devices = exohost.control({"op": "remote-devices"})
             # The machine's record of the device (none, saved, connected, revoked), logged when it changes: a pairing the machine
             # rolled back after the approval shows as saved -> none, with the times that explain it.
             state = "none"
@@ -251,7 +251,7 @@ def start(arguments) -> int:
                             log("pending", code=item["authenticationCode"])
                         # The phone's own code is compared by the acceptance script (it reads the phone's log) before this approves.
                         if (out / "approve").exists():
-                            approved = suit.control({"op": "remote-approve", "deviceId": device_id, "workspaces": []})
+                            approved = exohost.control({"op": "remote-approve", "deviceId": device_id, "workspaces": []})
                             log("approved", reply=approved)
                             pairing["approved"] = bool(approved.get("ok"))
                             write_json(out / "pairing.json", pairing)
@@ -260,14 +260,14 @@ def start(arguments) -> int:
                 command.unlink(missing_ok=True)
                 if request is None:
                     continue
-                if request.get("restart-suit"):
-                    # The desktop going away and coming back: suit stops (the machine leaves the relay) and starts again with the same home
-                    # and credentials; the workspace services keep running and suit finds them by their state folders.
-                    suit.run("stop", check=False)
+                if request.get("restart-exohost"):
+                    # The desktop going away and coming back: exohost stops (the machine leaves the relay) and starts again with the same home
+                    # and credentials; the workspace services keep running and exohost finds them by their state folders.
+                    exohost.run("stop", check=False)
                     time.sleep(float(request.get("downSeconds", 0)))
-                    assert "started" in suit("start")
-                    reply = suit.control({"op": "remote-enable", "origin": relay.origin})
-                    log("suit-restarted", ok=reply.get("ok"), error=reply.get("error"))
+                    assert "started" in exohost("start")
+                    reply = exohost.control({"op": "remote-enable", "origin": relay.origin})
+                    log("exohost-restarted", ok=reply.get("ok"), error=reply.get("error"))
                     continue
                 current = {entry["workspace"]: entry["preset"] for device in devices.get("devices", []) if device["deviceId"] == device_id
                            for entry in device["workspaces"]}
@@ -276,7 +276,7 @@ def start(arguments) -> int:
                         current.pop(ids[name], None)
                     else:
                         current[ids[name]] = preset
-                reply = suit.control({"op": "remote-grant", "deviceId": device_id,
+                reply = exohost.control({"op": "remote-grant", "deviceId": device_id,
                                       "workspaces": [{"workspace": workspace, "preset": preset} for workspace, preset in current.items()]})
                 pairing["granted"] = {name: current[workspace] for name, workspace in ids.items() if workspace in current}
                 write_json(out / "pairing.json", pairing)
@@ -291,14 +291,14 @@ def start(arguments) -> int:
         log("failed", error=str(error))
         exit_code = 1
     finally:
-        shutdown(out, suit, relay, log)
+        shutdown(out, exohost, relay, log)
     return exit_code
 
 
-def shutdown(out: Path, suit, relay, log) -> None:
+def shutdown(out: Path, exohost, relay, log) -> None:
     (out / "stop").write_text("stop\n")
     try:
-        suit.run("stop", check=False)
+        exohost.run("stop", check=False)
     except Exception:  # noqa: BLE001
         pass
     relay.stop()
@@ -318,10 +318,10 @@ def shutdown(out: Path, suit, relay, log) -> None:
     log("stopped", leftoversKilled=killed)
 
 
-def command_restart_suit(out: Path, down_seconds: float) -> None:
+def command_restart_exohost(out: Path, down_seconds: float) -> None:
     folder = out / "commands"
     folder.mkdir(exist_ok=True)
-    write_json(folder / f"{time.time_ns()}.json", {"restart-suit": True, "downSeconds": down_seconds})
+    write_json(folder / f"{time.time_ns()}.json", {"restart-exohost": True, "downSeconds": down_seconds})
 
 
 def command_set(out: Path, changes: dict) -> None:
@@ -370,7 +370,7 @@ def main() -> int:
     hold_parser.add_argument("--seconds", type=float, default=60)
     hold_parser.add_argument("--columns", type=int, default=120)
     hold_parser.add_argument("--rows", type=int, default=30)
-    restart_parser = commands.add_parser("restart-suit", help="stop suit, wait, start it again with the same home (the desktop restarting)")
+    restart_parser = commands.add_parser("restart-exohost", help="stop exohost, wait, start it again with the same home (the desktop restarting)")
     restart_parser.add_argument("--out", default=str(DEFAULT_OUT))
     restart_parser.add_argument("--down-seconds", type=float, default=0)
     for name in ("grant", "revoke-grant", "approve", "stop"):
@@ -392,8 +392,8 @@ def main() -> int:
         command_set(out, changes)
     elif arguments.command == "revoke-grant":
         command_set(out, {name: None for name in arguments.names})
-    elif arguments.command == "restart-suit":
-        command_restart_suit(out, arguments.down_seconds)
+    elif arguments.command == "restart-exohost":
+        command_restart_exohost(out, arguments.down_seconds)
     elif arguments.command == "approve":
         (out / "approve").write_text("approve\n")
     else:

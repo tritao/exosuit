@@ -4,7 +4,7 @@ B). A opens a1.txt in Second, then goes to the group Third and opens a3.txt ther
 (`exosuit.quit`, as closing the window does), then B. A new editor is started with the same state and no context: it must show a2.txt in Second (B closed
 last) and a3.txt in Third (only A touched it). (The scenario uses groups that only its windows touch.)
 
-Every window is driven over suit's control plane, found by its pid."""
+Every window is driven over exohost's control plane, found by its pid."""
 import ctypes
 import os
 import subprocess
@@ -121,7 +121,7 @@ def run(gui):
         program = next(x for x in arguments if x.lower().endswith(".hl"))
         root = os.path.abspath(os.path.join(os.path.dirname(program), "..", "..", ".."))
         env = dict(os.environ)
-        # `haxeon run` gives the editor the native libraries of its build on PATH; do the same (the rule of scripts/suit.py library_path).
+        # `haxeon run` gives the editor the native libraries of its build on PATH; do the same (the rule of scripts/exohost.py library_path).
         native = os.path.join(os.path.dirname(program), "native")
         libraries = [os.path.join(native, d) for d in sorted(os.listdir(native))] if os.path.isdir(native) else []
         libraries.append(os.path.dirname(arguments[0]))

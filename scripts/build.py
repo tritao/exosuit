@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the agent, suit and the graphical app with the Haxeon CLI."""
+"""Build the agent, exohost and the graphical app with the Haxeon CLI."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from prepare_agent_naming import prepare
 def main() -> int:
     root_dir = Path(__file__).resolve().parent.parent
     self_hosted = os.environ.get("HAXEON_SELF_HOSTED", "0") == "1"
-    # suit is the per-user tray daemon that tracks the processes editors and workspaces start. The projects build one
+    # exohost is the per-user tray daemon that tracks the processes editors and workspaces start. The projects build one
     # after another: they share the CMake trees of the native packages they have in common (haxeon/out/native-cache),
     # which a lock lets only one build use at a time, so the later projects find those packages built.
-    projects = ["agent", "suit", "graphical"]
-    # `--only agent,suit` (or `--only=agent,suit`) builds just those, for a quick loop on one part.
+    projects = ["agent", "exohost", "graphical"]
+    # `--only agent,exohost` (or `--only=agent,exohost`) builds just those, for a quick loop on one part.
     passed = sys.argv[1:]
     for index, argument in enumerate(passed):
         if argument == "--only" or argument.startswith("--only="):

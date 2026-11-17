@@ -149,7 +149,7 @@ def phone_url(config, desktop_url):
 
 def create_fake_session(config, workspace_id, folder, name, start=False):
     """Creates a fake agent session through the workspace service (the same admin tool the test host uses). `start` first
-    starts the service (a workspace the editor is not attached to); suit finds it by its report."""
+    starts the service (a workspace the editor is not attached to); exohost finds it by its report."""
     return admin_ensure(config, workspace_id, folder, ["--ensure-session", name], start, "provider_starting")
 
 
@@ -166,14 +166,14 @@ def admin_ensure(config, workspace_id, folder, admin_arguments, start=False, ret
                               timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     log = Path(env["EXOSUIT_AGENT_STATE_HOME"]) / "workspaces" / workspace_id / "service.log"
     if start:
-        # Started as suit starts it, in the background; it outlives this call and idles out.
+        # Started as exohost starts it, in the background; it outlives this call and idles out.
         subprocess.Popen([str(runtime), str(bytecode), "--workspace", workspace_id, "--folder", folder],
                          env=dict(env, EXOSUIT_SERVICE_IDLE_SECONDS="3000"), cwd=folder, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     deadline = time.monotonic() + 60
     socket = None
-    while socket is None:  # the editor (through suit) starts the service when it attaches; its log names its pipe once ready
+    while socket is None:  # the editor (through exohost) starts the service when it attaches; its log names its pipe once ready
         try:
             ready = [line for line in log.read_text(encoding="utf-8", errors="replace").splitlines() if "service ready on " in line]
         except OSError:
@@ -636,7 +636,7 @@ def step_keyboard(gui, ctx):
 
 def step_restart_editor(gui, ctx):
     """The editor window is closed and the editor started again (the keeper does it, see Restart-Editor in e2e-local.ps1,
-    with `suitctl quit --mode prompt` and no mouse). The phone, paired and showing the Claude terminal (run the `terminal` step first), must come
+    with `exohostctl quit --mode prompt` and no mouse). The phone, paired and showing the Claude terminal (run the `terminal` step first), must come
     back online by itself, list Alpha, and its terminal must still take input. Prints the time from the editor being ready
     to the phone online and to the first key reaching the fake."""
     phone, config = ctx["phone"], ctx["config"]

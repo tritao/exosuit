@@ -1,7 +1,7 @@
 # Android app
 
 A native Android application that runs haxeon and the same UI the desktop uses (`graphical/` `ExosuitApp`). Status:
-the app starts on the x86_64 emulator, pairs once with a machine (suit) over a relay, lists the workspaces the owner
+the app starts on the x86_64 emulator, pairs once with a machine (exohost) over a relay, lists the workspaces the owner
 grants it with their groups and sessions, follows new grants without pairing again, and opens a workspace in the
 same Workbench the desktop shows (`scripts/machine-acceptance.ps1`).
 
@@ -17,7 +17,7 @@ same Workbench the desktop shows (`scripts/machine-acceptance.ps1`).
 
 The Haxe module is compiled with `haxeon build --compiler-only` on the desktop (HashLink bytecode, about 53 MB
 `ui.hl`), shipped as an APK asset, and run by the JIT in `libhaxeon.so`. The app's state lives in its private files
-directory (`PRAGTICAL_PORTABLE`); it never starts a local suit.
+directory (`PRAGTICAL_PORTABLE`); it never starts a local exohost.
 
 ## Toolchain
 
@@ -123,7 +123,7 @@ libwebsockets, `UiHostRuntime` without a window, the UIKit frame retry, and the 
 
 ## Pairing with a machine
 
-A phone pairs once with a **machine** (suit, the per-user daemon; ADR 0005 section 4) and sees every workspace the owner
+A phone pairs once with a **machine** (exohost, the per-user daemon; ADR 0005 section 4) and sees every workspace the owner
 grants it. The owner grants on the machine, in the Remote Access panel; the phone follows without pairing again.
 
 The phone uses the same shared clients as the desktop and the browser build. The shared pieces are in `src/workspace`:
@@ -141,7 +141,7 @@ The phone uses the same shared clients as the desktop and the browser build. The
   connector that issues `OPEN` again on every reconnect. A dropped channel ends every stream, and the links reconnect
   through `OPEN`.
 - The phone holds the same `WorkspaceLinks` and `WorkspaceLink`s as the desktop editor; only the route differs (a relay
-  stream instead of suit's pipe).
+  stream instead of exohost's pipe).
 
 The Android files are in `android/haxe/src/`:
 
@@ -203,15 +203,15 @@ The Android files are in `android/haxe/src/`:
 ### Tests, desktop test host and acceptance run
 
 `scripts/mobile-machine-host.py start --out DIR` runs, all isolated: the wrangler relay on a free loopback port, an
-isolated suit with remote access enabled for it, two workspaces ("Alpha" with one fake Codex session, "Beta" with two;
-their services are started first so the sessions exist, and report to that suit), and a loop that
+isolated exohost with remote access enabled for it, two workspaces ("Alpha" with one fake Codex session, "Beta" with two;
+their services are started first so the sessions exist, and report to that exohost), and a loop that
 approves the pending device with no workspaces once `approve` is requested. `grant --out DIR Alpha:all Beta:read` and
 `revoke-grant --out DIR Beta` send the same control requests the desktop panel sends. `DIR/ready.json` has the
 invitation URL and ids; `DIR/pairing.json` the machine's pending code; `stop --out DIR` ends everything.
 
 ```
 python scripts/build.py --only agent
-python scripts/haxeon_cli.py build --project suit/haxeon.json
+python scripts/haxeon_cli.py build --project exohost/haxeon.json
 python scripts/haxeon_cli.py build --project tests/mobile-pairing/haxeon.json      (the admin tool that makes the sessions)
 pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-x86_64] [-Port 5554] [-OutDir dir] [-SkipBuild]
 ```
@@ -321,4 +321,4 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
 - A cold start (`resume-kill`) reconnects the machine from the stored pairing in about 2.5 s; the workspace is not reopened by itself.
 - Before a relaunch that must reconnect, `machine-acceptance.ps1` puts the `adb reverse` rule to the relay back if it is gone (`Assert-RelayTunnel`; it prints a `RIG:` line when it had to). An emulator transport reset drops the rule and a cold-started app then stays offline; that looked like an app bug once (2026-11-13).
 - Network loss is simulated by wifi and data off, removing the `adb reverse` rule and `adb reconnect` (the relay is reached through the reverse tunnel, so toggling wifi alone changes nothing).
-- Desktop restart is suit stopping and starting on the host's home. The relay keeps a device's socket when the machine behind it restarts and tells the device nothing; the old Noise session is dead. `DeviceMachine` now ends the connection when its directory read times out (at most 15 s refresh + 8 s timeout), and the client dials again.
+- Desktop restart is exohost stopping and starting on the host's home. The relay keeps a device's socket when the machine behind it restarts and tells the device nothing; the old Noise session is dead. `DeviceMachine` now ends the connection when its directory read times out (at most 15 s refresh + 8 s timeout), and the client dials again.

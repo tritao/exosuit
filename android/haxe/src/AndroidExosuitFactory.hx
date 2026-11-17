@@ -56,8 +56,8 @@ class AndroidExosuitFactory {
 			throw "An existing absolute app-files directory is required";
 		var root = appFilesRoot;
 		while (root.length > 1 && (StringTools.endsWith(root, "/") || StringTools.endsWith(root, "\\"))) root = root.substr(0, root.length - 1);
-		// The app keeps its settings and state in its private files directory. There is no suit on the phone: only the
-		// desktop's GraphicalMain makes a suit link, and the phone reaches its machine's suit through the relay.
+		// The app keeps its settings and state in its private files directory. There is no exohost on the phone: only the
+		// desktop's GraphicalMain makes an exohost link, and the phone reaches its machine's exohost through the relay.
 		Sys.putEnv("PRAGTICAL_PORTABLE", root);
 		var app:Null<ExosuitApp> = null;
 		var redraw = function() {

@@ -11,7 +11,7 @@ class ActiveContext {
 	public var roots(default, null):Array<String> = [];
 	public var cwd(default, null):String = Sys.getCwd();
 	public var revision(default, null):Int = 0;
-	/** The machine this window works on; the catalog's id once suit has answered, a placeholder before. */
+	/** The machine this window works on; the catalog's id once exohost has answered, a placeholder before. */
 	public var machineId(default, null):String = ContextKey.DEFAULT_MACHINE;
 	/** The workspace the active context belongs to: the saved workspace's id, also for a group of it. */
 	public var contextWorkspaceId(default, null):String = "workspace";

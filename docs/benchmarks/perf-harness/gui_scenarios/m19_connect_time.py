@@ -38,7 +38,7 @@ def record(gui, case, timeline, begin, ends):
     last = max([i for _, i in ends if i is not None] + [begin])
     gui.results.append({"check": "time " + case, "ok": ok, "ms": times, "budget_ms": BUDGET[case],
                         "events": ["%d %s %s %s" % (e["t"] - base, e["event"], e["workspace"][:8], e["detail"]) for e in timeline[begin:last + 1]
-                                   if e["event"] not in ("suit-queued",)]})
+                                   if e["event"] not in ("exohost-queued",)]})
     print("%s %s %s" % ("PASS" if ok else "FAIL", "time " + case, times), flush=True)
     gui._save()
 

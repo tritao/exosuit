@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-APPS = ("agent", "suit", "graphical")
+APPS = ("agent", "exohost", "graphical")
 
 
 def esc(s):
@@ -431,7 +431,7 @@ def render(A, B, notes, a_path, b_path):
     if "warm" in ra:
         warm_block = f"""
 <h3>Rebuild after deleting the app build folders ({ra['warm']['wall']:.0f} s)</h3>
-<p class="prose">The new case: <code>agent/build</code>, <code>suit/build</code> and <code>graphical/build</code> deleted, then the same command. Every package configures again; the compiles go through ccache, which holds the cold build's objects for these same paths. Drawn on the cold build's time scale.</p>
+<p class="prose">The new case: <code>agent/build</code>, <code>exohost/build</code> and <code>graphical/build</code> deleted, then the same command. Every package configures again; the compiles go through ccache, which holds the cold build's objects for these same paths. Drawn on the cold build's time scale.</p>
 {gantt_legend}
 <div class="scroll"><div class="chart" data-chart="gantt" data-run="a-warm" data-wall="{wall2('cold'):.2f}" data-min-width="760" data-label="Warm rebuild Gantt chart"></div></div>
 {actions_table("warm")}

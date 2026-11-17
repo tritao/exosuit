@@ -11,7 +11,7 @@ line timestamped. Afterwards it records ccache's counters, collects the static f
 Kinds:
   cold  the apps' build folders must not exist (a fresh checkout, or delete them and use a fresh -CcacheDir).
   noop  a build right after another one; the build folders must exist.
-  warm  deletes agent/build, suit/build and graphical/build first, so CMake configures again and compiles go
+  warm  deletes agent/build, exohost/build and graphical/build first, so CMake configures again and compiles go
         through the ccache that the previous build filled.
 
 The checkout's haxeon must be bootstrapped (haxeon/out/haxeon-cli.hl present): the build is of the apps only.
@@ -50,7 +50,7 @@ $python = (Get-Command python -ErrorAction Stop).Source
 if (-not (Test-Path (Join-Path $Worktree 'scripts\build-windows.ps1'))) { throw "$Worktree is not an Exosuit checkout" }
 $haxeon = Join-Path $Worktree 'haxeon'
 if (-not (Test-Path (Join-Path $haxeon 'out\haxeon-cli.hl'))) { throw "$haxeon is not bootstrapped (no out\haxeon-cli.hl)" }
-$appBuilds = 'agent', 'suit', 'graphical' | ForEach-Object { Join-Path $Worktree "$_\build" }
+$appBuilds = 'agent', 'exohost', 'graphical' | ForEach-Object { Join-Path $Worktree "$_\build" }
 $present = @($appBuilds | Where-Object { Test-Path $_ })
 switch ($Kind) {
 	'cold' { if ($present) { throw "cold needs no app build folders, found: $($present -join ', ')" } }

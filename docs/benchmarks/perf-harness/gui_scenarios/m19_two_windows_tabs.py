@@ -2,7 +2,7 @@
 with Open in New Window) open different files and each keeps its own tabs; both see the same terminal, and what is typed
 into it in one window shows in the other, in both directions.
 
-The second window is driven over suit's control plane, found by its pid."""
+The second window is driven over exohost's control plane, found by its pid."""
 import os
 import subprocess
 import sys

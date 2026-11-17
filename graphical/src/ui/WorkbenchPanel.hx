@@ -19,7 +19,7 @@ import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.text.Text;
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import ui.WorkbenchOrder;
 import ui.WorkbenchRows.WorkbenchRowSource;
 import workspace.client.WorkspaceWorkbenchClient;
@@ -344,7 +344,7 @@ class WorkbenchPanel implements View {
 		if (act == null) return;
 		var idle = !act.busy(), target = entry;
 		var items = createItems(entry.id, WorkspaceProtocol.ROOT_GROUP, event);
-		// A device uses the workspaces it is granted; only suit's own machine changes them.
+		// A device uses the workspaces it is granted; only exohost's own machine changes them.
 		if (!act.manages()) { showMenu(items, event, function() return act.workspaceById(target.id) != null); return; }
 		items.push(new MenuItem("machine-workspace-rename", "Rename…", function() act.rename(target), idle, "F2", true));
 		items.push(new MenuItem("machine-workspace-attach-folder", "Attach Folder…", function() act.attachFolder(target), idle));

@@ -433,7 +433,7 @@ class WorkspaceScmTestMain {
 
 	static function connect(server:WorkspaceRpcServer, grants:Array<String>, local:Bool, clock:Void->Float):ClientLink {
 		var pair = MemoryTransport.pair(1024 * 1024, 64);
-		// A device's stream reaches the service as suit forwards it: its first message is suit's intro with the device's grants.
+		// A device's stream reaches the service as exohost forwards it: its first message is exohost's intro with the device's grants.
 		if (!local) pair.client.send(workspace.transport.ForwardedStream.intro("device", grants));
 		server.acceptTestLocal(pair.server);
 		var options = new RpcPeerOptions("exosuit-agent/1", grants, [], 5000, 262144, 32, 1048576);

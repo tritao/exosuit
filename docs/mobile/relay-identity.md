@@ -1,13 +1,13 @@
 # Relay identity: relay ids, the invitation fingerprint and proven registration
 
 How a machine names itself to a relay, and how a phone knows it reached the right machine. Code:
-`src/workspace/transport/MachineKeys.hx` (the derived values), `suit/src/suit/remote/MachineRelayIds.hx` (which id a
+`src/workspace/transport/MachineKeys.hx` (the derived values), `exohost/src/exohost/remote/MachineRelayIds.hx` (which id a
 relay gets), `src/workspace/client/PairingLink.hx` (the invitation link), `relay/worker/src/index.ts` (the Worker).
 
 ## Why
 
 The relay (`relay/worker`) addresses a machine by a 16-byte id in the URL path and registers ids first come, first
-served: the first bearer to `POST /register` an id owns it. suit used to register the hex of its catalog id on every
+served: the first bearer to `POST /register` an id owns it. exohost used to register the hex of its catalog id on every
 relay. That id is in every invitation URL, so anyone who had seen an old invitation could register it on a relay the
 machine had not used yet, and the machine got `machine_identity_conflict` there for good. No access is gained (Noise
 pins the machine key, and devices are registered by the machine), but the machine is locked out of that relay.
@@ -17,7 +17,7 @@ its own key was caught only if the user compared the six-digit code.
 
 ## Values derived from the machine key
 
-The machine key is the Noise static public key (32 bytes, X25519) suit uses with a relay.
+The machine key is the Noise static public key (32 bytes, X25519) exohost uses with a relay.
 
 | Name | Value | Where |
 | --- | --- | --- |
@@ -29,14 +29,14 @@ Vectors (key = bytes 0..31): fingerprint `630dcd2966c4336691125448bbb25b4f`, rel
 `5ff11fa2bc5136b8ccf63b6c679d6f8d`; with shared secret 32 x `11`, challenge bytes 32..63 and bearer `ab` x 32 the
 proof is `bd14af04eba3b85dbfb2bca787b9a64bcf63070ec15a5e2de9170096057b1598`. `relay/worker/test/identity.test.ts` checks them.
 
-## Relay ids (suit)
+## Relay ids (exohost)
 
 Turning remote access on with a relay picks its relay id (`MachineRelayIds.choose`):
 
-1. the id remembered for that relay origin in `machine-relay-ids.json` (suit's home);
-2. else the catalog id's hex, when suit already holds a bearer for the relay under it: a relay used before relay ids
+1. the id remembered for that relay origin in `machine-relay-ids.json` (exohost's home);
+2. else the catalog id's hex, when exohost already holds a bearer for the relay under it: a relay used before relay ids
    were separate keeps that id, so its devices stay paired;
-3. else a new id: suit makes a Noise key for this relay, stores it as the relay identity's key
+3. else a new id: exohost makes a Noise key for this relay, stores it as the relay identity's key
    (`noise-static:<relay id>` in the credential store) and derives the relay id from it.
 
 `machine-relay.json` keeps its version 1 shape (`origin`, `machineId` = the relay id). Turning remote access off deletes
@@ -74,7 +74,7 @@ Proven registration:
    `Retry-After` (seconds until the oldest may go), otherwise the oldest older challenge makes room. One client
    address (`CF-Connecting-IP`) also gets a token bucket per machine id (6 at once, one more every 2 s, stored in
    `challenge_bucket`): beyond it, 429 with `Retry-After`. So a flood neither evicts the challenge the machine is about to
-   register with nor, from one address, keeps the table full; suit waits the `Retry-After` and dials again.
+   register with nor, from one address, keeps the table full; exohost waits the `Retry-After` and dials again.
 2. `POST /v1/machines/<id>/register`, the bearer, JSON `{"publicKey": "<64 hex>", "challenge": "<64 hex>", "proof":
    "<64 hex>"}`. The Worker checks that `<id>` is the relay id of `publicKey` (else 400 `machine_id_not_derived`), uses
    the challenge up (unknown or expired: 401 `invalid_challenge`), and recomputes the proof (mismatch, or an all-zero
@@ -85,9 +85,9 @@ Proven registration:
      one set up goes: pending invitations, devices, tickets, and every open socket (closed with 1008).
    The key is stored (`machine_key`) either way.
 
-suit registers plainly, as before. Only when that gives 409 and its relay id is derived from its key
+exohost registers plainly, as before. Only when that gives 409 and its relay id is derived from its key
 (`RelayRegistrationProver.forKey`) does it ask for a challenge and register with a proof. A Worker without proven
-registration answers the challenge with 404; suit then reports the original `machine_identity_conflict`.
+registration answers the challenge with 404; exohost then reports the original `machine_identity_conflict`.
 
 What it does not cover:
 
@@ -102,6 +102,6 @@ What it does not cover:
 
 | Pairing | Deployed Worker (no proofs) | Worker with proofs |
 | --- | --- | --- |
-| New suit, new phone | works; a squatted derived id stays a conflict | works; a squatted id is taken back |
-| New suit, older phone | the older phone refuses a link with `#mk=`; without the fragment it pairs (no key check). Then it works with a relay set up before (catalog id) and refuses the directory of a relay set up now ("answered for another machine id"): update the phone | same |
-| Older suit, new phone | works; the link has no fingerprint, the phone says so | works |
+| New exohost, new phone | works; a squatted derived id stays a conflict | works; a squatted id is taken back |
+| New exohost, older phone | the older phone refuses a link with `#mk=`; without the fragment it pairs (no key check). Then it works with a relay set up before (catalog id) and refuses the directory of a relay set up now ("answered for another machine id"): update the phone | same |
+| Older exohost, new phone | works; the link has no fingerprint, the phone says so | works |

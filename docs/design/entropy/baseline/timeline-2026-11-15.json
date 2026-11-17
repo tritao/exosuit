@@ -25,7 +25,7 @@
  },
  {
   "t": 245,
-  "event": "suit-queued",
+  "event": "exohost-queued",
   "workspace": "",
   "detail": "machine"
  },
@@ -67,7 +67,7 @@
  },
  {
   "t": 263,
-  "event": "suit-begin",
+  "event": "exohost-begin",
   "workspace": "",
   "detail": "machine"
  },
@@ -79,25 +79,25 @@
  },
  {
   "t": 498,
-  "event": "suit-reply",
+  "event": "exohost-reply",
   "workspace": "",
   "detail": "machine ok 235 ms"
  },
  {
   "t": 5300,
-  "event": "suit-queued",
+  "event": "exohost-queued",
   "workspace": "",
   "detail": "machine"
  },
  {
   "t": 5300,
-  "event": "suit-begin",
+  "event": "exohost-begin",
   "workspace": "",
   "detail": "machine"
  },
  {
   "t": 5410,
-  "event": "suit-reply",
+  "event": "exohost-reply",
   "workspace": "",
   "detail": "machine ok 109 ms"
  },
@@ -199,19 +199,19 @@
  },
  {
   "t": 9426,
-  "event": "suit-queued",
+  "event": "exohost-queued",
   "workspace": "",
   "detail": "machine"
  },
  {
   "t": 9488,
-  "event": "suit-begin",
+  "event": "exohost-begin",
   "workspace": "",
   "detail": "machine"
  },
  {
   "t": 9609,
-  "event": "suit-reply",
+  "event": "exohost-reply",
   "workspace": "",
   "detail": "machine ok 120 ms"
  },
@@ -319,7 +319,7 @@
  },
  {
   "t": 10953,
-  "event": "suit-queued",
+  "event": "exohost-queued",
   "workspace": "",
   "detail": "machine"
  },
@@ -343,7 +343,7 @@
  },
  {
   "t": 11013,
-  "event": "suit-begin",
+  "event": "exohost-begin",
   "workspace": "",
   "detail": "machine"
  },
@@ -367,7 +367,7 @@
  },
  {
   "t": 11131,
-  "event": "suit-reply",
+  "event": "exohost-reply",
   "workspace": "",
   "detail": "machine ok 117 ms"
  },
@@ -523,19 +523,19 @@
  },
  {
   "t": 12465,
-  "event": "suit-queued",
+  "event": "exohost-queued",
   "workspace": "",
   "detail": "machine"
  },
  {
   "t": 12538,
-  "event": "suit-begin",
+  "event": "exohost-begin",
   "workspace": "",
   "detail": "machine"
  },
  {
   "t": 12671,
-  "event": "suit-reply",
+  "event": "exohost-reply",
   "workspace": "",
   "detail": "machine ok 133 ms"
  },

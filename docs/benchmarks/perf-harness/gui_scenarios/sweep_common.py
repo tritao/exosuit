@@ -10,7 +10,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m19_common import *  # noqa: F401,F403
 from m19_folders import menu, open_by_double_click  # noqa: F401
-from gui_driver import Suit  # noqa: E402
+from gui_driver import Exohost  # noqa: E402
 
 ELLIPSIS = "…"
 
@@ -35,12 +35,12 @@ def running_services(state_dir):
 
 
 def stop_services(out_dir, state_dir):
-    """Asks the run's suit (suit-home in the run folder) to stop every running workspace service of the run (what
-    suit's Quit sends over each service's link)."""
-    suit = Suit(os.path.join(out_dir, "suit-home"))
+    """Asks the run's exohost (exohost-home in the run folder) to stop every running workspace service of the run (what
+    exohost's Quit sends over each service's link)."""
+    exohost = Exohost(os.path.join(out_dir, "exohost-home"))
     for pid in running_services(state_dir):
         try:
-            suit.request({"op": "service-stop", "pid": pid})
+            exohost.request({"op": "service-stop", "pid": pid})
         except Failure:
             pass
 

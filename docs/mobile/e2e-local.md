@@ -1,7 +1,7 @@
 # Local end to end: desktop, relay and phone on one machine
 
 `scripts/e2e-local.ps1` brings up the whole product locally with no cloud account and nothing shared with your real
-editor, suit or relay, pairs the phone once with the machine through the real editor's Remote Access panel, grants it workspaces one at a
+editor, exohost or relay, pairs the phone once with the machine through the real editor's Remote Access panel, grants it workspaces one at a
 time, and tears it all down. It exists so that a change to pairing, the relay, the shared workspace clients or the phone app can be tried
 against the real pieces, with pictures, in a few minutes.
 
@@ -12,7 +12,7 @@ against the real pieces, with pictures, in a few minutes.
 | Development CA and server certificate | `scripts/e2e-local-host.py` (openssl from Git for Windows). The certificate names `localhost`, `127.0.0.1` and `10.0.2.2`; both are valid for 10 years. | Keys live in `<RunDir>\host\tls`, never committed (`.local/` is git-ignored). |
 | Relay Worker (`relay/worker`) | `wrangler dev --local` (workerd, no login) with the repo's pinned wrangler (`npm ci` in `relay/worker`, done by the script when missing). | Durable Object state under `<RunDir>\host\wrangler-state`. |
 | TLS front | `scripts/e2e-tls-proxy.mjs`: https/wss on a loopback port, piped to the Worker's plain port. | |
-| Suit, workspace service, graphical editor | The real built apps, started by the rig (`scripts/run.py --live`) with the harness's isolated state (`PRAGTICAL_PORTABLE`, `EXOSUIT_AGENT_STATE_HOME`, `EXOSUIT_SUIT_HOME`) under `docs\benchmarks\perf-harness\runs\e2e-local`. Relay credentials go to a file store (`EXOSUIT_RELAY_TEST_CREDENTIALS_DIR`), not the OS credential store. | Nothing of the user's suit, agent state or settings is read or written. |
+| Exohost, workspace service, graphical editor | The real built apps, started by the rig (`scripts/run.py --live`) with the harness's isolated state (`PRAGTICAL_PORTABLE`, `EXOSUIT_AGENT_STATE_HOME`, `EXOSUIT_EXOHOST_HOME`) under `docs\benchmarks\perf-harness\runs\e2e-local`. Relay credentials go to a file store (`EXOSUIT_RELAY_TEST_CREDENTIALS_DIR`), not the OS credential store. | Nothing of the user's exohost, agent state or settings is read or written. |
 | Fake agent | `tests/workspace-agents/fake-codex.py` as the Codex provider (`FAKE_CODEX_REPLY=1`: it answers `FAKE-REPLY: <prompt>`), one session per workspace ("Fake session" in Alpha, "Beta fake session" in Beta) created through the services. | |
 | Phone | Android emulator `exosuit-mobile-e2e` (headless, `swiftshader_indirect`, console port 5556, quick-boot snapshot `rig`), the debug APK, `adb reverse` for the TLS port. | The emulator's own data. |
 
@@ -56,18 +56,18 @@ pwsh -NoProfile -File scripts/e2e-local.ps1 run      # the final gate: reset, up
 Common options: `-Build` (build the admin tool and the APK first), `-Avd`, `-Port`, `-RunDir` (default `<repo>\.local\rig`).
 
 - The rig lives in `<RunDir>`: `host\` (CA, certificate valid 10 years, relay state, `ports.json`: the ports are kept because
-  the phone stores the relay address when it pairs), `editor\` (the editor's isolated suit, agent state, settings and the
+  the phone stores the relay address when it pairs), `editor\` (the editor's isolated exohost, agent state, settings and the
   fixture workspaces Alpha and Beta), `credentials\`, `paired.json`, `up.json`.
 - The editor runs `scripts/run.py --live`, the same live mode as a developer's editor, so a desktop edit is a patch (about 23 s
   measured here for a one-line edit in `ExosuitApp.hx`, see below), not a rebuild (`python scripts/haxeon_cli.py` keeps one resident compiler worker for it). Leave it running between
-  iterations; `up` on a running rig only checks and starts what is missing. Its suit idles out after 24 h, not 150 s.
+  iterations; `up` on a running rig only checks and starts what is missing. Its exohost idles out after 24 h, not 150 s.
 - `up`, `pair` and `step` do not touch what is already right: the APK is installed with `install -r` only when its SHA1
   changed (app data and the pairing survive), the development CA is pushed only when missing, the app is started only when
   not running, and `pm clear` is never used (only the first `up` after a `reset` does it once).
 - `pair` skips itself when the rig is already paired and the editor lists the phone; `EXOSUIT_E2E_FORCE_PAIR=1` forces it.
 - Control checks (phone must already show the Claude terminal): `takeover` (the editor opens it and presses Take control; prints the time), `hold` (a second client takes control for 15 s), `editor-state` (editor screenshot and control state after the phone pressed Take control).
 - Cold start checks (same precondition): `coldstart` (the app is killed and started; the terminal view must come back by itself) and `recontrol` (the phone controls the terminal, is killed and started: when the editor took the lease meanwhile the phone must come back read only and ask "Take control back?", and Take control must make an extra key reach the fake TUI; when nobody took it the phone controls at once and the key must arrive). `recontrol` was rewritten on 2026-11-12 for the ask-first behaviour and has not been run on the rig since.
-- `step -Step restart-editor` (run `terminal` first): the keeper asks the editor to quit with `suitctl quit --mode prompt` (as closing its window does; no mouse), stops the old compiler worker and live host (a new launcher cannot reuse them; the suit and services stay), starts the editor again, and the phone must take input in its Claude terminal without pairing again. Measured: editor closed to ready again 37 to 43 s (live-mode start). Open: the step does not yet measure the phone's own time to first key (it waits up to 20 s for an `online` log line first, and the phone logs none when it never noticed the close).
+- `step -Step restart-editor` (run `terminal` first): the keeper asks the editor to quit with `exohostctl quit --mode prompt` (as closing its window does; no mouse), stops the old compiler worker and live host (a new launcher cannot reuse them; the exohost and services stay), starts the editor again, and the phone must take input in its Claude terminal without pairing again. Measured: editor closed to ready again 37 to 43 s (live-mode start). Open: the step does not yet measure the phone's own time to first key (it waits up to 20 s for an `online` log line first, and the phone logs none when it never noticed the close).
 - Steps are `pair`, `session` (open Alpha on the phone, send a prompt), `terminal` (the Claude Code terminal), `beta`
   (grant Beta). Each one sets up only its own precondition (the app in front, Alpha opened) and says plainly when the rig is
   not paired. The GUI steps take the machine-wide screen lock (`Global\exosuit-perf-gui`) and move the real mouse.
@@ -98,7 +98,7 @@ the first frame, but only once the editor has registered with the relay again. R
 registration is what is waited for (9.8 s measured once, before the keeper; not measured again: the log of that run is gone), so it is
 the editor's start, not the phone, that makes a resume feel slow. Starting the app only after `up` reports ready avoids it.
 
-Prerequisites: the Android toolchain variables from `docs/mobile/android.md`, `scripts/build-windows.ps1` (agent, suit,
+Prerequisites: the Android toolchain variables from `docs/mobile/android.md`, `scripts/build-windows.ps1` (agent, exohost,
 graphical), `python scripts/haxeon_cli.py build --project tests/mobile-pairing/haxeon.json` (the admin tool that creates
 the fake session) and `android/scripts/build.ps1 -Abi x86_64`; `-Build` runs the last two.
 
@@ -128,7 +128,7 @@ workspaces, Alpha (open) and Beta; its Remote Access panel is the machine's:
 
 1. The fake sessions are created through each workspace's service (Beta's service is started by the scenario).
 2. Remote Access (activity bar). The relay field is set to the local relay and "Enable remote access" pressed.
-3. "Create pairing invitation". The one-time URL is read over suit's control plane
+3. "Create pairing invitation". The one-time URL is read over exohost's control plane
    (`exosuit.state.get`, `state.remoteAccess.invitationUrl`), which only a process of this user reaches.
    The desktop's Copy button is not used, so the real clipboard is left alone.
 4. The phone starts pairing from the URL (test-rig intent extra `pairing_url`, taken only with `files/automation.on`). Both sides must show the same 6-digit code.

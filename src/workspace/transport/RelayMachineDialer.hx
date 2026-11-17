@@ -1,7 +1,7 @@
 package workspace.transport;
 
 /**
-	One machine-socket dial at a time, with capped exponential backoff between failures (suit's WorkspaceRelayHost), in
+	One machine-socket dial at a time, with capped exponential backoff between failures (exohost's WorkspaceRelayHost), in
 	whatever time unit the caller's loop uses.
 **/
 class RelayMachineDialer {

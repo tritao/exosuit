@@ -14,7 +14,7 @@ import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 
 /** The Workbench tree's machine rows: a workspace, a status line, New Workspace…. */

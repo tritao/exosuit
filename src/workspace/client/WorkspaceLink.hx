@@ -14,13 +14,13 @@ import workspace.service.WorkspaceAgentProtocol;
 /**
 	The window's link to one machine workspace: one connection to its service, for everything the window does there
 	(the workspace it shows, the catalog rows of its tree, its terminals). `open` names the workspace's running service,
-	which suit starts first when the workspace is idle: on this machine suit's `workspace.open` over the window's suit
-	link gives its pipe; on a paired device (the phone, the browser) the machine's OPEN gives a relay stream that suit
-	forwards to that pipe. The link connects, checks the service's IDENTITY against what suit reported and watches its
+	which exohost starts first when the workspace is idle: on this machine exohost's `workspace.open` over the window's exohost
+	link gives its pipe; on a paired device (the phone, the browser) the machine's OPEN gives a relay stream that exohost
+	forwards to that pipe. The link connects, checks the service's IDENTITY against what exohost reported and watches its
 	catalog.
 
 	A link lives for its workspace only; WorkspaceLinks keeps one per workspace in use and closes it once unused. When
-	the connection drops a link that `revive` says is wanted asks suit again (which starts a new service if the old one
+	the connection drops a link that `revive` says is wanted asks exohost again (which starts a new service if the old one
 	stopped); any other link ends (`ended`) and is dropped. Closing a link never stops the service.
 **/
 class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements ServedRoots implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient {
@@ -45,9 +45,9 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 	var groupEpoch:Null<String>;
 	/** The catalog watch on this client's connection: its CHANGED pushes are what make the lists be read again. */
 	var catalog:Null<WorkspaceCatalogWatch>;
-	/** True while suit is asked for the service. */
+	/** True while exohost is asked for the service. */
 	var opening:Bool = false;
-	/** After a failure: the wait before suit is asked again (doubling from 2 s to 30 s, back to 0 once ready), so a later fix is picked up. */
+	/** After a failure: the wait before exohost is asked again (doubling from 2 s to 30 s, back to 0 once ready), so a later fix is picked up. */
 	var reopenDelay:Float = 0;
 	var deadline:Float = 0;
 	var startupDeadline:Float = 0;
@@ -62,13 +62,13 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 	var remote:Bool = false;
 	var disposed:Bool = false;
 	final events:EventPump;
-	/** Whether a connection that dropped is made again (asking suit, which may start the service); false ends the link. */
+	/** Whether a connection that dropped is made again (asking exohost, which may start the service); false ends the link. */
 	public var revive:Void->Bool = function() return true;
 	/** The connection dropped and `revive` said no: the link is done. */
 	public var ended(default, null):Bool = false;
 
 	/**
-		`open` finds (and starts) a workspace's service: suit's `workspace.open` in the editor, testing.DirectService in
+		`open` finds (and starts) a workspace's service: exohost's `workspace.open` in the editor, testing.DirectService in
 		tests. A null `target` makes the link of a window with no workspace.
 	**/
 	public function new(events:EventPump, clock:Void->Float, open:ServiceOpener, target:Null<WorkspaceServiceTarget>) {
@@ -92,7 +92,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 
 	/**
 		Whether `endpoint` has the shape the agent gives its service (AgentState.endpointOf): a named pipe
-		`\\.\pipe\exosuit-<key>` on Windows, else `<state folder>/agent.sock`. suit's reply is data from another
+		`\\.\pipe\exosuit-<key>` on Windows, else `<state folder>/agent.sock`. exohost's reply is data from another
 		process, so a link connects to nothing else.
 	**/
 	public static function validEndpoint(endpoint:String, windows:Bool = true):Bool {
@@ -128,7 +128,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 		return watch != null && verified && watch.live;
 	}
 
-	/** Whether the link is asking suit for the service or connecting to it, with no connection ready yet. */
+	/** Whether the link is asking exohost for the service or connecting to it, with no connection ready yet. */
 	public function connecting():Bool
 		return serviceTarget != null && error == null && !ready && !ended;
 
@@ -330,7 +330,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 	}
 
 	/**
-		Shows `message` and asks suit again after the backoff. A service of another identity is not asked again, and a
+		Shows `message` and asks exohost again after the backoff. A service of another identity is not asked again, and a
 		link that was ready ends when `revive` says no, as when its connection drops.
 	**/
 	function fail(message:String, retry:Bool = true):Void {
@@ -344,12 +344,12 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 		retryAt = clock() + reopenDelay;
 	}
 
-	/** Asks for the workspace's service (suit starts it when it is idle), then connects to it. */
+	/** Asks for the workspace's service (exohost starts it when it is idle), then connects to it. */
 	function requestService():Void {
 		var target = serviceTarget;
 		if (target == null || disposed) return;
-		// suit does not count the service of a workspace this window uses as orphaned.
-		var link = suit.SuitLink.instance;
+		// exohost does not count the service of a workspace this window uses as orphaned.
+		var link = exohost.ExohostLink.instance;
 		if (link != null) link.usesWorkspace(target.workspace);
 		opening = true;
 		var selected = selection;
@@ -368,7 +368,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 	function install(service:OpenedService):Void {
 		var route = service.connector;
 		if (route == null && !validEndpoint(service.endpoint, Sys.systemName() == "Windows") || service.generation.length != 32
-			|| service.root.length == 0) throw "suit named an invalid workspace service";
+			|| service.root.length == 0) throw "exohost named an invalid workspace service";
 		remote = route != null;
 		var expectedInstance = service.generation, expectedRoot = service.root, selected = selection;
 		// A workspace's service keeps the root it started in, which later changes to the workspace's folders do not move.
@@ -391,7 +391,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 		caps.push(WorkspaceCatalogProtocol.CAPABILITY);
 		deadline = clock() + 12000;
 		ConnectTimeline.mark("discovered", timelineName());
-		// A relay stream starts with suit's OPEN, which may start the service: it gets the time that takes.
+		// A relay stream starts with exohost's OPEN, which may start the service: it gets the time that takes.
 		var connectMs = route == null ? 2000 : 40000;
 		client = new RpcClient(route != null ? route : new NativeRpcConnector(hub,
 			NativeRpcHub.local(service.endpoint)), clock, function() return Math.random(), new RpcPeerOptions(
@@ -430,11 +430,11 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 			return;
 		}
 		// IDENTITY, QUERY and the catalog watch go out together: one round trip, not three. Nothing they bring is used
-		// before IDENTITY names the generation suit reported (`ready` needs `verified`), and a mismatch drops them all.
+		// before IDENTITY names the generation exohost reported (`ready` needs `verified`), and a mismatch drops them all.
 		var callMs = remote ? 8000 : 2000;
 		connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, callMs, function(identity) {
 			if (selected != selection || !current.isCurrent(token)) return;
-			// Another generation answers on the pipe: the service suit named stopped and another took its place. Ask again.
+			// Another generation answers on the pipe: the service exohost named stopped and another took its place. Ask again.
 			if (identity.instance != expectedInstance) {
 				stopConnection();
 				retryAt = clock() + 100;
@@ -506,8 +506,8 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 		if (current.state == Closed || now >= deadline) {
 			stopConnection();
 			// The connection closed, or has not been ready for 3 s (the client redials a pipe that may be gone): the
-			// service stopped (idle, suit restarted it on another build, the user stopped it), or never got ready. A link
-			// the window needs asks suit again, which starts a new one; a link kept only for the tree's rows ends.
+			// service stopped (idle, exohost restarted it on another build, the user stopped it), or never got ready. A link
+			// the window needs asks exohost again, which starts a new one; a link kept only for the tree's rows ends.
 			if (wasReady && !revive()) {
 				ended = true;
 				return;

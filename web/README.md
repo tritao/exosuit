@@ -7,7 +7,7 @@ checkout or persist across page reloads. Save writes to this session filesystem.
 Native process, LSP, source-plugin compilation and local control commands are
 unavailable. Open File and Open Folder use the path command view.
 
-The browser is also a paired device, like the phone: it pairs with a machine's suit
+The browser is also a paired device, like the phone: it pairs with a machine's exohost
 over the relay and opens the workspaces the owner grants it, with their terminals and
 sessions (`RemoteMachines`, the same `WorkspaceLink`s as the desktop). Its pairings live
 in IndexedDB, encrypted with a non-extractable key (`BrowserPairedMachines`,

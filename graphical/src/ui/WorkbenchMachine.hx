@@ -1,13 +1,13 @@
 package ui;
 
-import suit.MachineCatalog.MachineWorkspace;
+import exohost.MachineCatalog.MachineWorkspace;
 import workspace.client.MachineClient;
 import workspace.client.WorkspaceLink;
 import workspace.client.WorkspaceWorkbenchClient;
 
 /**
-	The machine whose workspaces the Workbench shows, and how the window reaches each one: suit on this machine (the
-	desktop, SuitWorkbenchMachine) or a paired machine's directory over the relay (the phone and the browser,
+	The machine whose workspaces the Workbench shows, and how the window reaches each one: exohost on this machine (the
+	desktop, ExohostWorkbenchMachine) or a paired machine's directory over the relay (the phone and the browser,
 	DeviceWorkbenchMachine). The tree, its menus and WorkbenchActions see only this, so they have one path.
 **/
 interface WorkbenchMachine {
@@ -31,6 +31,6 @@ interface WorkbenchMachine {
 	/** The client the window shows workspace `id` through, once the window shows it; null before. */
 	function shown(id:String):Null<WorkspaceWorkbenchClient>;
 
-	/** suit's list of this machine's workspaces, which the window may change (create, rename, folders, remove); null on a device. */
-	function suit():Null<MachineClient>;
+	/** exohost's list of this machine's workspaces, which the window may change (create, rename, folders, remove); null on a device. */
+	function exohost():Null<MachineClient>;
 }

@@ -29,9 +29,9 @@
     "932 starter-endpoint workspac ",
     "932 service-noted workspac ",
     "932 starter-done workspac ",
-    "932 suit-queued  machine",
-    "994 suit-begin  machine",
-    "1115 suit-reply  machine ok 120 ms",
+    "932 exohost-queued  machine",
+    "994 exohost-begin  machine",
+    "1115 exohost-reply  machine ok 120 ms",
     "1115 watch-connected workspac ",
     "1115 catalog-read workspac first",
     "1173 watch-live workspac 1 pages",
@@ -56,11 +56,11 @@
     "743 starter-endpoint workspac ",
     "743 service-noted workspac ",
     "743 starter-done workspac ",
-    "743 suit-queued  machine",
+    "743 exohost-queued  machine",
     "754 identity-verified workspac ",
     "785 ready workspac ",
     "786 status workspac Workspace connected",
-    "803 suit-begin  machine",
+    "803 exohost-begin  machine",
     "822 catalog-first-read workspac 0 terminals",
     "823 rows-visible workspac own",
     "867 rows-frame workspac own"
@@ -107,7 +107,7 @@
    ]
   },
   {
-   "check": "time suit machine",
+   "check": "time exohost machine",
    "ok": true,
    "ms": {
     "reply 0": 235,

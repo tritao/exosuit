@@ -2,7 +2,7 @@
 row (Open in New Window); the second window is driven with its own driver. Each window's tree marks what the other has
 open, each sees the other's new group and terminal live, and closing the second window leaves the services running.
 
-The second window is driven over suit's control plane, found by its pid."""
+The second window is driven over exohost's control plane, found by its pid."""
 import os
 import subprocess
 import sys
@@ -39,7 +39,7 @@ def run(gui):
         menu(gui, "w:" + beta, "Open in New Window")
         second_pid = gui.wait("window 2 registered, focused on Beta",
                               lambda s: next((w["pid"] for w in s["state"]["otherWindows"] if "/" + beta + "/" in w["context"]), None), 60)
-        gui.check("window 1 knows window 2's focus (suit's windows list)", lambda s: others(s["state"], beta), 5)
+        gui.check("window 1 knows window 2's focus (exohost's windows list)", lambda s: others(s["state"], beta), 5)
         gui.check("starting the window blocked the frame under 50 ms", lambda s: 0 < s["state"]["newWindowMs"] < 50, 5,
                   detail=lambda s: s["state"]["newWindowMs"])
         two = Gui(second_pid, os.path.join(gui.out, "window2"),

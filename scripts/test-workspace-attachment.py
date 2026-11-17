@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WorkspaceLink against real workspace services, started the way suit starts them: shared verified reuse, a link that
+"""WorkspaceLink against real workspace services, started the way exohost starts them: shared verified reuse, a link that
 refuses a service it was not told about, independent closing, and what a link does when its service is killed."""
 from pathlib import Path
 import tempfile

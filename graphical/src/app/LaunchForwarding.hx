@@ -1,17 +1,17 @@
 package app;
 
-import suit.SuitControl;
+import exohost.ExohostControl;
 
 /** A path to open, with the 1-based line and column to put the cursor on when the command line named them. */
 typedef LaunchPath = {path:String, line:Null<Int>, column:Null<Int>};
 
 /**
 	`exosuit <folder|file>...` with an Exosuit window already open hands the paths to it instead of opening another
-	window (docs/design/suitctl/TDD-exosuit-ctl.md §8.3, Q3=a). Each path goes to suit as `editor.open`, which suit routes
+	window (docs/design/exohostctl/TDD-exosuit-ctl.md §8.3, Q3=a). Each path goes to exohost as `editor.open`, which exohost routes
 	to the window whose workspaces hold it, else to the most recently used window (§6); that window opens it the way it
 	opens any path (a folder: the workspace that holds it, or a new one named after it; a file: a tab), and is raised.
 
-	It has one second in all. Paths a window took are not opened here; when none was taken (suit is not running, no window
+	It has one second in all. Paths a window took are not opened here; when none was taken (exohost is not running, no window
 	is open, or the time ran out) this process opens its own window with everything. A window started for a context
 	(`--context=`, Open in New Window), with `--new-window`, for a capture or benchmark, or under `run.py --live` (which
 	does not come through `GraphicalMain.main`) never forwards.
@@ -68,7 +68,7 @@ class LaunchForwarding {
 			var params:Dynamic = {path: item.path};
 			if (item.line != null) params.line = item.line;
 			if (item.column != null) params.column = item.column;
-			var reply = SuitControl.request({op: "control", version: 1, client_id: "exosuit-launch:" + Sys.getPid(), method: "editor.open",
+			var reply = ExohostControl.request({op: "control", version: 1, client_id: "exosuit-launch:" + Sys.getPid(), method: "editor.open",
 				params: params, target: {path: item.path}}, left);
 			if (reply == null || Reflect.field(reply, "ok") != true) break;
 			taken.push(item.path);
@@ -78,7 +78,7 @@ class LaunchForwarding {
 		if (windows.length == 0) return {arguments: local, positions: positions};
 		// Every window that took a path is raised, the last one on top.
 		for (window in windows)
-			SuitControl.request({op: "control", version: 1, client_id: "exosuit-launch:" + Sys.getPid(), method: "window.focus", params: {},
+			ExohostControl.request({op: "control", version: 1, client_id: "exosuit-launch:" + Sys.getPid(), method: "window.focus", params: {},
 				target: {instance_id: window}}, Math.max(0.2, deadline - Sys.time()));
 		if (taken.length == paths.length) return null;
 		// The rest open here, in a window of this process's own.
