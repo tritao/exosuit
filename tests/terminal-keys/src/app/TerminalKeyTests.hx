@@ -106,6 +106,19 @@ class TerminalKeyTests {
 		backend.replies = "";
 		fixture.key(UiKey.Backspace, control | shift);
 		require(backend.replies.indexOf("\x1b[8;14;127;1;8;1_") < 0, "Ctrl+Shift+Backspace was taken for Ctrl+Backspace");
+		// Escape under DECSET 9001 is a Win32 key record even in kitty's disambiguate mode (Claude Code turns it on),
+		// whose CSI 27 u ConPTY cannot parse: Claude Code's dialogs never closed.
+		emulator.feedString("\x1b[>1u");
+		backend.replies = "";
+		fixture.key(UiKey.Escape, UiModifier.empty());
+		require(backend.replies == "\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_",
+			"Escape in win32-input-mode reached the PTY as " + show(backend.replies));
+		// Num Lock on is a modifier bit, not a different key.
+		backend.replies = "";
+		fixture.key(UiKey.Escape, UiModifier.NumLock);
+		require(backend.replies == "\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_",
+			"Escape with Num Lock on in win32-input-mode reached the PTY as " + show(backend.replies));
+		emulator.feedString("\x1b[<u");
 		emulator.feedString("\x1b[?9001l");
 		// Plain Backspace is DEL in every keyboard mode: BS would be read as Ctrl+Backspace and delete a word. Kitty's
 		// disambiguate mode (Claude Code turns it on) keeps the legacy byte; report-all-keys mode sends CSI 127 ; 1 u.
