@@ -9,6 +9,83 @@ and the status.
 
 ## Open
 
+Found during the port to haxeon upstream `ff7e29aac` + our commits (`exosuit-upstream` 5d2c7ab19), 2026-11-17. The
+repro folders named below are under `.port/out/` in the port worktree (not in git); each entry has the minimal source.
+
+### An empty array literal nested in an object inside an array: "element type ... reached IR generation unresolved"
+
+- **Symptom:** `Internal error: the type of the element type of this empty array reached IR generation unresolved`,
+  with no file or line, after typing succeeds. Seen at `src/syntax/BuiltinSyntax.hx:227` (`patterns: []`).
+- **Repro:** `static function g():Dynamic return {patterns: [{patterns: []}]};` fails; `{patterns: []}` alone and
+  `{patterns: [{patterns: ([] : Array<Dynamic>)}]}` compile (`S2/emptyarray`).
+- **Cause:** not known. The empty array's element type is left as an open monomorph when the expected type is Dynamic.
+- **Workaround:** `([] : Array<Dynamic>)` (BuiltinSyntax).
+- **Status:** open.
+
+### A default argument value is resolved in the caller's module, not the declaring one
+
+- **Symptom:** `E1005: Unknown variable "config"` for `delaySeconds:Float = config.Settings.DEFAULT_TOOLTIP_DELAY`
+  (`graphical/src/ui/TabTooltip.hx`) unless some other module of the closure loaded `config.Settings`; and
+  `E1005: Unknown variable "MessagePackReader"` in any module that uses `haxeon.wire.MessagePackFrame`, whose
+  `?maxPayload:Int = MessagePackReader.DEFAULT_MAX_BYTES` names a same-package type the caller does not import.
+- **Repro:** `a.Tip` with `new(delay:Float = b.Const.DELAY)` and `app.Main` doing `new a.Tip()` gives
+  `Tip.hx:5:36: E1005: Unknown variable "b"` (`U2/repro-default-arg`). A Main that only calls
+  `MessagePackFrame.payloadLength(Bytes.alloc(MessagePackFrame.HEADER_BYTES), 100)` (`S1a/wire-repro`).
+- **Cause:** the default value expression is typed at the call site, in the caller's import scope.
+- **Workaround:** import the type in the declaring module and use its short name (TabTooltip); for MessagePackFrame,
+  import `haxeon.wire.MessagePackReader` in the caller as well (NativeRpcTransport, RelayFrameCodec, RelayFrameReader).
+- **Status:** open.
+
+### A type of a parent package, or a generated module of the same package, is found only if something loaded it
+
+- **Symptom:** `package a.b; class Child { var p:Parent; }` with `a.Parent` imported nowhere else gives
+  `E1020 Unknown type "Parent"` (stock Haxe resolves parent packages). Hit by `ui.control.EditorControl`
+  (`ui.ExosuitApp`) and `exohost.control.ControlRouter`, `ExohostCtl`, `exohost.remote.MachineRemote`. The same shape:
+  `-Entry editor.GutterGeometry` stops in haxeon's generated binding `haxeon/ui/ResolvedLayoutItem.hx:156` with
+  `E1005 Unknown variable "NativeKitUIConstants"`; the whole app build loads that module first and is not affected.
+- **Repro:** `U8/repro-parentpkg`.
+- **Cause:** module lookup does not walk up the package path, and does not load a module of the current package by
+  name on demand.
+- **Workaround:** explicit imports.
+- **Status:** open.
+
+### A lambda with an untyped parameter and a declared return type, assigned to `Null<A->B>`: E1020 at an unrelated file
+
+- **Symptom:** `holder.f = function(_):Int return 1;` with `var f:Null<String->Int>` fails with
+  `E1020 Unresolved inferred type` reported at `stdlib/EReg.hx:1:1` or `stdlib/StringBuf.hx:76:1`, not at the lambda.
+  `function(_) return 1`, or a field type without `Null<>`, compiles.
+- **Repro:** `X1/repro-nullfn`.
+- **Workaround:** type the parameter (`function(_:String):Int ...`).
+- **Status:** open.
+
+### A method of a generic instance passed as a function value: "Conflicting generic method reference"
+
+- **Symptom:** `directories.forAgent(..., ctx.fail)` with `ctx:RpcContext<AgentView>` in one provider and
+  `RpcContext<AgentRecord>` in another fails with `Conflicting generic method reference
+  "$generic-method-reference:haxeon.rpc.RpcContext:fail..."`.
+- **Workaround:** a lambda, `error -> ctx.fail(error)` (ClaudeProvider, CodexProvider, PiProvider).
+- **Status:** open, no minimal repro.
+
+### Enum values with class payloads cannot be compared, against what LANGUAGE_SUPPORT.md says
+
+- **Symptom:** `Array<UiEditorTab>.indexOf/remove` and `==` give `E1025 ... does not conform to Equatable`; declaring
+  `Equatable` fails too (`E1025 "Settings.settings does not conform"`) because a constructor holds a plain class.
+  `docs/reference/LANGUAGE_SUPPORT.md:49-51` says such values compare by identity and that `indexOf`/`remove` use the
+  same rule.
+- **Repro:** `U8/repro-enum-identity`.
+- **Workaround:** compare the held object (`UiWorkbenchHost.tabIndex`, `removeTab`).
+- **Status:** open; the docs or the compiler is wrong.
+
+### Several probe compiles of one package at once: intermittent internal errors in the worker
+
+- **Symptom:** with several `-Entry` probes of one project running at the same time, the worker sometimes fails with
+  `Cached function "workspace.client.AgentHistoryWindow.new" has no source owner`, `Missing target for generic method
+  reference "$generic-method-reference:haxeon.platform.async.Promise:cancel:..."` or `IR verification failed ...
+  Unknown IR closure target "workspace.service.WorkspaceTerminalProtocol.encodeChange"`. Each passes when run again
+  alone; the whole-project builds never showed it.
+- **Cause:** not known; probably shared cached state between requests of different entries.
+- **Status:** open, no repro.
+
 ### An edit to AutomationProbe.hx makes its hlNative extern "not return on every path"
 
 - **Symptom:** seen 2026-11-16 on haxeon fa128931e (exosuit main a457e3dc): adding one line to
@@ -329,7 +406,8 @@ and the status.
 - **Workaround:** strip leading zeros before `Std.parseInt` (was `AgentTerminalResume.matchedTime`; that code went on
   2026-11-15, when provider terminals began to report their conversation instead of being matched by time). Other
   exosuit callers that parse zero-padded fields are still exposed.
-- **Status:** open. Fix in haxeon: base 10 unless a `0x` prefix, in both the native and the wasm version.
+- **Status:** fixed upstream in haxeon `6320ca672` ("Parse integers as Haxe does: Null<Int>, decimal unless 0x"),
+  which the port pin includes; `graphical/src/app/LaunchForwarding.hx` no longer works around it.
 
 ## Building haxeon's own tools with haxeon (2026-11-11)
 
