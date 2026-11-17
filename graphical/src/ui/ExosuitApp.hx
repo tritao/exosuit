@@ -712,7 +712,19 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	/** New Chat with <provider>: a session in the open workspace, in the chat view (the Workbench's New Chat With…). */
+	function installChatCommands():Void {
+		for (provider in WorkbenchActions.PROVIDERS) {
+			var chosen = provider;
+			application.commands.add("agent:new-chat-" + chosen, function(_) {
+				if (workbenchPanel != null) workbenchPanel.makeChat(null, workspace.service.WorkspaceProtocol.ROOT_GROUP, chosen);
+			}, function(_) return workbenchPanel != null && workbenchPanel.model.openWorkspace != null,
+				"New Chat with " + WorkbenchActions.providerLabel(chosen));
+		}
+	}
+
 	function installCommands():Void {
+		installChatCommands();
 		application.commands.add("preferences:theme-toggle", function(_) setDarkTheme(!darkPalette), null, "Toggle Light/Dark Theme");
 		application.commands.add("preferences:theme-dark", function(_) setDarkTheme(true), null, "Use Dark Theme");
 		application.commands.add("preferences:theme-light", function(_) setDarkTheme(false), null, "Use Light Theme");
@@ -2794,7 +2806,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function paletteEntries():Array<commandview.CommandViewEntry> {
-		// Include domain commands registered after startup (for example by plugins).
+		// Include domain commands registered after startup (for example by plugins, or by a live patch).
+		installChatCommands();
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 		var entries:Array<commandview.CommandViewEntry> = [];
 		for (id in ui.commands.ids()) {

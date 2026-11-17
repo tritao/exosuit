@@ -27,6 +27,10 @@ class WorkbenchActions {
 	public static function providerLabel(provider:String):String
 		return provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : provider == "codex" ? "Codex" : provider;
 
+	/** New Chat With…: a `provider` session in `group` of the open workspace, in the chat view, not a terminal. */
+	public function createChat(provider:String, group:String):Void
+		app.agentTabs.createProviderChat(provider, group);
+
 	/** How long an action waits for its workspace's rows before it is given up, with a message. */
 	static inline final WAIT_SECONDS = 60.0;
 

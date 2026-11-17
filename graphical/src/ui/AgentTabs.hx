@@ -509,13 +509,17 @@ class AgentTabs {
    } catch (error:Dynamic) app.application.reportError("agent", "Could not open file: " + Std.string(error));
   }
  }
- function canCreateAgentSession():Bool {
+ function canCreateAgentSession():Bool
+  return canCreateSession(app.application.settings.current.agentSessionMode == "terminal");
+ /** Whether a session can start now: as an agent terminal (`terminal`) or in the chat view. */
+ function canCreateSession(terminal:Bool):Bool {
   var client = app.workbenchClient;
   if (client == null) return false;
-  if (app.application.settings.current.agentSessionMode == "terminal")
-   return client.canCreateGroupedTerminals() && !client.terminalCatalogBusy();
+  if (terminal) return client.canCreateGroupedTerminals() && !client.terminalCatalogBusy();
   return client.agentService().canControlAgents() && client.agentService().agentCreation() == null;
  }
+ /** New Chat With…: a `provider` session in `group` of the open workspace, in the chat view even in terminal session mode. */
+ function createProviderChat(provider:String, group:String):Void createProviderAgentIn(provider, group, sessionDirectory(group), true);
  /**
   New Agent Session: a `provider` session in `group` of the open workspace, at once and with no dialog (Workbench
   design Q7), in the folder the group gives it.
@@ -539,15 +543,19 @@ class AgentTabs {
    : SessionFolderChooser.preview(catalog.groups, group, app.workbenchPanel.model.firstFolder(app.workbenchPanel.model.openWorkspace), catalog.workspaceRoot);
   app.workbenchActions.chooseFolder("Choose the Session's Folder", initial, function(folder) createProviderAgentIn(provider, group, folder));
  }
- /** `directory` is the folder chosen with Change Folder…, or the one `sessionDirectory` gives; null lets the service resolve it. */
- function createProviderAgentIn(provider:String, group:String, directory:Null<String>):Void {
+ /**
+  `directory` is the folder chosen with Change Folder…, or the one `sessionDirectory` gives; null lets the service
+  resolve it. `chat` starts it in the chat view whatever the session mode setting says.
+ **/
+ function createProviderAgentIn(provider:String, group:String, directory:Null<String>, chat:Bool = false):Void {
   // New Agent Session in the connect timeline; a terminal session ends at terminal-attached (it accepts input).
   workspace.client.ConnectTimeline.mark("new-agent-session", app.currentWorkspaceName(), provider);
-  if (!canCreateAgentSession()) {
+  var terminal = !chat && app.application.settings.current.agentSessionMode == "terminal";
+  if (!canCreateSession(terminal)) {
    app.application.reportError("agent", "Cannot create an agent session while the workspace is disconnected or another session operation is in progress. Wait and try again.");
    app.requestFrame(); return;
   }
-  if (app.application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group, directory); return; }
+  if (terminal) { createAgentTerminal(provider, group, directory); return; }
   createIntegratedAgent(provider, group, directory);
  }
  function createIntegratedAgent(provider:String, group:String, ?directory:String):Void {

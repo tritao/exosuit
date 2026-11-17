@@ -370,6 +370,7 @@ class WorkbenchPanel implements View {
 			new MenuItem("new-agent", "New Agent Session", function() make(id, group, false, provider), canAgent,
 				WorkbenchActions.providerLabel(provider)),
 			new MenuItem("new-agent-with", "New Agent Session With…", function() { if (event != null) showMenu(providerItems(id, group, provider), event, function() return true); }, canAgent),
+			new MenuItem("new-chat-with", "New Chat With…", function() { if (event != null) showMenu(chatItems(id, group), event, function() return true); }, actions != null),
 			new MenuItem("new-terminal", "New Terminal", function() make(id, group, true),
 				known == null || known.canCreateGroupedTerminals() && !known.terminalCatalogBusy()),
 			new MenuItem("new-group", "New Group", function() inWorkspace(id, function(_) {
@@ -399,6 +400,26 @@ class WorkbenchPanel implements View {
 	function reveal(id:String):Void {
 		var row = workspaceRow(id);
 		if (row != null) tree.setExpanded(row, true);
+	}
+
+	/**
+		New Chat With… `provider` in workspace `id` (the open one when null), in `group`: the session opens in the chat
+		view, not a terminal, and the window goes to its workspace as New Agent Session's does.
+	**/
+	public function makeChat(id:Null<String>, group:String, provider:String):Void {
+		var workspace = id == null ? model.openWorkspace : id, act = actions;
+		if (workspace == null || act == null) return;
+		goThere(workspace, function() { reveal(workspace); act.createChat(provider, group); });
+	}
+
+	/** New Chat With…: every provider, each opening its chat in the workspace. */
+	function chatItems(id:String, group:String):Array<MenuItem> {
+		var items:Array<MenuItem> = [];
+		for (provider in WorkbenchActions.PROVIDERS) {
+			var chosen = provider;
+			items.push(new MenuItem("new-chat-" + chosen, WorkbenchActions.providerLabel(chosen), function() makeChat(id, group, chosen)));
+		}
+		return items;
 	}
 
 	/** New Agent Session With…: the other providers, then Change Folder… for the default one; each goes to the workspace. */
