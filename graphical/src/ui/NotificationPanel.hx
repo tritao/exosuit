@@ -60,15 +60,13 @@ class NotificationPanel implements View {
 		if (previous != report.revision) changed();
 	}
 
-	function button(label:String, action:Void->Void, key:String, ?icon:IconName):Button {
+	function button(label:String, action:Void->Void, key:String, ?icon:IconName, ?accessibilityLabel:String,
+			enabled:Bool = true):Button {
 		var style = new LayoutStyle();
 		style.height = LayoutAxis.fixed(26);
 		style.padding = new Insets(6, 2, 6, 2);
-		var result = new Button(label, style, action, key);
-		result.variant = ButtonVariant.Navigation;
-		result.leadingIcon = icon;
-		result.iconSize = 14;
-		return result;
+		return new Button(label, style, action, key, enabled, ButtonVariant.Navigation, null, null, icon, null, null, null, null,
+			null, 14, accessibilityLabel);
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -77,16 +75,12 @@ class NotificationPanel implements View {
 		headerStyle.childAlignY = LayoutAlignmentY.Center;
 		headerStyle.childGap = 4;
 		headerStyle.height = LayoutAxis.fixed(32);
-		var read = button("", function() { center.markAllRead(); changed(); }, "notifications-read", IconName.Check);
-		read.accessibilityLabel = "Mark all notifications read";
-		read.enabled = center.unreadCount() > 0;
+		var read = button("", function() { center.markAllRead(); changed(); }, "notifications-read", IconName.Check,
+			"Mark all notifications read", center.unreadCount() > 0);
 		var clear = button("", function() {
 			center.clear(); expanded = 0; reportEntry = 0; report.close(); changed();
-		}, "notifications-clear", IconName.Trash);
-		clear.accessibilityLabel = "Clear all notifications";
-		clear.enabled = center.entries.length > 0;
-		var close = button("", dismiss, "notifications-close", IconName.Close);
-		close.accessibilityLabel = "Close notifications";
+		}, "notifications-clear", IconName.Trash, "Clear all notifications", center.entries.length > 0);
+		var close = button("", dismiss, "notifications-close", IconName.Close, "Close notifications");
 		var header = new Row("notifications-header", [
 			new KeyedView("title", new Text("Notifications", null, context.theme.tokens.textPrimary, TextStyleOverride.text(14))),
 			new KeyedView("space", new Spacer("space", LayoutAxis.grow(), LayoutAxis.fixed(1))),
@@ -107,15 +101,14 @@ class NotificationPanel implements View {
 				center.dismiss(id);
 				if (reportEntry == id) { report.close(); reportEntry = 0; }
 				changed();
-			}, "notification-dismiss:" + id, IconName.Close);
-			remove.accessibilityLabel = "Dismiss notification " + id;
+			}, "notification-dismiss:" + id, IconName.Close, "Dismiss notification " + id);
 			var lineStyle = new LayoutStyle(); lineStyle.width = LayoutAxis.grow();
 			lineStyle.childGap = 8; lineStyle.childAlignY = LayoutAlignmentY.Center;
 			var textStyle = new LayoutStyle(); textStyle.width = LayoutAxis.grow();
 			var details = button("", function() {
 				expanded = expanded == id ? 0 : id; center.markRead(id); changed();
-			}, "notification-details:" + id, expanded == id ? IconName.ChevronDown : IconName.ChevronRight);
-			details.accessibilityLabel = (expanded == id ? "Hide" : "Show") + " notification details";
+			}, "notification-details:" + id, expanded == id ? IconName.ChevronDown : IconName.ChevronRight,
+				(expanded == id ? "Hide" : "Show") + " notification details");
 			var severityIcon = switch entry.kind { case Error: IconName.ErrorCircle; case Warning: IconName.AlertTriangle; case Information: IconName.InfoCircle; };
 			var severityColor = switch entry.kind { case Error: context.theme.tokens.danger; case Warning: context.theme.tokens.warning; case Information: context.theme.tokens.info; };
 			var summary = new Row("notification-summary", [
