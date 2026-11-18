@@ -202,6 +202,13 @@ class ExohostLink {
 		}
 	}
 
+	/** Retry now: forget the failures so far, so the next poll connects and starts exohost again. */
+	public function retryNow():Void {
+		failingSince = -1;
+		retryAt = 0;
+		ExohostClient.daemonAnswered();
+	}
+
 	/** exohost did not answer: start it (once until a link attaches again), then retry, often at first and then rarely. */
 	function failed(now:Float):Void {
 		if (failingSince < 0)

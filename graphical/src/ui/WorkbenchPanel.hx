@@ -234,6 +234,12 @@ class WorkbenchPanel implements View {
 
 	/** Opens the row (a click, Enter or a double click); false for a row that opens nothing. */
 	function openRow(key:String):Bool {
+		// "exohost is not answering" row (no machine at all): trying again is its action.
+		if (key == WorkbenchRowKey.status("error") && model.machineMissing()) {
+			var act = actions;
+			if (act != null) act.retryMachine();
+			return true;
+		}
 		var id = WorkbenchRowKey.workspaceId(key);
 		if (id == null) id = WorkbenchRowKey.noteWorkspace(key);
 		if (id != null) {

@@ -20,6 +20,8 @@ import sys.FileSystem;
 class ExohostClient {
 	static var registered:Bool = false;
 	static var daemonRequested:Bool = false;
+	/** Why the last attempt to start exohost failed, or null. */
+	static var startFailure:Null<String> = null;
 
 	/** True when `path` is inside the system temp folder (TEMP or TMP on Windows, TMPDIR or /tmp elsewhere). */
 	public static function underTemp(path:String):Bool {
@@ -89,11 +91,32 @@ class ExohostClient {
 		if (daemonRequested || Sys.getEnv("EXOSUIT_EXOHOST_AUTOSTART") == "0")
 			return;
 		daemonRequested = true;
+		startFailure = null;
 		try {
 			var launcher = findLauncher();
 			if (launcher != null)
 				startDaemon(launcher);
-		} catch (_:Dynamic) {}
+		} catch (error:Dynamic) {
+			startFailure = Std.string(error);
+		}
+	}
+
+	/**
+		Why a window that cannot reach exohost cannot: exohost is not built here, its automatic start is off, starting it
+		failed, or it was started and does not answer. The Workbench shows this instead of looking for workspaces for ever.
+	**/
+	public static function unreachableReason():String
+		return explainUnreachable(Sys.getEnv("EXOSUIT_EXOHOST_AUTOSTART") == "0", findLauncher() != null, startFailure);
+
+	/** The text for `unreachableReason`, from what it found. */
+	public static function explainUnreachable(autostartOff:Bool, built:Bool, startFailure:Null<String>):String {
+		if (!built)
+			return "exohost is not built here (no exohost/build/host/main.hl or tools/exosuit-exohost.hl), so there are no workspaces to list. Build Exosuit, then retry.";
+		if (autostartOff)
+			return "exohost is not running, and starting it automatically is off (EXOSUIT_EXOHOST_AUTOSTART=0).";
+		if (startFailure != null)
+			return "exohost could not be started: " + startFailure;
+		return "exohost was started but is not answering.";
 	}
 
 	/** exohost answered: the next time it does not, `ensureDaemon` starts it again. */

@@ -65,6 +65,13 @@ class WorkbenchActions {
 	public function manages():Bool
 		return exohost != null;
 
+	/** Tries to reach exohost again (the Workbench's Retry when it could not be reached), starting it if need be. */
+	public function retryMachine():Void {
+		var known = exohost;
+		if (known != null) known.retry();
+		app.requestFrame();
+	}
+
 	/** A change to the machine's workspaces is on its way; renames, folder changes and removals wait for it. */
 	public function busy():Bool {
 		var known = exohost;

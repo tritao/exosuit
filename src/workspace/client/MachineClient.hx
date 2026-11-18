@@ -5,6 +5,7 @@ import exohost.MachineCatalog;
 import exohost.MachineCatalog.MachineService;
 import exohost.MachineCatalog.MachineState;
 import exohost.MachineCatalog.MachineWorkspace;
+import exohost.ExohostClient;
 import exohost.ExohostLink;
 import exohost.WindowFocus;
 import exohost.WindowFocus.WindowFocuses;
@@ -56,9 +57,40 @@ class MachineClient {
 		}
 	}
 
+	/** Why exohost cannot be reached while the workspaces are still unknown after `UNREACHABLE_AFTER` seconds; else null. */
+	public var unreachable(default, null):Null<String>;
+	/** How long the window waits for exohost's first answer before it says why there is none. */
+	public static inline final UNREACHABLE_AFTER = 4.0;
+	var begun = Sys.time();
+	var checkedAt = 0.0;
+
 	/** Moves the link along; call every frame. */
-	public function poll():Void
+	public function poll():Void {
 		link.poll();
+		var now = Sys.time();
+		if (machine != null || link.isAttached()) {
+			noteUnreachable(null);
+			return;
+		}
+		if (now - begun < UNREACHABLE_AFTER || now - checkedAt < 1.0)
+			return;
+		checkedAt = now;
+		noteUnreachable(ExohostClient.unreachableReason());
+	}
+
+	function noteUnreachable(reason:Null<String>):Void {
+		if (reason == unreachable)
+			return;
+		unreachable = reason;
+		revision++;
+	}
+
+	/** Try to reach exohost again, starting it if need be: the Workbench's Retry. */
+	public function retry():Void {
+		link.retryNow();
+		begun = Sys.time();
+		noteUnreachable(null);
+	}
 
 	/** Creates a workspace with these folders, which may be none if it has a name; `done` gets it, or the error. */
 	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void

@@ -367,6 +367,12 @@ class WorkbenchTreeModel implements TreeViewModel implements Observable {
 		return exohost.WindowFocus.WindowFocuses.elsewhere(view.windows, null, workspaceId, group).length > 0;
 	}
 
+	/** The window has no machine to show and says why (exohost could not be reached): the row offers a retry. */
+	public function machineMissing():Bool {
+		var view = machine;
+		return view != null && view.machine == null && view.error != null;
+	}
+
 	function machineItem(key:String):View {
 		var view = machine;
 		if (view == null) return new Text("");
@@ -388,7 +394,8 @@ class WorkbenchTreeModel implements TreeViewModel implements Observable {
 			case "empty": WorkbenchMachineLabel.status(view.manages ? "No workspaces yet. Make one to hold groups, sessions and terminals."
 				: "No workspaces are shared with this device yet.");
 			case "loading": WorkbenchMachineLabel.status("Looking for this machine's workspaces…");
-			case "error": WorkbenchMachineLabel.status(error == null ? "" : error, true);
+			// Without a machine at all the error is why exohost cannot be reached, and clicking the row tries again.
+			case "error": WorkbenchMachineLabel.status(error == null ? "" : view.machine == null ? error + " · click to retry" : error, true);
 			default: new Text("");
 		};
 	}

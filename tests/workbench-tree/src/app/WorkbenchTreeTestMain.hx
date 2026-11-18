@@ -113,6 +113,7 @@ class WorkbenchTreeTestMain {
 	static function main():Void {
 		workspaceFolder();
 		hiddenRowsDoNotThrow();
+		unreachableMachine();
 		scratchStarted();
 		ordering();
 		everyWorkspace();
@@ -403,6 +404,46 @@ class WorkbenchTreeTestMain {
 		require(tree.selectedKey == "w:resume", "a refused selection moved the selection to " + tree.selectedKey);
 		require(!WorkbenchTreeSafe.scrollTo(tree, "g:exo|work"), "scrolled to a row that is not shown");
 		require(WorkbenchTreeSafe.select(tree, "w:eon", false) && tree.selectedKey == "w:eon", "a shown row was not selected");
+	}
+
+	/**
+		A window that cannot reach exohost used to say "Looking for this machine's workspaces…" for ever. It says why (not
+		built, start failed, not answering) and the row offers a retry.
+	**/
+	static function unreachableMachine():Void {
+		var reasons = [
+			exohost.ExohostClient.explainUnreachable(false, false, null),
+			exohost.ExohostClient.explainUnreachable(true, true, null),
+			exohost.ExohostClient.explainUnreachable(false, true, "no such file"),
+			exohost.ExohostClient.explainUnreachable(false, true, null)
+		];
+		for (index in 0...reasons.length) for (other in index + 1...reasons.length) require(reasons[index] != reasons[other], "two causes read the same: " + reasons[index]);
+		require(reasons[0].indexOf("not built") >= 0 && reasons[1].indexOf("AUTOSTART") >= 0 && reasons[2].indexOf("no such file") >= 0 && reasons[3].indexOf("not answering") >= 0,
+			"the reasons do not name their causes: " + reasons);
+		var model = new WorkbenchTreeModel();
+		model.update(view(null, null, reasons[0]), []);
+		require(roots(model).join(",") == "s:error,n:new-workspace,n:folder-workspace", "an unreachable exohost: " + roots(model));
+		require(model.machineMissing(), "the model does not know the machine is missing");
+		model.update(view(null, null), []);
+		require(roots(model)[0] == "s:loading" && !model.machineMissing(), "waiting for exohost: " + roots(model));
+		model.update(view(machineWorkspaces, "resume", "a push failed"), ["resume" => lists(catalog("C:/work/resume"))]);
+		require(!model.machineMissing(), "a failed push with a machine offers the retry");
+		// Through a real TreeView: the row says why, and that clicking it retries.
+		model.update(view(null, null, reasons[3]), []);
+		var fonts = haxeon.ui.FontCollection.create();
+		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		var context = new UiContext(null, fonts);
+		var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.height = LayoutAxis.grow();
+		var tree = new TreeView("workbench-tree", model, style);
+		context.verifyRetentionEvery = 0;
+		var root:RenderNode = null;
+		for (_ in 0...3) root = context.submit(tree, new haxeon.ui.LayoutFrame(520, 300));
+		var found = false;
+		root.walk(function(node) {
+			if (node.semantics != null && node.semantics.label != null && node.semantics.label.indexOf("not answering") >= 0 && node.semantics.label.indexOf("retry") >= 0) found = true;
+		});
+		require(found, "the row does not say why exohost is not reached and that it can be retried");
+		context.dispose();
 	}
 
 	/** Through a real TreeView: the open workspace is expanded with its groups; the others are collapsed but expandable. */

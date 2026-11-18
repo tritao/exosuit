@@ -101,7 +101,7 @@ class ExohostWorkbenchMachine implements WorkbenchMachine {
 							revision: link == null ? 0 : link.terminalCatalogRevision() * 7919 + link.agentRevision()});
 				}
 		}
-		return {machine: state, error: machine.error, openWorkspace: open, windows: app.otherWindows(), manages: true,
+		return {machine: state, error: machine.error != null ? machine.error : state == null ? machine.unreachable : null, openWorkspace: open, windows: app.otherWindows(), manages: true,
 			revision: machine.revision, watched: watchedStates, rows: rowSources, watchRevision: revision};
 	}
 
