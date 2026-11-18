@@ -24,6 +24,9 @@ $platform = Get-HostPlatform
 $sdk = Join-Path $toolchainHome 'sdk'
 $downloads = Join-Path $toolchainHome 'downloads'
 $logs = Join-Path $toolchainHome 'logs'
+# Windows' own tar (bsdtar reads zips) and curl: a Git Bash tar earlier on PATH cannot read C: paths.
+$tar = Join-Path $env:SystemRoot 'System32/tar.exe'
+$curl = Join-Path $env:SystemRoot 'System32/curl.exe'
 
 $items = @(Get-ToolchainItems)
 if ($SkipAvd) { $items = @($items | Where-Object { $_.Kind -ne 'avd' -and $_.Name -notlike 'system-images;*' }) }
@@ -53,7 +56,7 @@ function Get-Download([string]$url, [string]$algorithm, [string]$expected) {
     if ((Test-Path $path) -and (Test-Path $verified) -and ([IO.File]::ReadAllText($verified).Trim() -eq $expected)) { return $path }
     Write-Host "  downloading $name"
     for ($attempt = 1; $attempt -le 4; $attempt++) {
-        & curl.exe -L --fail -sS -C - --retry 3 --retry-delay 5 --max-time 3600 -o $path $url
+        & $curl -L --fail -sS -C - --retry 3 --retry-delay 5 --max-time 3600 -o $path $url
         if ($LASTEXITCODE -eq 0) { break }
         if ($LASTEXITCODE -eq 33 -or $LASTEXITCODE -eq 416) { Remove-Item $path -Force -ErrorAction SilentlyContinue }  # server refused the range: start over
         if ($attempt -eq 4) { throw "download of $url failed (curl exit $LASTEXITCODE)" }
@@ -72,7 +75,7 @@ function Expand-TopFolder([string]$archive, [string]$target, [string]$expectedTo
     $partial = "$target.partial"
     Remove-Item -Recurse -Force $partial -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $partial | Out-Null
-    & tar.exe -xf $archive -C $partial
+    & $tar -xf $archive -C $partial
     if ($LASTEXITCODE -ne 0) { throw "tar failed to extract $archive" }
     $top = @(Get-ChildItem $partial)
     if ($top.Count -ne 1) { throw "$archive does not hold exactly one top folder" }
