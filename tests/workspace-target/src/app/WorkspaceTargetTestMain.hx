@@ -14,7 +14,21 @@ class WorkspaceTargetTestMain {
 		for (folder in [one, two, scratch]) FileSystem.createDirectory(folder);
 		try run(one, two, scratch) catch (failure:Dynamic) { cleanup(base); throw failure; }
 		cleanup(base);
+		sharedFirstFolder();
 		Sys.println("PASS: a machine workspace is named to the agent by its id with its existing folders and scratch folder");
+	}
+
+	/** Two workspaces with the same first folder: a terminal made in the second must not be found in the first. */
+	static function sharedFirstFolder():Void {
+		var alpha:exohost.MachineCatalog.MachineWorkspace = {id: "alpha", name: "Alpha", folders: ["C:/src/shared", "C:/src/a"], scratch: null, revision: 1};
+		var beta:exohost.MachineCatalog.MachineWorkspace = {id: "beta", name: "Beta", folders: ["C:/src/shared"], scratch: null, revision: 1};
+		var none:exohost.MachineCatalog.MachineWorkspace->Null<String> = function(_) return null;
+		var both = [alpha, beta];
+		require(workspace.client.MachineClient.holdingIn(both, "C:/src/shared", none, "beta") == beta, "a terminal of Beta was given to another workspace's service");
+		require(workspace.client.MachineClient.holdingIn(both, "C:/src/shared", none, "alpha") == alpha, "a terminal of Alpha was not given to Alpha");
+		require(workspace.client.MachineClient.holdingIn(both, "C:/src/shared", none) == alpha, "without a workspace id the first holder is used");
+		require(workspace.client.MachineClient.holdingIn(both, "C:/src/shared", none, "gone") == alpha, "an unknown workspace id did not fall back to the folder");
+		require(workspace.client.MachineClient.holdingIn(both, "C:/elsewhere", none, null) == null, "a folder nobody holds was given a workspace");
 	}
 
 	static function cleanup(base:String):Void {

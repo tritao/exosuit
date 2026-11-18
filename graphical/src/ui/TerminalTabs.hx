@@ -144,7 +144,7 @@ class TerminalTabs {
 			if (directory != null) cwd = directory;
 			var resource = workspace.client.WorkspaceIds.create("workspace-terminal");
 			return createTerminalTab(ResourceViewIdentity.view(root, resource), agentProvider == null ? "Terminal" : agentProvider,
-				cwd, false, true, resource, root, group, directory, agentProvider);
+				cwd, false, true, resource, root, group, directory, agentProvider, id);
 		}
 		var number = allocateTerminalNumber(), title = "Terminal " + number;
 		var id = app.createWorkspaceTerminal != null && app.application.workspace.activeProject != null
@@ -165,7 +165,8 @@ class TerminalTabs {
             if (terminal != null && remote) terminal.retainOnClose = true;
             return terminal;
         }
-	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String, ?agentProvider:String):Null<UiTerminalTab> {
+	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String, ?agentProvider:String, ?workspaceId:String):Null<UiTerminalTab> {
+		if (workspaceId != null && resource != null) app.terminalWorkspaces.set(resource, workspaceId);
 		var isRemote = remoteOwner == null ? StringTools.startsWith(id, "workspace-terminal-") : remoteOwner;
 		if (restored && !isRemote && ~/^Terminal [1-9][0-9]*$/.match(title)) {
 			for (existing in app.host.allTerminalTabs()) if (!existing.disposed && existing.title == title) {
@@ -180,7 +181,7 @@ class TerminalTabs {
 		// folders it was made under: the service names its own root. That is the folder the running service started in
 		// (a scratch folder, say, before a folder was attached), once this window is attached to it.
 		if (isRemote && workspaceRoot != null) {
-			var service = app.terminalServiceTarget(workspaceRoot), serviceRoot = service == null ? null : service.root();
+			var service = app.terminalServiceTarget(workspaceRoot, workspaceId), serviceRoot = service == null ? null : service.root();
 			var all = app.links;
 			if (service != null && all != null) {
 				var link = all.get(service.workspace);
@@ -294,7 +295,7 @@ class TerminalTabs {
 	}
 	/** The row of a terminal tab: in the workspace whose service holds its root, else the one the window shows. */
 	function terminalRow(terminal:UiTerminalTab):String {
-		var target = terminal.workspaceRoot == null ? null : app.terminalServiceTarget(terminal.workspaceRoot);
+		var target = terminal.workspaceRoot == null ? null : app.terminalServiceTarget(terminal.workspaceRoot, app.terminalWorkspaces.get(terminal.resourceId));
 		var id = target != null ? target.workspace : app.workbenchActions.currentWorkspace();
 		return WorkbenchRowKey.terminal(id == null ? "" : id, terminal.resourceId);
 	}
@@ -327,7 +328,7 @@ class TerminalTabs {
 			app.requestFrame();
 			return true;
 		}
-		var terminal = createTerminalTab(ResourceViewIdentity.view(record.workspaceRoot == null ? record.cwd : record.workspaceRoot, record.id), record.name, record.cwd, true, true, record.id, record.workspaceRoot);
+		var terminal = createTerminalTab(ResourceViewIdentity.view(record.workspaceRoot == null ? record.cwd : record.workspaceRoot, record.id), record.name, record.cwd, true, true, record.id, record.workspaceRoot, null, null, null, Std.isOfType(client, workspace.client.WorkspaceLink) ? (cast client : workspace.client.WorkspaceLink).servedWorkspace() : null);
 		if (terminal == null) return false;
         if (app.sidebar.activeId == "workbench") { showTerminalInEditor(terminal); return true; }
 		app.host.panelTerminals.push(terminal);
@@ -418,7 +419,7 @@ class TerminalTabs {
 	}
 	/** The client of a terminal tab's workspace: the link of the workspace whose service holds its root, else the window's. */
 	function terminalClient(terminal:UiTerminalTab):Null<workspace.client.WorkspaceWorkbenchClient> {
-		var target = terminal.workspaceRoot == null ? null : app.terminalServiceTarget(terminal.workspaceRoot);
+		var target = terminal.workspaceRoot == null ? null : app.terminalServiceTarget(terminal.workspaceRoot, app.terminalWorkspaces.get(terminal.resourceId));
 		var link = target == null ? null : app.linkOf(target.workspace);
 		return link != null ? link : app.workbenchClient;
 	}

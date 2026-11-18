@@ -161,11 +161,23 @@ class MachineClient {
 	}
 
 	/** The workspace that has `folder` among its folders, or as its scratch folder. */
-	public function workspaceHolding(folder:String):Null<MachineWorkspace> {
+	public function workspaceHolding(folder:String, ?preferred:String):Null<MachineWorkspace> {
 		var state = machine;
 		if (state == null)
 			return null;
-		for (workspace in state.workspaces) {
+		return holdingIn(state.workspaces, folder, scratchOf, preferred);
+	}
+
+	/**
+		The workspace a folder belongs to: `preferred` (the workspace a terminal was made in) when it is known, else the
+		first that holds the folder. Two workspaces may share a first folder; only the id tells them apart.
+	**/
+	public static function holdingIn(workspaces:Array<MachineWorkspace>, folder:String, scratchOf:MachineWorkspace->Null<String>, ?preferred:String):Null<MachineWorkspace> {
+		if (preferred != null)
+			for (workspace in workspaces)
+				if (workspace.id == preferred)
+					return workspace;
+		for (workspace in workspaces) {
 			var scratch = scratchOf(workspace);
 			if (scratch != null && PathKey.same(scratch, folder))
 				return workspace;
@@ -181,8 +193,8 @@ class MachineClient {
 		return workspace.scratch != null ? workspace.scratch : scratches.get(workspace.id);
 
 	/** The service a folder's workspace has: null until the machine's workspaces are known, and for a folder none holds. */
-	public function serviceTargetFor(folder:String):Null<WorkspaceServiceTarget> {
-		var workspace = workspaceHolding(folder);
+	public function serviceTargetFor(folder:String, ?preferred:String):Null<WorkspaceServiceTarget> {
+		var workspace = workspaceHolding(folder, preferred);
 		return workspace == null ? null : serviceTarget(workspace);
 	}
 

@@ -1401,10 +1401,10 @@ class ExosuitApp implements DesktopUiApplication {
 		The connection a terminal under `root` uses: the link of the workspace that root belongs to (made when the window
 		has none), or null while the machine's workspaces are not known or no workspace holds the root.
 	**/
-	public function terminalEndpoint(root:String):Null<workspace.client.WorkspaceRpcEndpoint> {
+	public function terminalEndpoint(root:String, ?resource:String):Null<workspace.client.WorkspaceRpcEndpoint> {
 		var all = links;
 		if (all == null || machineWorkspacesPending()) return null;
-		var target = terminalServiceTarget(root);
+		var target = terminalServiceTarget(root, resource == null ? null : terminalWorkspaces.get(resource));
 		return target == null ? null : all.use(target, true);
 	}
 
@@ -1463,11 +1463,17 @@ class ExosuitApp implements DesktopUiApplication {
 		return machine != null && machine.machine == null && machine.error == null;
 	}
 
-	/** The workspace service a terminal root belongs to, or null for a folder's own. */
-	public function terminalServiceTarget(root:String):Null<workspace.client.WorkspaceServiceTarget> {
+	/** The workspace service a terminal root belongs to (that of workspace `workspaceId` when it is known), or null for a folder's own. */
+	public function terminalServiceTarget(root:String, ?workspaceId:String):Null<workspace.client.WorkspaceServiceTarget> {
 		var machine = machineClient;
-		return machine == null ? null : machine.serviceTargetFor(root);
+		return machine == null ? null : machine.serviceTargetFor(root, workspaceId);
 	}
+
+	/**
+		The workspace each terminal tab was made in, by its resource id. Two workspaces may share a first folder, so the
+		terminal's root alone cannot say which service holds it.
+	**/
+	public final terminalWorkspaces:Map<String, String> = [];
 
 	/** The folder an agent or terminal tab's session runs in, as its service reports it. */
 	function sessionFolder(resource:String, root:String, terminal:Bool):Null<String> {

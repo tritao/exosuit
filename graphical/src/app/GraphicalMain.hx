@@ -224,7 +224,7 @@ class GraphicalMain {
 				openPaths.length == 0 ? null : openPaths[0], null,
 				dialogs, dark, ui.TerminalPane.open,
 				(Sys.systemName() == "Linux" || Sys.systemName() == "Windows") ? function(id,cwd,restored,requestFrame,palette,group,directory)
-					return ui.TerminalPane.openRemote(function() return app == null ? null : app.terminalEndpoint(cwd),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
+					return ui.TerminalPane.openRemote(function() return app == null ? null : app.terminalEndpoint(cwd, id),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
 			workspace.client.ConnectTimeline.mark("app-constructed");
 			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows") {
 				try {
