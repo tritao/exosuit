@@ -23,6 +23,12 @@ It never stops or restarts exohost, writes nothing into exohost's home, and neve
   -AutoApprove    with -ExohostHome only: approve the pending device itself, as the owner would in the editor (proves the mechanism).
   -Headless       no emulator window (tests).
   -SkipInstall    keep the app already on the emulator.
+  -LocalRelay     use the repo's relay on this PC (relay/worker, started detached; log and pid in android/build/local-relay; port 18787, reached
+                  by the emulator through adb reverse). It is the DEFAULT when the public relay rejects native clients (origin_not_allowed).
+                  A real exohost refuses a loopback http relay unless it runs with EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1 (the script says so).
+  -SwitchRelay    when remote access is already on with another relay: turn it off and on again with the chosen relay. Devices paired
+                  through the old relay must pair again. Without this switch the script never changes a relay in use.
+  -StopLocalRelay stops the local relay and removes the emulator's adb reverse rules; touches nothing else.
 Stop the emulator afterwards with: adb -s emulator-<Port> emu kill
 #>
 param(
@@ -36,13 +42,24 @@ param(
     [switch]$NoAutoPair,
     [switch]$AutoApprove,
     [switch]$Headless,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [switch]$LocalRelay,
+    [switch]$SwitchRelay,
+    [switch]$StopLocalRelay
 )
 . (Join-Path $PSScriptRoot 'env.ps1')
 . (Join-Path $PSScriptRoot 'emulator-lib.ps1')
 . (Join-Path $PSScriptRoot 'phone-ui.ps1')
 $python = (Get-Command python -ErrorAction Stop).Source
 $control = Join-Path $PSScriptRoot 'connect-real.py'
+$localRelayScript = Join-Path $PSScriptRoot 'local-relay.py'
+if ($StopLocalRelay) {
+    # Ends the relay this script started (never exohost: turn remote access off in the editor's Remote panel, or `exohost remote off`).
+    & $python -I $localRelayScript stop
+    $adbExe = Join-Path $env:ANDROID_HOME 'platform-tools/adb.exe'
+    if (Test-Path $adbExe) { & $adbExe -s "emulator-$Port" reverse --remove-all 2>$null | Out-Null }
+    exit 0
+}
 if ($AutoApprove -and -not $ExohostHome) { throw '-AutoApprove only works with -ExohostHome (an isolated exohost): the owner approves a real one in the editor' }
 
 function Invoke-Control([string[]]$arguments) {
@@ -73,6 +90,29 @@ if (-not (Test-Path $apk)) { throw "Build the APK first: pwsh -NoProfile -File a
 New-Item -ItemType Directory -Force $BuildRoot | Out-Null
 
 function Logcat { (& $script:Adb -s $script:Serial logcat -d) -join "`n" }
+function Get-DefaultRelay { (& $python -I $control relay | ConvertFrom-Json).relay }
+# A relay deployed before native clients were supported (the original joao-9f7 account's) answers 403 origin_not_allowed to every
+# client without an Origin header, which is every phone: pairing then fails with "Could not connect using this pairing link".
+function Test-NativeRelay([string]$origin) {
+    if (([Uri]$origin).IsLoopback) { return $true }
+    $zero = '00000000000000000000000000000000'
+    $probe = (& (Join-Path $env:SystemRoot 'System32/curl.exe') -s -m 20 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$origin/v1/machines/$zero/pair/$zero?secret=$zero") -join ''
+    return ($probe -notmatch 'origin_not_allowed')
+}
+function Start-LocalRelay {
+    $info = (& $python -I $localRelayScript start) -join ''
+    try { $relayInfo = $info | ConvertFrom-Json } catch { throw "local relay: $info" }
+    if (-not $relayInfo.running) { throw "local relay did not start: $info" }
+    Write-Host "local relay on $($relayInfo.origin) (pid $($relayInfo.pid), log $($relayInfo.log)); stop it with -StopLocalRelay"
+    return $relayInfo.origin
+}
+function Format-EnableError([string]$reason, [string]$origin) {
+    if ($reason -eq 'relay_loopback_disabled') {
+        return ("remote-enable refused ${origin}: this exohost only accepts a loopback http relay when it was started with EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1. " +
+            "Quit Exosuit (exohost quit), set that variable in the shell that starts the editor, start the editor again and run this again.")
+    }
+    return "remote-enable failed: $reason"
+}
 function Test-EmulatorRunning { ((& $script:Adb devices 2>$null) -join "`n") -match "emulator-$Port\s+device" }
 
 # 2. The emulator, with a window for the owner.
@@ -85,12 +125,43 @@ if (Test-EmulatorRunning) {
 Initialize-PhoneSettings
 if (-not $SkipInstall) { Invoke-Adb "install -r `"$apk`"" 240 }
 
-# 3. Remote access on, the way the panel does it (nothing changes when it is already on).
+# 3. Which relay, and remote access on, the way the panel does it. A relay in use is never changed without -SwitchRelay.
+$localOrigin = $null
+$wantLocal = [bool]$LocalRelay
 if (-not $status.enabled) {
-    $arguments = @('enable'); if ($Relay) { $arguments += @('--relay', $Relay) }
+    $chosen = $null
+    if ($Relay) { $chosen = $Relay }
+    elseif ($wantLocal) { }
+    elseif (Test-NativeRelay (Get-DefaultRelay)) { }
+    else { Write-Host "The public relay $(Get-DefaultRelay) rejects native clients (origin_not_allowed); using a local relay instead."; $wantLocal = $true }
+    if ($wantLocal -and -not $Relay) { $localOrigin = Start-LocalRelay; $chosen = $localOrigin }
+    $arguments = @('enable'); if ($chosen) { $arguments += @('--relay', $chosen) }
     $enabled = Invoke-Control $arguments
-    if (-not $enabled.ok) { throw "remote-enable failed: $($enabled.error)" }
+    if (-not $enabled.ok) { throw (Format-EnableError $enabled.error $chosen) }
     Write-Host "remote access turned on, relay $($enabled.origin)"
+} else {
+    $inUse = [Uri]$status.origin
+    $usable = $inUse.IsLoopback -or (Test-NativeRelay $status.origin)
+    $ourLocal = $inUse.IsLoopback -and $inUse.Port -eq 18787
+    if ($usable -and -not $wantLocal) {
+        if ($ourLocal) { $null = Start-LocalRelay }
+    } elseif ($ourLocal) {
+        $null = Start-LocalRelay
+    } elseif (-not $SwitchRelay) {
+        $why = if ($usable) { '-LocalRelay was asked for' } else { "the relay in use rejects native clients (origin_not_allowed)" }
+        throw ("Remote access is already on with $($status.origin), and $why. Not switching it without your say-so. To switch to the local relay run:`n" +
+            "  pwsh -NoProfile -File android/scripts/connect-real.ps1 -SwitchRelay`n" +
+            "Switching turns remote access off and on again with the local relay (127.0.0.1:18787). Devices paired through $($status.origin) must pair again; " +
+            "this PC must keep the local relay running (connect-real.ps1 -StopLocalRelay stops it).")
+    } else {
+        Write-Host "-SwitchRelay: turning remote access off and on again with the local relay; devices paired through $($status.origin) must pair again"
+        $localOrigin = Start-LocalRelay
+        $off = Invoke-Control @('disable')
+        if (-not $off.ok) { throw "remote-disable failed: $($off.error)" }
+        $enabled = Invoke-Control @('enable', '--relay', $localOrigin)
+        if (-not $enabled.ok) { throw (Format-EnableError $enabled.error $localOrigin) }
+        Write-Host "remote access turned on, relay $($enabled.origin)"
+    }
 }
 $deadline = (Get-Date).AddSeconds(90)
 do {
@@ -101,15 +172,6 @@ do {
 if (-not $status.connected) { throw "exohost could not reach the relay $($status.origin): $($status.error)" }
 Write-Host "relay connected: $($status.origin)"
 
-# A relay deployed before native clients were supported (the original joao-9f7 account's) answers 403 origin_not_allowed to every
-# client without an Origin header, which is every phone: pairing then fails with "Could not connect using this pairing link".
-$relayUri = [Uri]$status.origin
-if (-not $relayUri.IsLoopback) {
-    $probe = (& (Join-Path $env:SystemRoot 'System32/curl.exe') -s -m 20 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$($status.origin)/v1/machines/00000000000000000000000000000000/pair/00000000000000000000000000000000?secret=00000000000000000000000000000000") -join ''
-    if ($probe -match 'origin_not_allowed') {
-        throw "The relay $($status.origin) rejects native clients (origin_not_allowed): its deployment is older than the Android app. Deploy your own relay (docs/mobile/own-relay.md, relay/worker/scripts/deploy-own.ps1), turn remote access off and on again with that relay, or pass -Relay <your relay> when remote access is off."
-    }
-}
 # A loopback relay (the isolated test host) is reached from the emulator through adb reverse; a public one directly.
 if ($relayUri.IsLoopback) {
     & $script:Adb -s $script:Serial reverse "tcp:$($relayUri.Port)" "tcp:$($relayUri.Port)" | Out-Null

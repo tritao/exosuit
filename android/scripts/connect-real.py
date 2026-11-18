@@ -7,6 +7,8 @@ Used by connect-real.ps1. Each subcommand prints one JSON object on stdout.
   connect-real.py devices  [--home DIR]                         remote-devices (read only)
   connect-real.py enable   [--home DIR] [--relay ORIGIN]        remote-enable, only when remote access is off
   connect-real.py invite   [--home DIR] [--ttl 300]             remote-invite: a one-time pairing URL
+  connect-real.py disable  [--home DIR]                         remote-disable (relay switch)
+  connect-real.py grant    --home DIR --device ID --workspace W  remote-grant all (isolated test hosts only)
   connect-real.py approve  --home DIR [--device ID]             remote-approve with no workspaces (isolated test hosts only)
 
 Without --home the control pipe is the user's own exohost (\\\\.\\pipe\\exosuit-exohost-<user>), as the editor finds it;
@@ -92,15 +94,19 @@ def control(home: str | None, request: dict, timeout: float = 15) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["status", "devices", "enable", "invite", "approve", "pipe"])
+    parser.add_argument("command", choices=["status", "devices", "enable", "disable", "invite", "approve", "grant", "pipe", "relay"])
     parser.add_argument("--home", default=None)
     parser.add_argument("--relay", default=None)
     parser.add_argument("--ttl", type=int, default=300)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--workspace", action="append", default=[])
     arguments = parser.parse_args()
     home = arguments.home
     if arguments.command == "pipe":
         print(json.dumps({"endpoint": endpoint(home)}))
+        return 0
+    if arguments.command == "relay":
+        print(json.dumps({"relay": default_relay()}))
         return 0
     if arguments.command == "status":
         reply = control(home, {"op": "remote-status"})
@@ -113,6 +119,12 @@ def main() -> int:
             reply = dict(status, alreadyEnabled=True)
         else:
             reply = control(home, {"op": "remote-enable", "origin": (arguments.relay or default_relay()).rstrip("/")})
+    elif arguments.command == "disable":
+        reply = control(home, {"op": "remote-disable"}, timeout=30)
+    elif arguments.command == "grant":
+        if not (home or os.environ.get("EXOSUIT_EXOHOST_HOME")):
+            raise SystemExit(json.dumps({"ok": False, "error": "grant only runs against an isolated exohost (--home)"}))
+        reply = control(home, {"op": "remote-grant", "deviceId": arguments.device, "workspaces": [{"workspace": w, "preset": "all"} for w in arguments.workspace]})
     elif arguments.command == "invite":
         reply = control(home, {"op": "remote-invite", "ttl": arguments.ttl}, timeout=40)
     else:
