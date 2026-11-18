@@ -1,0 +1,85 @@
+{
+  "comment": "Pinned Android toolchain. setup.ps1 and setup.sh install exactly this into the per-user folder named by 'home'; env.ps1 and env.sh point the build at it. Change a version here, nowhere else (build.gradle.kts and the wrapper pin AGP 9.3.3 and Gradle 9.5.0 themselves).",
+  "home": {
+    "windows": "%LOCALAPPDATA%/exosuit-android",
+    "macos": "~/Library/Application Support/exosuit-android",
+    "linux": "~/.local/share/exosuit-android"
+  },
+  "layout": ["sdk", "jdk", "gradle-home", "avd", "user-home", "downloads"],
+  "sdkPackages": [
+    "platform-tools",
+    "emulator",
+    "platforms;android-36",
+    "build-tools;36.0.0",
+    "ndk;30.0.16248370",
+    "cmake;3.31.6"
+  ],
+  "cmdlineTools": {
+    "package": "cmdline-tools;23.0",
+    "sha1Note": "Google publishes SHA-1 for these archives (repository2-3.xml).",
+    "windows-x64": {
+      "url": "https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip",
+      "sha1": "57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d"
+    },
+    "linux-x64": {
+      "url": "https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip",
+      "sha1": "e025545c62a8e64c7559119566a569fb1dec5f60"
+    },
+    "linux-arm64": {
+      "url": "https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip",
+      "sha1": "e025545c62a8e64c7559119566a569fb1dec5f60"
+    },
+    "macos-x64": {
+      "url": "https://dl.google.com/android/repository/commandlinetools-mac_x86_64-16111833_latest.zip",
+      "sha1": "112cf9618794a997ff273537d55bee02c22abffe"
+    },
+    "macos-arm64": {
+      "url": "https://dl.google.com/android/repository/commandlinetools-mac_arm64-16111833_latest.zip",
+      "sha1": "ad03dc49bfacfd52c110b14104ea548b8a07e830"
+    }
+  },
+  "jdk": {
+    "version": "21.0.13+9",
+    "vendor": "Eclipse Temurin",
+    "windows-x64": {
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_windows_hotspot_21.0.13_9.zip",
+      "sha256": "a4dbaa05fca4bd89d84584e58c459bd732efebb1722af80ab13c6516832004f9"
+    },
+    "linux-x64": {
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz",
+      "sha256": "d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.13_9.tar.gz",
+      "sha256": "e3522e707fc7dbe2a72c30746b1e7068301a0213ecd213d4491f35a14eb55578"
+    },
+    "macos-x64": {
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_mac_hotspot_21.0.13_9.tar.gz",
+      "sha256": "9aa1d1c17ae5467a022679e7e0af5c00797d94ac462ed1a46f4db07a8a34a6dd"
+    },
+    "macos-arm64": {
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.13_9.tar.gz",
+      "sha256": "bf036b35b071bfb2f54f2c0af8ee8d88afa95ee6eb3dce02c0f94cfc2524d04a"
+    }
+  },
+  "ndk": "30.0.16248370",
+  "cmake": "3.31.6",
+  "gradle": "9.5.0 (downloaded by the wrapper into gradle-home)",
+  "agp": "9.3.3",
+  "avd": {
+    "name": "exosuit-s8",
+    "device": "pixel_6",
+    "port": 5584,
+    "systemImage": {
+      "x86_64": "system-images;android-36;google_apis;x86_64",
+      "arm64-v8a": "system-images;android-36;google_apis;arm64-v8a"
+    },
+    "systemImageByPlatform": {
+      "windows-x64": "x86_64",
+      "linux-x64": "x86_64",
+      "macos-x64": "x86_64",
+      "linux-arm64": "arm64-v8a",
+      "macos-arm64": "arm64-v8a"
+    }
+  }
+}
