@@ -49,7 +49,7 @@ private class MemoryDeviceStore implements WorkspaceDevicePersistence {
 }
 
 private class MemoryPairingRelay implements WorkspacePairingRelay {
-	final endpoint:RelayMachineEndpoint;
+	public final endpoint:RelayMachineEndpoint;
 	public var online:Bool = true;
 	public var registrationError:Null<String>;
 	public var registered:Map<String, String> = [];

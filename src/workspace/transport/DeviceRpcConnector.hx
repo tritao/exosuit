@@ -197,10 +197,12 @@ class DeviceRpcConnector implements RpcConnector {
 	@:allow(workspace.transport.DeviceConnectAttempt)
 	function remove(attempt:DeviceConnectAttempt):Void pending.remove(attempt);
 
+	@:allow(workspace.transport.DeviceConnectAttempt)
 	function ticketRetryable(code:Null<String>):Bool
 		return code == "relay_unavailable" || code == "relay_rate_limited"
 			|| code == "ticket_transport_failed" || code == "ticket_request_failed";
 
+	@:allow(workspace.transport.DeviceConnectAttempt)
 	function noiseRetryable(code:String):Bool
 		return code == "noise_disconnected" || code == "noise_timeout"
 			|| code == "noise_send_failed";

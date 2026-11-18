@@ -105,6 +105,7 @@ class GitProcess {
 		return processes.start(executable, arguments, cwd, environment);
 	}
 
+	@:allow(scm.git.GitCommandTask)
 	static function locate(configuredPath:Null<String>, developerDirectory:Null<String>):Null<String> {
 		var isMac = Sys.systemName() == "Mac";
 		if (configuredPath != null && StringTools.trim(configuredPath).length > 0) {

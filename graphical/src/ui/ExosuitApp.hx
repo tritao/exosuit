@@ -2765,6 +2765,7 @@ class ExosuitApp implements DesktopUiApplication {
 		A folder opens as a workspace (`openFolderWorkspace`, once the window polls); a file opens in a tab, with the
 		cursor on `line` and `column` (1-based) when given.
 	**/
+	@:allow(app.GraphicalMain)
 	function openArgument(path:String, ?line:Int, ?column:Int):Void {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
 			explorerRoot = application.workspace.fileSystem.normalize(path);
