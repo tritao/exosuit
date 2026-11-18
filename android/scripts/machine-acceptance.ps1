@@ -2,7 +2,7 @@
 Acceptance run for Phase 9 on the phone (ADR 0005 section 4): the emulator app pairs ONCE with a machine (exohost),
 then sees the workspaces the owner grants it, with their groups and sessions, without pairing again.
 
-  pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-x86_64] [-Port 5554] [-OutDir dir] [-SkipBuild]
+  pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-s8] [-Port 5554] [-OutDir dir] [-SkipBuild]
 
 Steps (screenshots in -OutDir; LOOK at each one, the logcat waits only prove the state changed):
   1-pairing-code.png    the code on the phone; the script checks it equals the machine's pending code before approving
@@ -41,7 +41,7 @@ esume	imes.log per step. Steps share one run, so they are listed in one -Step.
   resume-desktop  the desktop restarts (exohost stops 8 s, starts again on the same home): the phone reconnects by itself
 #>
 param(
-    [string]$Avd = 'exosuit-x86_64',
+    [string]$Avd = 'exosuit-s8',
     [int]$Port = 5554,
     [string]$OutDir = '',
     [switch]$SkipBuild,

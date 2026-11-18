@@ -32,14 +32,16 @@ function New-EmulatorAvd {
 # Starts the emulator hidden and waits for boot. Returns the emulator process.
 # With -Snapshot the emulator boots from that quick-boot snapshot when it exists (seconds, apps and their data as they were) and
 # saves it again when it is stopped with `adb emu kill`; without it nothing is loaded or saved.
-function Start-Emulator([string]$gpu = 'swiftshader_indirect', [int]$bootTimeoutSeconds = 240, [string]$snapshot = '') {
+function Start-Emulator([string]$gpu = 'swiftshader_indirect', [int]$bootTimeoutSeconds = 240, [string]$snapshot = '', [switch]$Visible) {
     New-EmulatorAvd
     $log = Join-Path $BuildRoot "emulator-$script:EmulatorPort.log"
     $cores = if ($env:EXOSUIT_EMU_CORES) { $env:EXOSUIT_EMU_CORES } else { '2' }
     $memory = if ($env:EXOSUIT_EMU_MEMORY) { $env:EXOSUIT_EMU_MEMORY } else { '3072' }
     $snapshotArguments = if ($snapshot) { @('-snapshot', $snapshot) } else { @('-no-snapshot-save') }
-    $emulatorArguments = @('-avd', $script:AvdName, '-port', $script:EmulatorPort, '-no-window', '-no-audio', '-no-boot-anim') + $snapshotArguments + @('-gpu', $gpu, '-cores', $cores, '-memory', $memory)
-    $started = Start-Process $script:EmulatorExe -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err" -ArgumentList $emulatorArguments
+    # -Visible: a normal emulator window (and sound) for a person to use; the default is headless for scripted runs.
+    $windowArguments = if ($Visible) { @() } else { @('-no-window', '-no-audio') }
+    $emulatorArguments = @('-avd', $script:AvdName, '-port', $script:EmulatorPort) + $windowArguments + @('-no-boot-anim') + $snapshotArguments + @('-gpu', $gpu, '-cores', $cores, '-memory', $memory)
+    $started = Start-Process $script:EmulatorExe -WindowStyle $(if ($Visible) { 'Normal' } else { 'Hidden' }) -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err" -ArgumentList $emulatorArguments
     $deadline = (Get-Date).AddSeconds($bootTimeoutSeconds)
     do {
         Start-Sleep -Seconds 3

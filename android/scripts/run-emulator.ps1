@@ -1,7 +1,7 @@
 <#
 Runs the app on a headless x86_64 emulator and saves a screenshot.
 
-  pwsh -NoProfile -File android/scripts/run-emulator.ps1 [-Avd exosuit-x86_64] [-Gpu swiftshader_indirect]
+  pwsh -NoProfile -File android/scripts/run-emulator.ps1 [-Avd exosuit-s8] [-Gpu swiftshader_indirect]
       [-Port 5554] [-Screenshot out.png] [-Tap "x,y"] [-KeepRunning]
 
 Creates the AVD on first use (system-images;android-36;google_apis;x86_64), starts it without a window, waits for
@@ -9,12 +9,11 @@ boot, installs the debug APK, launches it, waits for frames, writes the screensh
 stops the emulator unless -KeepRunning is given. Logs: <build>/emulator.log, <build>/logcat.txt.
 #>
 param(
-    [string]$Avd = 'exosuit-x86_64',
+    [string]$Avd = 'exosuit-s8',
     [int]$Port = 5554,
     [string]$Gpu = 'swiftshader_indirect',
     [string]$Screenshot = '',
     [string]$Tap = '',
-    [int]$Port = 5554,
     [int]$BootTimeoutSeconds = 240,
     [int]$StartupSeconds = 25,
     [switch]$KeepRunning
