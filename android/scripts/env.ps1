@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'toolchain-lib.ps1')
 Set-ToolchainEnvironment
 # Native tools (adb) print UTF-8; a plain pwsh decodes them with the OEM code page (cp437 here) and the phone's labels such as
-# "Alpha · running" arrive as mojibake, so the label-driven taps in machine-acceptance.ps1 never match.
+# "Alpha (middle dot) running" arrive as mojibake, so the label-driven taps in machine-acceptance.ps1 never match.
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 $script:HaxeonRoot = Join-Path $script:RepoRoot 'haxeon'
