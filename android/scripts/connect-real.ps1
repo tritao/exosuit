@@ -172,6 +172,7 @@ do {
 if (-not $status.connected) { throw "exohost could not reach the relay $($status.origin): $($status.error)" }
 Write-Host "relay connected: $($status.origin)"
 
+$relayUri = [Uri]$status.origin
 # A loopback relay (the isolated test host) is reached from the emulator through adb reverse; a public one directly.
 if ($relayUri.IsLoopback) {
     & $script:Adb -s $script:Serial reverse "tcp:$($relayUri.Port)" "tcp:$($relayUri.Port)" | Out-Null
