@@ -29,6 +29,8 @@ class GraphicalMain {
 	static final devtoolsOutput:haxe.io.Bytes = haxe.io.Bytes.alloc(4096);
 	/** Where the window was last time; null for benchmark and capture runs, which keep the system's placement. */
 	static var placementFile:Null<WindowPlacementFile> = null;
+	/** Writes the state folder's logs/ui-hang.log when the UI thread stops ticking for 5 s. */
+	static var hangWatchdog:Null<devtools.HangWatchdog> = null;
 	static var placementReader:Null<Void->Null<haxeon.ui.host.WindowPlacement>> = null;
 
 	static function main():Int {
@@ -44,6 +46,8 @@ class GraphicalMain {
 
 	@:keep public static function tick():Int {
 		var current = session;
+		var watchdog = hangWatchdog;
+		if (watchdog != null) watchdog.beat("tick");
 		if (current != null && placementFile != null) placementFile.update(placementReader);
 		return current != null && current.tick() ? 1 : 0;
 	}
@@ -51,6 +55,7 @@ class GraphicalMain {
 	@:keep public static function close():Int {
 		var current = session;
 		if (current == null) return 0;
+		if (hangWatchdog != null) { hangWatchdog.stop(); hangWatchdog = null; }
 		// A live reload closes and reopens the window: it must come back where it was, like a new run.
 		if (placementFile != null) placementFile.update(placementReader, true);
 		placementReader = null;
@@ -165,6 +170,10 @@ class GraphicalMain {
 		var benchmark = captureDirectory != null || recordPath != null || inputScriptPath != null
 			|| titleOverride != null && titleOverride.length > 0;
 		placementFile = benchmark ? null : new WindowPlacementFile();
+		if (!benchmark && Sys.getEnv("EXOSUIT_HANG_WATCHDOG") != "0") {
+			hangWatchdog = new devtools.HangWatchdog(devtools.HangWatchdog.defaultFile());
+			hangWatchdog.start();
+		}
 		if (placementFile != null) host.placement = placementFile.load();
 		allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
 		var profileFrames = 0;

@@ -60,6 +60,43 @@ class PathKeyTestMain {
 		posix();
 		style();
 		edges();
+		hangWatchdog();
 		Sys.println("PASS: path keys ignore separators, trailing separators and Windows case; containment respects roots and sibling prefixes");
+	}
+
+	/** A UI thread that stops ticking leaves a report naming its last phase; one that keeps ticking leaves nothing. */
+	static function hangWatchdog():Void {
+		var directory = haxe.io.Path.join([Sys.getEnv("TEMP") == null ? "." : Sys.getEnv("TEMP"), "exosuit-hang-watchdog-test-" + Sys.getPid()]);
+		var file = haxe.io.Path.join([directory, "logs", "ui-hang.log"]);
+		var now = 100.0;
+		var watchdog = new devtools.HangWatchdog(file, 5.0, function() return now);
+		watchdog.beat("tick");
+		watchdog.phase("build workbench");
+		now = 104.0;
+		require(!watchdog.check() && !sys.FileSystem.exists(file), "a 4 s gap was reported");
+		now = 106.0;
+		require(watchdog.check(), "a 6 s stall was not reported");
+		var text = sys.io.File.getContent(file);
+		require(text.indexOf("stalled for 6") >= 0 && text.indexOf("last phase: build workbench") >= 0 && text.indexOf("tick > build workbench") >= 0, "the report: " + text);
+		require(!watchdog.check(), "one stall was reported twice");
+		now = 110.0;
+		watchdog.beat("tick");
+		require(sys.io.File.getContent(file).indexOf("ticking again after 10") >= 0, "the end of the stall was not noted");
+		now = 112.0;
+		require(!watchdog.check(), "a ticking thread was reported");
+		// The real watcher thread, with a real stall.
+		var real = new devtools.HangWatchdog(haxe.io.Path.join([directory, "logs", "real.log"]), 0.4);
+		real.start();
+		real.beat("tick");
+		real.phase("artificial stall");
+		Sys.sleep(1.5);
+		real.stop();
+		var reported = sys.FileSystem.exists(haxe.io.Path.join([directory, "logs", "real.log"])) ? sys.io.File.getContent(haxe.io.Path.join([directory, "logs", "real.log"])) : "";
+		require(reported.indexOf("last phase: artificial stall") >= 0, "the watcher thread wrote no report for a 1.5 s stall: " + reported);
+		try {
+			for (name in sys.FileSystem.readDirectory(haxe.io.Path.join([directory, "logs"]))) sys.FileSystem.deleteFile(haxe.io.Path.join([directory, "logs", name]));
+			sys.FileSystem.deleteDirectory(haxe.io.Path.join([directory, "logs"]));
+			sys.FileSystem.deleteDirectory(directory);
+		} catch (_:Dynamic) {}
 	}
 }
