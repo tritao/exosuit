@@ -9,6 +9,113 @@ and the status.
 
 ## Open
 
+Found during the port to haxeon upstream `ff7e29aac` + our commits (`exosuit-upstream` 5d2c7ab19), 2026-11-17. Each
+entry has the minimal source.
+
+### An empty array literal nested in an object inside an array: "element type ... reached IR generation unresolved"
+
+- **Symptom:** `Internal error: the type of the element type of this empty array reached IR generation unresolved`,
+  with no file or line, after typing succeeds. Seen at `src/syntax/BuiltinSyntax.hx:227` (`patterns: []`).
+- **Repro:** `static function g():Dynamic return {patterns: [{patterns: []}]};` fails; `{patterns: []}` alone and
+  `{patterns: [{patterns: ([] : Array<Dynamic>)}]}` compile (`S2/emptyarray`).
+- **Cause:** not known. The empty array's element type is left as an open monomorph when the expected type is Dynamic.
+- **Workaround:** `([] : Array<Dynamic>)` (BuiltinSyntax).
+- **Status:** open.
+
+### A default argument value is resolved in the caller's module, not the declaring one
+
+- **Symptom:** `E1005: Unknown variable "config"` for `delaySeconds:Float = config.Settings.DEFAULT_TOOLTIP_DELAY`
+  (`graphical/src/ui/TabTooltip.hx`) unless some other module of the closure loaded `config.Settings`; and
+  `E1005: Unknown variable "MessagePackReader"` in any module that uses `haxeon.wire.MessagePackFrame`, whose
+  `?maxPayload:Int = MessagePackReader.DEFAULT_MAX_BYTES` names a same-package type the caller does not import.
+- **Repro:** `a.Tip` with `new(delay:Float = b.Const.DELAY)` and `app.Main` doing `new a.Tip()` gives
+  `Tip.hx:5:36: E1005: Unknown variable "b"` (`U2/repro-default-arg`). A Main that only calls
+  `MessagePackFrame.payloadLength(Bytes.alloc(MessagePackFrame.HEADER_BYTES), 100)` (`S1a/wire-repro`).
+- **Cause:** the default value expression is typed at the call site, in the caller's import scope.
+- **Workaround:** import the type in the declaring module and use its short name (TabTooltip); for MessagePackFrame,
+  import `haxeon.wire.MessagePackReader` in the caller as well (NativeRpcTransport, RelayFrameCodec, RelayFrameReader).
+- **Status:** open.
+
+### A type of a parent package, or a generated module of the same package, is found only if something loaded it
+
+- **Symptom:** `package a.b; class Child { var p:Parent; }` with `a.Parent` imported nowhere else gives
+  `E1020 Unknown type "Parent"` (stock Haxe resolves parent packages). Hit by `ui.control.EditorControl`
+  (`ui.ExosuitApp`) and `exohost.control.ControlRouter`, `ExohostCtl`, `exohost.remote.MachineRemote`. The same shape:
+  `-Entry editor.GutterGeometry` stops in haxeon's generated binding `haxeon/ui/ResolvedLayoutItem.hx:156` with
+  `E1005 Unknown variable "NativeKitUIConstants"`; the whole app build loads that module first and is not affected.
+- **Repro:** `U8/repro-parentpkg`.
+- **Cause:** module lookup does not walk up the package path, and does not load a module of the current package by
+  name on demand.
+- **Workaround:** explicit imports.
+- **Status:** open.
+
+### A lambda with an untyped parameter and a declared return type, assigned to `Null<A->B>`: E1020 at an unrelated file
+
+- **Symptom:** `holder.f = function(_):Int return 1;` with `var f:Null<String->Int>` fails with
+  `E1020 Unresolved inferred type` reported at `stdlib/EReg.hx:1:1` or `stdlib/StringBuf.hx:76:1`, not at the lambda.
+  `function(_) return 1`, or a field type without `Null<>`, compiles.
+- **Repro:** `X1/repro-nullfn`.
+- **Workaround:** type the parameter (`function(_:String):Int ...`).
+- **Status:** open.
+
+### A method of a generic instance passed as a function value: "Conflicting generic method reference"
+
+- **Symptom:** `directories.forAgent(..., ctx.fail)` with `ctx:RpcContext<AgentView>` in one provider and
+  `RpcContext<AgentRecord>` in another fails with `Conflicting generic method reference
+  "$generic-method-reference:haxeon.rpc.RpcContext:fail..."`.
+- **Workaround:** a lambda, `error -> ctx.fail(error)` (ClaudeProvider, CodexProvider, PiProvider).
+- **Status:** open, no minimal repro.
+
+### Enum values with class payloads cannot be compared, against what LANGUAGE_SUPPORT.md says
+
+- **Symptom:** `Array<UiEditorTab>.indexOf/remove` and `==` give `E1025 ... does not conform to Equatable`; declaring
+  `Equatable` fails too (`E1025 "Settings.settings does not conform"`) because a constructor holds a plain class.
+  `docs/reference/LANGUAGE_SUPPORT.md:49-51` says such values compare by identity and that `indexOf`/`remove` use the
+  same rule.
+- **Repro:** `U8/repro-enum-identity`.
+- **Workaround:** compare the held object (`UiWorkbenchHost.tabIndex`, `removeTab`).
+- **Status:** open; the docs or the compiler is wrong.
+
+### Several probe compiles of one package at once: intermittent internal errors in the worker
+
+- **Symptom:** with several `-Entry` probes of one project running at the same time, the worker sometimes fails with
+  `Cached function "workspace.client.AgentHistoryWindow.new" has no source owner`, `Missing target for generic method
+  reference "$generic-method-reference:haxeon.platform.async.Promise:cancel:..."` or `IR verification failed ...
+  Unknown IR closure target "workspace.service.WorkspaceTerminalProtocol.encodeChange"`. Each passes when run again
+  alone; the whole-project builds never showed it.
+- **Cause:** not known; probably shared cached state between requests of different entries.
+- **Status:** open, no repro.
+
+### `Array.remove` and `indexOf` in a generic instance over an array type: "Unknown IR call __array_remove_any"
+
+- **Symptom:** `activeJobs.remove(cast job)` (`activeJobs:Array<ScmJob<Dynamic>>`) in the generic `finish<T>` and
+  `newJob<T>` of `src/scm/RpcScmSource.hx` fails only where the instance has `T = Array<ScmBranch>` (tests/workspace-scm):
+  `IR verification failed for $generic:scm.RpcScmSource.finish[layout]<Array<class:scm.ScmBranch<>>>: Unknown IR call
+  "__array_remove_any"`; `indexOf` gives `__array_index_of_any` the same way. The app's own build does not reach that
+  instance.
+- **Repro:** put back `activeJobs.remove(cast job)` in RpcScmSource and compile tests/workspace-scm.
+- **Cause:** not known; the array-equality helper for an element type that is itself an instance of a generic class
+  over an array is not generated.
+- **Workaround:** a `forgetJob` loop with `splice` (RpcScmSource).
+- **Status:** open, no minimal repro.
+
+### UIKit: a positioned Tooltip inside a TrackedScope that runs alone: "Layout node IDs must be unique"
+
+- **Symptom:** a `TrackedScope` whose body holds a Tooltip with a placement (its tip node is `overlay`, lifted by the
+  window's `TooltipOverlayHost`) throws `Layout node IDs must be unique` at the next submit as soon as the scope runs
+  alone (no root build): after a signal it read was written between frames, and after a State its body read was
+  written in `onResolved`. Seen once as "A render scope body must produce its reserved, unparented root". The same tree
+  built at the root runs. Also, `ScopeRootBoundary.transferNodeFields` does not carry a caller-set
+  `commandShortcutFilter` to the root a re-run builds, and caller closures that captured the old root read its stale
+  geometry.
+- **Repro:** `F3/repro` (`main.hl plain|scope|signal`: plain passes, scope and signal throw); in the app,
+  tests/terminal-context-menu at 2da8ddb2 (the whole TerminalPane in its scope with the control strip's status
+  Tooltip).
+- **Workaround:** keep Tooltips and caller-decorated nodes out of a scope that re-runs alone: the terminal's scope
+  covers its rows only (b6853624), and the status bar (a TabTooltip on every slot) is not scoped, so caret, selection
+  and text changes still rebuild the root.
+- **Status:** open.
+
 ### An edit to AutomationProbe.hx makes its hlNative extern "not return on every path"
 
 - **Symptom:** seen 2026-11-16 on haxeon fa128931e (exosuit main a457e3dc): adding one line to
@@ -281,6 +388,14 @@ and the status.
   module published, and its fields to their published slots. The resumed build patches; no reload needed. Checked on the
   real case: graphical published before `bb6d77ed`, compiler stopped, then built with it: `resuming the published live
   module`, patch revision 2, 46 functions changed, no reload reasons.
+- **Seen again on upstream main** (`ff7e29aac`, 2026-11-17, haxeon port): upstream does not have the fix, and since it
+  verifies the whole program before a resumed build lowers it, the same test fails one step earlier:
+  `IR verification failed for $lambda:Pane.build:build#onResolved(0)@279E7C81#0: Unknown IR object
+  "$lambda-env:Pane.build:build#onResolved(0)@279E7C81#0"`. Fixed again on haxeon `exosuit-upstream` ("Live: a resumed
+  session patches an edit that changes what a lambda captures, or deletes it"): lowering verifies only the program's own
+  functions, not the frozen ones (retired signatures, dropped lambdas), and resolves their objects to the published types
+  as before. `resumed-capture-change-patch` passes, with `added-class-patch`, `lambda-renumber-patch` and
+  `LiveKeptCheckMain`.
 
 ### The compiler worker reports negative allocation bytes for a large compile
 
@@ -321,7 +436,8 @@ and the status.
 - **Workaround:** strip leading zeros before `Std.parseInt` (was `AgentTerminalResume.matchedTime`; that code went on
   2026-11-15, when provider terminals began to report their conversation instead of being matched by time). Other
   exosuit callers that parse zero-padded fields are still exposed.
-- **Status:** open. Fix in haxeon: base 10 unless a `0x` prefix, in both the native and the wasm version.
+- **Status:** fixed upstream in haxeon `6320ca672` ("Parse integers as Haxe does: Null<Int>, decimal unless 0x"),
+  which the port pin includes; `graphical/src/app/LaunchForwarding.hx` no longer works around it.
 
 ## Building haxeon's own tools with haxeon (2026-11-11)
 
@@ -507,3 +623,13 @@ restored context's retained row node still carries that state from when the cont
 cleared without focusing (`haxeon/packages/ui/haxe/haxeon/ui/widgets/collections/TreeView.hx`, the row build
 callback). Fix in haxeon: treat the request as met only when `focus.focusedId` is the row's id. No workaround in
 exosuit; the scenario clicks the root's row once more before using the keyboard.
+
+## Self-hosting check: the self-hosted compile server cannot start on Windows
+
+Seen 2026-11-18 on upstream main `ff7e29aac` (+ our series, `5d2c7ab19`): `haxeon scripts/check-self-hosting.hx` passes
+the fixed point (stage 1 = stage 2) and builds all 9 entry points, then fails its "programs" step: the test driver's
+compile server exits with "A secure random token requires the Haxeon runtime". `CompilerServer.windowsSecureToken`
+(`src/compiler/tools/CompilerServer.hx`) calls the runtime's `__host_secure_random_token` only `#if (hl && !haxeon)`;
+built by haxeon itself (the self-hosted server this step tests), it throws. So the step cannot pass on Windows.
+Fix in haxeon: bind `__host_secure_random_token` for haxeon-built HashLink too (or use the platform's random source).
+Not a port problem; the gate the port relies on (fixed point and entry points) passes.
