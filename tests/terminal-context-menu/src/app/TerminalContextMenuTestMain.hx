@@ -111,6 +111,7 @@ class TerminalContextMenuTestMain {
 		var fonts = haxeon.ui.FontCollection.create();
 		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
 		TerminalRestartTests.run(fonts);
+		try TerminalInputFailureTests.run(fonts) catch (e:Dynamic) { Sys.println("INPUT FAILURE TEST FAIL: " + Std.string(e) + haxe.CallStack.toString(haxe.CallStack.exceptionStack())); Sys.exit(1); }
 		try { TerminalControlNoticeTests.run(fonts); TerminalControlNoticeTests.runInApp(fonts); TerminalControlNoticeTests.runTwoViews(); } catch (e:Dynamic) { Sys.println("NOTICE TEST FAIL: " + Std.string(e) + haxe.CallStack.toString(haxe.CallStack.exceptionStack())); Sys.exit(1); }
 		var app = new ui.ExosuitApp(fonts, ui.ExosuitPalette.theme(false), null, null, null, null, false,
 			function(_, _, _) return new TerminalFixture());
