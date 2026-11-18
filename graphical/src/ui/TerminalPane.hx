@@ -1151,6 +1151,18 @@ class TerminalPane implements AgentTerminalPanel {
 			event.preventDefault();
 			return;
 		}
+		// Escape under DECSET 9001 goes as a Win32 key record, as Windows Terminal sends it. A bare ESC byte can be
+		// held as the start of a sequence, and a kitty CSI 27 u (when the program asked for disambiguated keys) is
+		// not input ConPTY parses; either way the program, e.g. a Claude Code dialog, never saw Escape. Num Lock and
+		// Caps Lock arrive as modifiers too, so only Ctrl, Shift, Alt and Super make it a different key.
+		if (event.key == UiKey.Escape && (event.modifiers & (UiModifier.Control | UiModifier.Shift | UiModifier.Alt | UiModifier.Super)).isEmpty()
+				&& session.emulator.win32InputMode()) {
+			prepareInput();
+			// VK_ESCAPE, scan code 1, char 0x1b, down then up, no modifiers.
+			session.write(Bytes.ofString("\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"));
+			event.preventDefault();
+			return;
+		}
 		if ((event.key == UiKey.V || event.key == UiKey.C) &&
 			(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 			(UiModifier.Control | UiModifier.Shift)) {
