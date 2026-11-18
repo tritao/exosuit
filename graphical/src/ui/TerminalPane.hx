@@ -747,7 +747,7 @@ class TerminalPane implements AgentTerminalPanel {
 				buttonStyle.padding = new haxeon.ui.Insets(8, 0, 8, 0);
 				var action = new haxeon.ui.widgets.controls.Button(controlActionText == "Restart Terminal" ? (remoteBackend.resumesConversation() ? "Resume" : "Restart") : controlActionText,buttonStyle,function() {
 					remoteBackend.activateControl();syncControlLayout();
-					// A focus request is applied by a full build only (C-probe-results point 2).
+					// A focus request is applied by a full build only.
 					if (terminalNode != null) context.requestFocusAfterLayout(terminalNode.id);
 					requestFrame();
 				},"terminal-control-action",null,haxeon.ui.widgets.controls.ButtonVariant.Secondary,null,null,null,null,null,null,null,null,null,controlActionText);
