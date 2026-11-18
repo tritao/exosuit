@@ -1157,8 +1157,9 @@ class ExosuitApp implements DesktopUiApplication {
 		settingsTab.syncStore();
 		host.dismissStaleLanguagePopup();
 		// Plain state the root build shows, which it cannot track: a change makes this frame a full build. A document view's
-		// scroll offset, queued reveal and search marks run only its pane's scope, unless something built at the root reads
-		// them too: the language popup (placed at the caret), the command view and a context menu do.
+		// scroll offset, queued reveal and search marks run only its pane's scope, and its caret, selection and text only that
+		// scope and the status bar's, unless something built at the root reads them too: the language popup (placed at the
+		// caret), the command view and a context menu do.
 		var overlayOpen = host.isLanguagePopupVisible() || host.isCommandViewActive() || contextMenu != null;
 		if (rootChanges.changed(host, hostContext, application.settings.current.minimapEnabled, application.settings.store.revision,
 			responsiveRightHidden, overlayOpen))
@@ -2186,12 +2187,21 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	function statusBar():View {
+	/**
+		The status bar, in a scope of its own: it runs in every root build, and alone when the active view's `editing` signal
+		moves (RootChangeDetector before a frame), so a caret move, a selection or typing does not build the root.
+	**/
+	function statusBar():View
+		return new TrackedScope("status-bar-scope", statusBarContent);
+
+	function statusBarContent():View {
 		var active = host.activeDocument();
 		var tab = host.activeTab();
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
 		// A diff view's document is generated, never saved, so it has no unsaved changes to flag.
 		var activeView = host.activeView(), diff = activeView != null && activeView.diffDocument != null;
+		// The read is the subscription.
+		if (activeView != null) activeView.editing.value;
 		var label = active == null ? (terminal == null ? "No document open" : terminal.title) :
 			(active.title + (active.dirty && !diff ? " *" : "") + " - " + active.encodingLabel());
 		var image = tab == null ? null : UiEditorTabs.image(tab);
@@ -2562,11 +2572,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/**
 		The body of a document tab's scope: breadcrumbs over the editor pane. It runs in every root build that builds the tab,
-		and alone when the view's `presentation` signal moves (RootChangeDetector before a frame, or the pane itself).
+		and alone when the view's `presentation` or `editing` signal moves (RootChangeDetector before a frame, or the pane
+		itself).
 	**/
 	function documentContent(documentView:UiDocumentView, paneId:String):View {
-		// The read is the subscription.
+		// The reads are the subscriptions.
 		documentView.presentation.value;
+		documentView.editing.value;
 		var document = documentView.document;
 		var diffDocument = documentView.diffDocument;
 		var pane = configureDocumentPane(documentView, paneId);
