@@ -43,6 +43,8 @@ class RpcTerminalBackend implements TerminalBackend {
   var columns:Int = 80;
   var rows:Int = 24;
   var resizePending:Bool = false;
+  /** Per terminal, the view in this process whose pane chose the program's size last; only it restores that size. */
+  static final sizeChooser:Map<String, RpcTerminalBackend> = [];
   var theme:Null<TerminalTheme>;
   var themePending:Bool = false;
   var position:Int64 = 0;
@@ -308,7 +310,13 @@ class RpcTerminalBackend implements TerminalBackend {
     controlled = info.controlled == true;
     // In control (the service gave it at open, or the person took it), or nothing left to control: the offer is answered.
     if (controller || ended()) controlOffered = false;
-    resizePending = terminalState == "running" && controller && (columns != observedColumns || rows != observedRows);
+    // A controller puts the program back to its pane's size when the service reports another one, unless another view
+    // of this terminal in this process chose its size later (sizeChooser): control is per connection, so two views of
+    // one terminal in a window are both controllers, and each restoring its own pane's size resized the program back
+    // and forth for as long as both were open (the jiggle).
+    var chooser = sizeChooser.get(terminalId);
+    resizePending = terminalState == "running" && controller && (chooser == null || chooser == this)
+      && (columns != observedColumns || rows != observedRows);
     if (terminalState == "running" || terminalState == "starting") restoreStreamGeometry();
     if (attached && !controller) {
       writes.resize(0);
@@ -418,6 +426,7 @@ class RpcTerminalBackend implements TerminalBackend {
   public function resize(columns:Int, rows:Int):Void {
     if (columns < 1 || columns > 512 || rows < 1 || rows > 256) throw "Terminal size exceeds service limits";
     geometryReady = true;
+    if (columns != this.columns || rows != this.rows || !sizeChooser.exists(terminalId)) sizeChooser.set(terminalId, this);
     this.columns = columns;
     this.rows = rows;
     resizePending = controller && terminalState == "running" && (columns != observedColumns || rows != observedRows);
@@ -483,6 +492,7 @@ class RpcTerminalBackend implements TerminalBackend {
   public function close():Void {
     if (closed) return;
     closed = true;
+    if (sizeChooser.get(terminalId) == this) sizeChooser.remove(terminalId);
     var lastListener = releaseEvents == null || releaseEvents();
     releaseEvents = null;
     var c = connection;

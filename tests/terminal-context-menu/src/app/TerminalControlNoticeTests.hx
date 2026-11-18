@@ -100,6 +100,44 @@ class TerminalControlNoticeTests {
   }
   trace("PASS: terminal control notice follows control changes through the application view cache (panel and editor, desktop and phone width)");
  }
+ /**
+  Two views of one terminal in one window share a connection, so the service counts both as controller. Their panes
+  differ in height (one with the control strip is two rows shorter). Each view used to push its own size whenever the
+  service reported another one, so the program was resized back and forth for as long as both were open: Claude Code
+  re-wrapped at each size and its screen jiggled. The fake service answers a resize as the real one does: it applies the
+  size and tells every view the terminal changed.
+ */
+ public static function runTwoViews():Void {
+  var clock=function() return Sys.time()*1000;
+  var pair=MemoryTransport.pair(),connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
+  var endpoint=new TestEndpoint(connection);endpoint.root="/tmp";endpoint.generation="owner";
+  var columns=80,rows=24,resizes=0;
+  function info():TerminalInfo return {id:"shared",name:"Shared",cwd:"/tmp",state:"running",exitCode:0,columns:columns,rows:rows,
+   start:Int64.ofInt(0),end:Int64.ofInt(0),restartable:true,historyAvailable:true,controller:true,controlled:true,notifications:true};
+  function changed():Void server.notify(WorkspaceTerminalProtocol.CHANGED,{workspace:"workspace",instance:"owner",id:"shared"},WorkspaceTerminalProtocol.encodeChange);
+  server.register(WorkspaceTerminalProtocol.OPEN,function(q,ctx) ctx.respond(info()));
+  server.register(WorkspaceTerminalProtocol.REPLAY,function(q,ctx) ctx.respond({terminal:info(),events:[],next:Int64.ofInt(0),end:Int64.ofInt(0)}));
+  server.register(WorkspaceTerminalProtocol.SET_CONTROL,function(q,ctx) ctx.respond(info()));
+  server.register(WorkspaceTerminalProtocol.RESIZE,function(q,ctx) {resizes++;columns=q.columns;rows=q.rows;ctx.respond(info());changed();});
+  server.register(WorkspaceTerminalProtocol.UNWATCH,function(q,ctx) ctx.respond(q));
+  FakeTerminalSnapshots.register(server,info);
+  var tall=new RpcTerminalBackend(function() return endpoint,"shared","/tmp",false);
+  var short=new RpcTerminalBackend(function() return endpoint,"shared","/tmp",false);
+  var sessions=[for(b in [tall,short]) new terminalsession.TerminalSession(b,terminalkit.Emulator.open(80,24),false)];
+  tall.resize(80,24);short.resize(80,22);
+  function step():Void {for(s in sessions) s.pollEvents();server.poll();connection.poll();}
+  for(_ in 0...40) step();
+  var settled=resizes;
+  for(_ in 0...200) step();
+  require(resizes==settled,"two views of one terminal kept resizing it: "+(resizes-settled)+" more resizes after it settled ("+settled+" to settle), now "+columns+"x"+rows);
+  require(settled<=4,"two views of one terminal took "+settled+" resizes to settle");
+  // The view whose pane changes still sets the size.
+  tall.resize(80,30);
+  for(_ in 0...40) step();
+  require(rows==30,"a pane that changed size did not resize the terminal: "+columns+"x"+rows);
+  for(s in sessions) s.close();connection.close();server.close();
+  trace("PASS: two views of one terminal in a window stop resizing it once settled, and a pane that changes size still resizes it");
+ }
  static function labels(root:haxeon.ui.core.RenderNode):String {
   var out:Array<String>=[];
   root.walk(function(node) {if(node.semantics!=null && node.semantics.label!=null && node.semantics.label!="") out.push(node.semantics.label);});
