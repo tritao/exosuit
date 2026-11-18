@@ -3,12 +3,12 @@ package testing.model;
 import view.View;
 import view.LayoutKind;
 
-import build.BuildOutput;
+import build.BuildLog;
 import testing.model.EditorViewportModel;
 import style.Theme;
 
 class ModelBuildOutputView extends View {
-	final output:BuildOutput;
+	final output:BuildLog;
 	final metrics:testing.model.ModelTextMetrics;
 	final theme:Theme;
 	final activateDiagnostic:build.BuildDiagnostic->Void;
@@ -18,7 +18,7 @@ class ModelBuildOutputView extends View {
 	var height:Int;
 	var scrollRow:Int = 0;
 
-	public function new(output:BuildOutput, metrics:testing.model.ModelTextMetrics, theme:Theme, width:Int, height:Int,
+	public function new(output:BuildLog, metrics:testing.model.ModelTextMetrics, theme:Theme, width:Int, height:Int,
 			activateDiagnostic:build.BuildDiagnostic->Void) {
 		super("Build Output");
 		this.output = output;

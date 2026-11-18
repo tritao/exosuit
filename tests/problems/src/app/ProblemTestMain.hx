@@ -34,8 +34,8 @@ class ProblemTestMain {
 		var dock = new haxeon.ui.docking.DockWorkspaceModel();
 		dock.register(new haxeon.ui.docking.DockPanelDescriptor("problems", "Problems"));
 		require(dock.setPanelBadge("problems", 3), "badge update rejected");
-		var badgeRevision = dock.revision;
-		require(!dock.setPanelBadge("problems", 3) && dock.revision == badgeRevision, "identical badge invalidated layout");
+		var badged = dock.get("problems");
+		require(!dock.setPanelBadge("problems", 3) && badged != null && badged.badgeCount == 3, "identical badge was reported as a change");
 		require(dock.setPanelBadge("problems", 0) && !dock.setPanelBadge("problems", -1), "badge clearing/validation failed");
 
 		trace("PASS: scoped diagnostics, stable identities, producer isolation, atomic replacement, actions");

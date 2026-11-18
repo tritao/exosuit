@@ -155,6 +155,8 @@ class TabTooltipTestMain {
 			var theme = ui.ExosuitPalette.theme(dark);
 			if (size != 13) theme.tokens.tooltipFontSize = size;
 			var context = new haxeon.ui.core.UiContext(null, fonts, theme);
+			// The tooltip outline is the app's rule over haxeon's theme, which the context's theme refresh drops: as ExosuitApp.
+			context.setStyleSheet(ui.ExosuitPalette.styleSheet(theme, dark));
 			context.buildContext.environment.pixelDensity = density;
 			var fixture = new haxeon.ui.widgets.overlays.TooltipOverlayHost(new TooltipTypographyFixture(standard));
 			var root = context.submit(fixture, new haxeon.ui.LayoutFrame(320, 240));
@@ -249,7 +251,7 @@ class TabTooltipTestMain {
 		scheduler.advance(0.31);
 		require(visible && reveals == 1 && scheduler.activeCount == 0, "deliberate hover did not reveal exactly once");
 		delay.cancel(); require(!visible, "click/leave did not hide visible tooltip");
-		delay.delaySeconds = 0.2; delay.start(); scheduler.advance(0.21);
+		delay.durationSeconds = 0.2; delay.start(); scheduler.advance(0.21);
 		require(visible, "configured delay was ignored");
 		delay.cancel(); delay.start(); delay.dispose(); scheduler.advance(2); delay.start();
 		require(!visible && scheduler.activeCount == 0 && reveals == 2, "removed tab retained or restarted its timer");
@@ -272,7 +274,9 @@ class TabTooltipTestMain {
 		fonts.add(Sys.getCwd() + "/../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
 		checkTooltipTypography(fonts);
 		var session = haxeon.ui.LayoutSession.create();
-		var context = new haxeon.ui.core.UiContext(session, fonts, ui.ExosuitPalette.theme(false));
+		var light = ui.ExosuitPalette.theme(false);
+		var context = new haxeon.ui.core.UiContext(session, fonts, light);
+		context.setStyleSheet(ui.ExosuitPalette.styleSheet(light, false));
 		var fixture = new NarrowTooltipFixture();
 		var root:haxeon.ui.core.RenderNode = null;
 		for (_ in 0...4) root = context.submit(fixture, new haxeon.ui.LayoutFrame(800, 600));
