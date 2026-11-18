@@ -362,7 +362,7 @@ class ExohostInventory {
 		`launcher`, and a scanned live host of `<ROOT>/graphical/build/` is adopted.
 
 		A compiler worker whose hl.exe is `<ROOT>/haxeon/...` is adopted only while a run session of that checkout runs and
-		only when it started after that session: the session starts its workers through `cmd /c start`, so no parent chain
+		only when it started after that session, or while a live host of that checkout's graphical/build runs: the session starts its workers through `cmd /c start`, so no parent chain
 		can show it, and an editor alone starts none. Such an adoption is never persisted: once the session exits the
 		worker is no longer exosuit's (it is listed as not started by exosuit, so the orphan sweep never takes it). Workers
 		are shared per compiler and project, so a build exosuit did not start may use one too: classify marks it `shared`.
@@ -396,6 +396,22 @@ class ExohostInventory {
 			adoptChain(info, ExohostKind.LiveSession, launcher == null ? null : launcher.pid);
 			sessions.push({root: root, started: info.started});
 		}
+		// A live host of a checkout's graphical/build that registers with this exohost keeps the checkout's resident compiler
+		// workers busy too, whether or not its run session is still there (run.py and its session may have ended or crashed first):
+		// quit ends them with it, or one is left behind running the toolchain of the checkout.
+		var hosted = new Map<String, Bool>();
+		for (process in processes) {
+			if (process.source != Scanned || process.kind != ExohostKind.LiveHost || process.commandLine.length == 0)
+				continue;
+			var info = byPid.get(process.pid);
+			if (info == null || !registers(info) || belowTerminalHost(info))
+				continue;
+			var root = ExohostClassifier.editorCheckout(ExohostClassifier.split(process.commandLine));
+			if (root == null)
+				continue;
+			checkouts.set(rootKey(root), root);
+			hosted.set(rootKey(root), true);
+		}
 		if (!checkouts.keys().hasNext())
 			return;
 		for (process in processes) {
@@ -411,6 +427,12 @@ class ExohostInventory {
 						process.source = Adopted;
 						break;
 					}
+				if (process.source == Scanned)
+					for (root in checkouts)
+						if (hosted.exists(rootKey(root)) && ExohostClassifier.inCheckout(arguments[0], root, "haxeon")) {
+							process.source = Adopted;
+							break;
+						}
 				continue;
 			}
 			for (root in checkouts)

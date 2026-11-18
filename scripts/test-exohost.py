@@ -770,6 +770,29 @@ def test_run_py_chain(fixture: Fixture, directory: Path, keep_terminals: bool) -
                 kill_pid(pid)
 
 
+def test_live_host_worker_ends_with_quit(fixture: Fixture, directory: Path, keep_terminals: bool) -> None:
+    """The run.py launcher and its run session are gone (crashed, or ended first) but the live host of this checkout's
+    graphical/build still runs, with the resident compiler worker on this checkout's hl.exe. Both register with this
+    exohost, so both are exosuit's and the quit, full or polite, ends them: no worker is left running the toolchain."""
+    live_host = fixture.spawn([str(HL), str(EXOHOST), "watch", "--fake=live-host.hl", str(ROOT / "graphical/build/host/live.hl")],
+                              fixture.environment)
+    worker = fixture.spawn(WORKER, fixture.environment)
+    scanning = dict(fixture.environment, EXOSUIT_EXOHOST_SCAN="1")
+    try:
+        listing = scanned_listing(scanning)
+        for process in (live_host, worker):
+            entry = find(listing, process.pid)
+            assert entry is not None and entry["source"] == "adopted", f"{process.pid} is not exosuit's with only a live host running: {entry}"
+        assert worker.pid in planned_kills(scanning, "--all"), "kill --all does not plan the live host's worker"
+        run_exohost(scanning, "quit", *(["--keep-terminals"] if keep_terminals else []))
+        wait_until(lambda: not process_runs(live_host.pid) and not process_runs(worker.pid), 20,
+                   "the quit left the live host's compiler worker running")
+    finally:
+        for process in (live_host, worker):
+            if process_runs(process.pid):
+                kill_pid(process.pid)
+
+
 def test_terminal_build_shares_worker(fixture: Fixture, directory: Path) -> None:
     """A run.py session's compiler worker is exosuit's, but a build the user runs in a terminal on the same hl.exe (a
     stand-in shell running `hl haxeon-cli.hl build`) uses the same per-compiler workers: while it runs the worker is
@@ -1187,6 +1210,8 @@ def main() -> int:
                  ("helper markers", lambda f: test_helper_markers(f, directory / "h")),
                  ("full quit ends the run.py chain", lambda f: test_run_py_chain(f, directory / "rq", False)),
                  ("polite quit ends the run.py chain", lambda f: test_run_py_chain(f, directory / "rp", True)),
+                 ("full quit ends a live host's worker", lambda f: test_live_host_worker_ends_with_quit(f, directory / "lq", False)),
+                 ("polite quit ends a live host's worker", lambda f: test_live_host_worker_ends_with_quit(f, directory / "lp", True)),
                  ("a terminal build shares the worker", lambda f: test_terminal_build_shares_worker(f, directory / "rb")),
                  ("a terminal's program is not adopted", lambda f: test_terminal_program_not_adopted(f, directory / "rt")),
                  ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon),
