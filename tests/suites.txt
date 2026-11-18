@@ -37,6 +37,7 @@ workspace-attachment      all      python   600      -                  scripts/
 agent-idle                all      python   400      -                  scripts/test-agent-idle.py
 workspace-terminals       all      python   600      -                  scripts/test-workspace-terminals.py
 terminal-hosts            windows  python   600      -                  scripts/test-terminal-hosts.py
+toolchain-repair          windows  python   600      -                  scripts/test-toolchain-repair.py
 workspace-agents          all      python   400      -                  scripts/test-workspace-agents.py
 # Fake Claude, Codex and Pi peers only: never a real CLI, never a model.
 claude-agents             all      python   600      -                  scripts/test-claude-agents.py

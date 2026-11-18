@@ -10,6 +10,7 @@ from pathlib import Path
 
 from haxeon_cli import run_cli
 from prepare_agent_naming import prepare
+import toolchain_repair
 
 
 def _windows_npm_codex_environment() -> dict[str, str]:
@@ -54,6 +55,10 @@ def main() -> int:
     if self_hosted:
         agent_arguments.append("--self-hosted")
     try:
+        # A missing or half-deleted haxeon/.tools (no haxe.exe, or no ccache.exe the native caches launch through) is
+        # repaired with the bootstrap scripts/build-windows.ps1 runs, instead of failing deep inside the Haxeon CLI.
+        if os.name == "nt" and "HAXEON_BIN" not in os.environ:
+            toolchain_repair.ensure(Path(os.environ.get("HAXEON_ROOT") or root_dir / "haxeon").expanduser().resolve())
         prepare(root_dir)
         status = run_cli(root_dir, agent_arguments)
         if status != 0:
