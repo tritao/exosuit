@@ -110,7 +110,7 @@ class WorkbenchDragTestMain {
   model.update({machine:{id:"m",name:"m",workspaces:[{id:"",name:"work",folders:[],scratch:null,revision:1}]},error:null,openWorkspace:"",revision:1,manages:true},[""=>{terminals:catalog,agents:agents,snapshot:null,revision:++revision}]);submit();from=row("t:|term");
   context.pointerDown(100,from.y+15,0);context.pointerMove(100,295);submit();
   context.animations.advance(0.25);submit();
-  require(tree.controller.targetY>0,"edge drag did not scroll tree");
+  require(@:privateAccess tree.controller.targetY>0,"edge drag did not scroll tree");
   context.pointerCancel(0,100,295);submit();
   context.dispose();fonts.dispose();
   trace("PASS: workbench drop rules, durable agent grouping, real tree pointer gestures, click preservation, cancellation, release validation, hover expansion and edge scrolling");
