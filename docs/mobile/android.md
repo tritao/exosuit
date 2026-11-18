@@ -88,7 +88,7 @@ pwsh -NoProfile -File android/scripts/connect-real.ps1             # the real th
 Prerequisites: `setup.ps1` done, the APK built (`build.ps1`), the editor running (it started exohost). The owner then has one
 decision to make. In order, the script:
 
-1. Finds exohost's control pipe the way the editor does (`\.\pipe\exosuit-exohost-<user>`; `EXOSUIT_EXOHOST_HOME` or
+1. Finds exohost's control pipe the way the editor does (`\\.\pipe\exosuit-exohost-<user>`; `EXOSUIT_EXOHOST_HOME` or
    `-ExohostHome` moves it) and sends **`remote-status`** (read only). No exohost: it stops with a message.
 2. Starts the AVD `exosuit-s8` on port 5584 **with a window** (reuses `emulator-5584` when it is up), installs the debug APK,
    turns the emulator's animations off. The emulator keeps running after the script ends; stop it with
