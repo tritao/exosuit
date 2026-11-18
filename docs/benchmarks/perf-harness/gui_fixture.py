@@ -54,6 +54,8 @@ def main():
                     .replace("{root}", str(root)).replace("{python}", sys.executable))
     for key in ("state", "agent-state", "scratch", "result"):
         (out / key).mkdir(parents=True, exist_ok=True)
+    for name, text in fixture.get("stateFiles", {}).items():  # files the editor finds in its state folder, e.g. window.conf
+        (out / "state" / name).write_text(text)
     if fixture.get("settings"):  # preference values the editor starts with, e.g. {"workbench/agents/session_mode": "integrated"}
         (out / "state" / "settings.json").write_text(json.dumps({"values": fixture["settings"]}))
     folders = {}
