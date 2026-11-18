@@ -105,7 +105,7 @@ Write-Host "relay connected: $($status.origin)"
 # client without an Origin header, which is every phone: pairing then fails with "Could not connect using this pairing link".
 $relayUri = [Uri]$status.origin
 if (-not $relayUri.IsLoopback) {
-    $probe = (& (Join-Path $env:SystemRoot 'System32/curl.exe') -s -m 20 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$($status.origin)/v1/machines/probe/pair/probe") -join ''
+    $probe = (& (Join-Path $env:SystemRoot 'System32/curl.exe') -s -m 20 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$($status.origin)/v1/machines/00000000000000000000000000000000/pair/00000000000000000000000000000000?secret=00000000000000000000000000000000") -join ''
     if ($probe -match 'origin_not_allowed') {
         throw "The relay $($status.origin) rejects native clients (origin_not_allowed): its deployment is older than the Android app. Deploy your own relay (docs/mobile/own-relay.md, relay/worker/scripts/deploy-own.ps1), turn remote access off and on again with that relay, or pass -Relay <your relay> when remote access is off."
     }
