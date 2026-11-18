@@ -70,6 +70,21 @@ def read_json(path: Path):
         return None
 
 
+class PublicRelay:
+    """A relay that is not started here (a deployed one, reached over https): only its origin is known."""
+
+    def __init__(self, origin: str) -> None:
+        self.origin = origin.rstrip("/")
+        self.port = 0
+        self.process = type("Running", (), {"poll": staticmethod(lambda: None)})()
+
+    def tail(self) -> str:
+        return ""
+
+    def stop(self) -> None:
+        pass
+
+
 class Log:
     def __init__(self, path: Path) -> None:
         self.file = path.open("a", encoding="utf-8")
@@ -91,7 +106,7 @@ def start(arguments) -> int:
     for old in commands.glob("*.json"):
         old.unlink()
     log = Log(out / "host.log")
-    assert harness.WRANGLER.is_file(), f"run `npm ci` in relay/worker first ({harness.WRANGLER} is missing)"
+    assert arguments.public_relay or harness.WRANGLER.is_file(), f"run `npm ci` in relay/worker first ({harness.WRANGLER} is missing)"
     assert ADMIN.is_file(), "build tests/mobile-pairing first (scripts/haxeon_cli.py build --project tests/mobile-pairing/haxeon.json)"
     for built in (harness.EXOHOST, harness.AGENT):
         assert built.is_file(), f"build first: {built}"
@@ -107,7 +122,10 @@ def start(arguments) -> int:
         "EXOSUIT_CODEX_PROXY_LAUNCHER": str(ROOT / "scripts" / "run-codex-proxy.py"), "FAKE_CODEX_REPLY": "1",
         "EXOSUIT_SERVICE_IDLE_SECONDS": "3000"})
 
-    relay = harness.Relay(out)
+    if arguments.public_relay:
+        relay = PublicRelay(arguments.public_relay)
+    else:
+        relay = harness.Relay(out)
     exohost = harness.Exohost(out, {
         "EXOSUIT_EXOHOST_IDLE_SECONDS": "3000", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1",
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(out / "credentials"), "EXOSUIT_AGENT_STATE_HOME": str(out / "agent-state"),
@@ -362,6 +380,7 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     start_parser = commands.add_parser("start")
     start_parser.add_argument("--out", default=str(DEFAULT_OUT))
+    start_parser.add_argument("--public-relay", default=None, help="use this deployed relay (https origin) instead of starting a local one")
     start_parser.add_argument("--real-claude", default=None, help="path of the real Claude Code CLI to run in Beta's terminal, on a throwaway config")
     hold_parser = commands.add_parser("hold-control", help="attach to a terminal as a second viewer that takes control (a stand-in for the desktop)")
     hold_parser.add_argument("--out", default=str(DEFAULT_OUT))

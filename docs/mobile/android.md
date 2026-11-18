@@ -115,7 +115,7 @@ the owner's editor is not touched. To undo: Remote Access panel, "Disconnect fro
 revoke the device (`exohost remote revoke <id>`).
 
 The tested path used an isolated exohost and a local relay (`-ExohostHome <host>\exohost-home -AutoApprove`, the exohost that
-`mobile-machine-host.py` starts; the script approved as the owner would). Not yet exercised: the public https relay from the
+`mobile-machine-host.py` starts; the script approved as the owner would). Tested 2026-11-18 against the public default relay `https://exosuit-relay.joao-9f7.workers.dev`: pairing FAILS. That deployment is older than the Android app: it answers `403 origin_not_allowed` to every client without an `Origin` header (a phone sends none; relay/worker/src/index.ts allows that since 586fb253). The emulator's TLS and DNS are fine (the CA file is written, the host resolves and answers). Fix: deploy your own relay (`docs/mobile/own-relay.md`) and use it (`-Relay`, remote access off first). `connect-real.ps1` now detects this before pairing and says so. The mechanism with a current relay is proven on loopback http only.
 emulator (TLS trust, `TlsTrust.kt`; the local runs use loopback http). If pairing fails there, the logcat lines
 `exosuit-pairing` and `exosuit-tls` and the `Relay connection:` line in the editor's Remote panel say why.
 

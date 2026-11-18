@@ -101,8 +101,16 @@ do {
 if (-not $status.connected) { throw "exohost could not reach the relay $($status.origin): $($status.error)" }
 Write-Host "relay connected: $($status.origin)"
 
-# A loopback relay (the isolated test host) is reached from the emulator through adb reverse; a public one directly.
+# A relay deployed before native clients were supported (the original joao-9f7 account's) answers 403 origin_not_allowed to every
+# client without an Origin header, which is every phone: pairing then fails with "Could not connect using this pairing link".
 $relayUri = [Uri]$status.origin
+if (-not $relayUri.IsLoopback) {
+    $probe = (& (Join-Path $env:SystemRoot 'System32/curl.exe') -s -m 20 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$($status.origin)/v1/machines/probe/pair/probe") -join ''
+    if ($probe -match 'origin_not_allowed') {
+        throw "The relay $($status.origin) rejects native clients (origin_not_allowed): its deployment is older than the Android app. Deploy your own relay (docs/mobile/own-relay.md, relay/worker/scripts/deploy-own.ps1), turn remote access off and on again with that relay, or pass -Relay <your relay> when remote access is off."
+    }
+}
+# A loopback relay (the isolated test host) is reached from the emulator through adb reverse; a public one directly.
 if ($relayUri.IsLoopback) {
     & $script:Adb -s $script:Serial reverse "tcp:$($relayUri.Port)" "tcp:$($relayUri.Port)" | Out-Null
     Write-Host "adb reverse tcp:$($relayUri.Port) for the loopback relay"
