@@ -223,6 +223,12 @@ while ((Get-Date) -lt $deadline) {
         $announced = $true
         Write-Host "EXOHOST CODE: $($pending[0].authenticationCode)  (must equal the phone's)"
         Write-Host 'Now: tap "The code matches" on the phone, then in the editor open Remote Access, compare the code and press Approve.'
+        if ($Headless -and -not $AutoApprove) {
+            # A headless phone has no screen to tap: confirm the code on it here; the owner still approves in the editor.
+            Enable-PhoneAutomation
+            try { Tap-PhoneElement 'The code matches' -role 1 -after 0 } finally { Disable-PhoneAutomation }
+            Write-Host 'Phone confirmed the code. Approve it in the editor now.'
+        }
         if ($AutoApprove) {
             # What the owner does by hand, for a test host: approve in the "editor", then confirm the code on the phone.
             $approved = Invoke-Control @('approve', '--device', $deviceId)
