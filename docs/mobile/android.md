@@ -51,6 +51,8 @@ SDK's cmake and ninja first on `PATH`; set the variables yourself to use another
 haxeon must be built first (`scripts/build-windows.ps1`). Versions: minSdk 34, targetSdk 36, native platform android-34 (haxeon
 needs 28 or newer). The macOS and Linux scripts are written but have not been run; building the APK is Windows only today.
 
+Measured on 2026-11-18 from an empty toolchain (nothing but the repo and a built haxeon): `setup.ps1` took about 5 minutes and left 8.9 GB; `build.ps1` then produced `android/app/build/outputs/apk/debug/app-debug.apk` (143.9 MB) in one run, about 6 minutes; `machine-acceptance.ps1 -Avd exosuit-s8 -Port 5584` passed headless in 2.5 minutes with 16 screenshots (the rig needs `npm ci` in `relay/worker` once).
+
 ## Build
 
 ```
