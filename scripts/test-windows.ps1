@@ -124,7 +124,9 @@ $unknown = @($Only | Where-Object { $_ -notin $Suites.Name })
 if ($unknown) { Write-Host "Unknown suite(s): $($unknown -join ', '). See -List."; exit 2 }
 $chosen = @($Suites | Where-Object { $Only.Count -eq 0 -or $_.Name -in $Only })
 if (-not (Test-Path (Join-Path $Root 'agent\build\host\main.hl'))) { Write-Host 'The agent is not built: run scripts\build-windows.ps1 first.'; exit 2 }
-if (-not (Test-Path (Join-Path $Haxeon '.tools\hashlink\hl.exe'))) { Write-Host "No HashLink under $Haxeon\.tools: run scripts\build-windows.ps1 first."; exit 2 }
+# The VM's directory comes from Haxeon's table through scripts/haxeon_paths.py, the rule every script uses.
+$Vm = & python (Join-Path $Root 'scripts\haxeon_paths.py') $Haxeon
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $Vm 'hl.exe'))) { Write-Host "No HashLink VM in ${Vm}: run scripts\build-windows.ps1 first."; exit 2 }
 
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 # Short: a fixture's path ends up in command lines and, for some tests, in file names.
@@ -134,7 +136,7 @@ New-Item -ItemType Directory -Force $Run | Out-Null
 # What every suite sees. Every hl.exe needs Haxeon's runtime and HashLink on PATH.
 $env:HAXEON_ROOT = $Haxeon
 $env:HAXEON_HOME = $Haxeon
-$env:PATH = "$Haxeon\out;$Haxeon\.tools\hashlink;$env:PATH"
+$env:PATH = "$Haxeon\out;$Vm;$env:PATH"
 $env:EXOSUIT_EXOHOST_AUTOSTART = '0'
 if (-not $env:HAXEON_UI_VERIFY_RETENTION) { $env:HAXEON_UI_VERIFY_RETENTION = '1' }
 foreach ($name in 'EXOSUIT_PROJECT_ROOT', 'EXOSUIT_AGENT_LAUNCHER', 'EXOSUIT_SERVICE_IDLE_SECONDS', 'XDG_STATE_HOME') { Remove-Item "env:$name" -ErrorAction SilentlyContinue }

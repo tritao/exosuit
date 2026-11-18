@@ -28,10 +28,8 @@ for spec in "$haxeon_root:src stdlib native embed packages CMakeLists.txt script
 		exit 1
 	fi
 done
-# CMake builds both the VM and runtime from vendor/hashlink, regardless of
-# historical checkout metadata left in the .tools output directory.
+# CMake builds the VM, with the runtime in it, from vendor/hashlink. The language server is built by stage-runtime.sh.
 (cd "$haxeon_root" && ./scripts/build-native.sh) >&2
-"$haxeon_root/.tools/haxe/haxe" --cwd "$haxeon_root" "$haxeon_root/haxeon-lsp.hxml" >&2
 python3 "$root_dir/scripts/build.py" >&2
 "$haxeon_root/scripts/haxeon" build --project "$root_dir/agent/haxeon.json" >&2
 

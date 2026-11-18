@@ -12,7 +12,7 @@ out="$here/runs/$name"
 rm -rf "$out"; mkdir -p "$out"
 win=$(cygpath -w "$out")
 cd "$root"
-export PATH="$root/haxeon/out:$root/haxeon/.tools/hashlink:$PATH"
+export PATH="$root/haxeon/out:$(cygpath -u "$(python "$root/scripts/haxeon_paths.py" "$root/haxeon")"):$PATH"
 export NK_LATENCY_TRACE="$win\app.txt" HL_GC_TIMELINE="$win\gc.txt"
 python "$here/hook.py" "$out/hook.txt" 145 &
 hookpid=$!

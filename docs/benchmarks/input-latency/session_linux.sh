@@ -16,6 +16,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 haxeon=${HAXEON_ROOT:-"$root/haxeon"}
+vm=$(python3 "$root/scripts/haxeon_paths.py" "$haxeon")
 name=$1; shift
 seconds=60
 live=0
@@ -51,19 +52,19 @@ set -u
 native=$root/graphical/build/host/native
 export PRAGTICAL_PORTABLE=$out/state XDG_CONFIG_HOME=$out/state/config XDG_DATA_HOME=$out/state/data
 export XDG_STATE_HOME=$out/state/state XDG_CACHE_HOME=$out/state/cache
-export LD_LIBRARY_PATH=$haxeon/out:$haxeon/.tools/hashlink:\$native/pluginhost:\$native/exosuit-ui-native:\$native/textmateregex:\$native/terminalkit
+export LD_LIBRARY_PATH=$haxeon/out:$vm:\$native/pluginhost:\$native/exosuit-ui-native:\$native/textmateregex:\$native/terminalkit
 port=\$((20000 + RANDOM % 20000))
 if [[ $live == 1 ]]; then
 	cd $root
-	PATH=$haxeon/out:$haxeon/.tools/hashlink:\$PATH setsid python3 scripts/run.py --live --profile=sampling --profile-output=$out/capture \\
+	PATH=$haxeon/out:$vm:\$PATH setsid python3 scripts/run.py --live --profile=sampling --profile-output=$out/capture \\
 		--title="$title" $out/workspace $out/workspace/Document.hx > $out/app.log 2>&1 &
 else
-	$haxeon/.tools/hashlink/hl --diagnostics \$port --diagnostics-wait $root/graphical/build/host/main.hl --title="$title" \\
+	$vm/hl --diagnostics \$port --diagnostics-wait $root/graphical/build/host/main.hl --title="$title" \\
 		$out/workspace $out/workspace/Document.hx > $out/app.log 2>&1 &
 fi
 app=\$!
 if [[ $live == 0 ]]; then
-	$haxeon/.tools/hashlink/hlprof-live --sources sampling --rate 1000 --connect-timeout 60 --output $out/capture.hlpc \$port > $out/recorder.log 2>&1 &
+	$vm/hlprof-live --sources sampling --rate 1000 --connect-timeout 60 --output $out/capture.hlpc \$port > $out/recorder.log 2>&1 &
 	recorder=\$!
 fi
 if [[ $human == 1 ]]; then
@@ -95,5 +96,5 @@ fi
 capture="$out/capture.hlpc"
 [[ $live == 1 ]] && capture=$(ls "$out"/capture/*/profile.hlpc 2>/dev/null | head -n1 || true)
 [[ -n "$capture" && -f "$capture" ]] || { echo "no capture was recorded; see $out/app.log and $out/recorder.log" >&2; exit 1; }
-"$haxeon/.tools/hashlink/hlprof-live" export --format perfetto --output "$out/trace.json" "$capture" > "$out/export.log" 2>&1
+"$vm/hlprof-live" export --format perfetto --output "$out/trace.json" "$capture" > "$out/export.log" 2>&1
 python3 "$here/analyze_capture.py" "$out/trace.json" | tee "$out/summary.txt"
