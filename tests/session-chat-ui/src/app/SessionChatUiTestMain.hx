@@ -126,6 +126,7 @@ class SessionChatUiTestMain {
 		var fonts = FontCollection.create();
 		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
 		SessionQuestionFormTest.run(fonts);
+		startFailureTab(fonts);
 		for (dark in [true, false]) for (width in [320.0, 420.0, 1000.0]) {
 			var height = 900.0, client = new FakeAgent(), menu:Array<haxeon.ui.widgets.overlays.MenuItem> = null;
 			var opened:String = null, files = 0, changes = 0;
@@ -809,6 +810,30 @@ class SessionChatUiTestMain {
 		folder inside the same repository, the session still sees worktree support, and changing the selection keeps the
 		same source, so a prompt opened for the session stays valid.
 	**/
+	/**
+		A chat session that fails to start keeps a tab with the error and Retry (as a terminal session does), through the
+		application: the tab is in the editor, shows the reason, and Retry closes it and starts the session again.
+	**/
+	static function startFailureTab(fonts:FontCollection):Void {
+		var app = new ui.ExosuitApp(fonts, ui.ExosuitPalette.theme(false), null, null, null, null, false, null);
+		app.agentTabs.showStartFailure("claude", "work", null, "Fixture launch failure");
+		var found:Array<ui.UiAgentTab> = [];
+		for (pane in app.host.panes) for (item in pane.items) { var tab = ui.UiEditorTabs.agent(item); if (tab != null) found.push(tab); }
+		require(found.length == 1, "a session that failed to start left " + found.length + " tabs");
+		var held = found[0].panel.startFailure;
+		require(held != null && held.message == "Fixture launch failure", "the tab does not hold the error");
+		var root = app.submit(new LayoutFrame(900, 600));
+		find(root, "Fixture launch failure"); find(root, "Retry");
+		var context = new UiContext(null, fonts, ui.ExosuitPalette.theme(false));
+		var panel = found[0].panel, retried = 0;
+		panel.startFailure = {message: "Fixture launch failure", retry: function() retried++};
+		var own = context.submit(panel, new LayoutFrame(600, 400));
+		activate(context, find(own, "Retry"));
+		require(retried == 1, "Retry did not reach its callback");
+		context.dispose();
+		app.dispose();
+	}
+
 	static function sessionScmSources():Void {
 		var base = Sys.getEnv("TEMP");
 		if (base == null || base.length == 0) base = Sys.getEnv("TMPDIR");

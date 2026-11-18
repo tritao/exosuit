@@ -21,7 +21,7 @@ interface WorkspaceAgentClient {
 	/** The sessions shown in tabs: only their views are read, and kept current. */
 	public function showAgents(ids:Array<String>):Void;
 	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void,
-		?defaults:AgentSessionDefaults):Void;
+		?defaults:AgentSessionDefaults, ?failed:String->Void):Void;
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void;
 	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>, ?order:Int):Void;
 	public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void;

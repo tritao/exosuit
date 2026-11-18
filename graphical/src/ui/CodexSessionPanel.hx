@@ -329,9 +329,36 @@ class CodexSessionPanel implements View {
     return {state: view.record.state, lines: [for (item in items) item.kind + ": " + item.text], error: view.error, prompt: prompt};
   }
 
+  /** Resource ids of the tab a session that did not start keeps (see AgentTabs.showStartFailure); the service knows no such session. */
+  public static inline final START_FAILED_PREFIX = "start-failed-";
+
+  /** Set on the tab of a session that did not start: the tab shows why and offers Retry, and nothing is read from the service. */
+  public var startFailure(default, set):Null<{message:String, retry:Void->Void}> = null;
+  function set_startFailure(value:Null<{message:String, retry:Void->Void}>):Null<{message:String, retry:Void->Void}> {
+    startFailure = value;
+    invalidate();
+    return value;
+  }
+
   public function build(context:BuildContext):RenderNode return session.build(context);
 
+  function buildStartFailure(context:BuildContext, failure:{message:String, retry:Void->Void}):RenderNode {
+    var style = new LayoutStyle();
+    style.width = LayoutAxis.grow();
+    style.height = LayoutAxis.grow();
+    style.childGap = 10;
+    return new Column("codex-start-failed", [
+      new KeyedView("title", new Text("This session did not start")),
+      new KeyedView("message", paragraph(failure.message)),
+      new KeyedView("retry", new Button("Retry", null, failure.retry, "agent-start-retry", true))
+    ], style).build(context);
+  }
+
   function buildSession(context:BuildContext):RenderNode {
+    var failure = startFailure;
+    if (failure != null) return buildStartFailure(context, failure);
+    if (StringTools.startsWith(resource, START_FAILED_PREFIX))
+      return paragraph("This session did not start. Start a new one from the Workbench.").build(context);
     var client = getClient();
     var catalog = client == null ? null : client.agents();
     if (client == null || catalog == null

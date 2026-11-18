@@ -565,7 +565,9 @@ class AgentTabs {
  function createIntegratedAgent(provider:String, group:String, ?directory:String):Void {
   var client=app.workbenchClient;
   if(client == null || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) {
-   app.application.reportError("agent", "The worktree group is ready; connect to start an integrated session"); return;
+   app.application.reportError("agent", "The worktree group is ready; connect to start an integrated session");
+   showStartFailure(provider,group,directory,"The workspace is not connected, or another session is being created.");
+   return;
   }
   var defaults:workspace.client.AgentSessionDefaults={provider:provider,model:null,effort:null,
    permissionProfile:provider == "claude" ? "default" : "supervised",directory:directory};
@@ -575,8 +577,29 @@ class AgentTabs {
    defaults.effort=settings.codexDefaultEffort == "model-default" ? null : settings.codexDefaultEffort;
    defaults.permissionProfile=settings.codexDefaultPermissions;
   }
-  client.agentService().createAgent(group,null,openCreatedAgent,defaults);
+  client.agentService().createAgent(group,null,openCreatedAgent,defaults,function(message) showStartFailure(provider,group,directory,message));
  }
+ var startFailures = 0;
+ /**
+  A session that did not start keeps a tab: the error, and Retry, which starts it again in place. Terminal sessions
+  keep theirs the same way; a message in the status bar alone left nothing to come back to.
+ **/
+ public function showStartFailure(provider:String, group:String, directory:Null<String>, message:String):Void {
+  var resource=CodexSessionPanel.START_FAILED_PREFIX+(++startFailures),root=currentRoot();
+  var tab=makeAgentTab(ResourceViewIdentity.view(root,resource,"agent"),resource,root,"New "+providerLabel(provider)+" session");
+  tab.panel.startFailure={message:message,retry:function() {
+   app.host.closeAgentTabs(resource,root);
+   createProviderAgentIn(provider,group,directory,true);
+  }};
+  app.host.attachAgent(tab);
+  if(app.phoneLayoutActive && app.sidebar.visible) app.sidebar.setVisible(false);
+  app.requestFrame();
+ }
+ function currentRoot():String {
+  var client=app.workbenchClient,catalog=client == null ? null : client.terminalCatalog();
+  return catalog == null ? "" : catalog.workspaceRoot;
+ }
+ static function providerLabel(provider:String):String return provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Codex";
  function createAgentTerminal(provider:String, group:String, ?directory:String):Void {
   var client = app.workbenchClient, catalog = client == null ? null : client.terminalCatalog();
   if (catalog == null || catalog.agentProviders == null || catalog.agentProviders.indexOf(provider) < 0) {

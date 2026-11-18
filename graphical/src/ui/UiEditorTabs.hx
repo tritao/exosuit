@@ -19,7 +19,7 @@ class UiEditorTabs {
 		var ids = [];
 		for (pane in panes) for (item in pane.items) {
 			var tab = agent(item);
-			if (tab != null && tab.workspaceRoot == root) ids.push(tab.resource);
+			if (tab != null && tab.workspaceRoot == root && !StringTools.startsWith(tab.resource, CodexSessionPanel.START_FAILED_PREFIX)) ids.push(tab.resource);
 		}
 		return ids;
 	}

@@ -248,8 +248,8 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 	public function refreshAgents():Void workbench.refreshAgents();
 	public function showAgents(ids:Array<String>):Void workbench.showAgents(ids);
 	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void,
-			?defaults:AgentSessionDefaults):Void
-		workbench.createAgent(group, thread, created, defaults);
+			?defaults:AgentSessionDefaults, ?failed:String->Void):Void
+		workbench.createAgent(group, thread, created, defaults, failed);
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
 	public function agentDeliveryUncertain(id:String):Bool return workbench.agentDeliveryUncertain(id);
 	public function agentDeliveryReviewReady(id:String):Bool return workbench.agentDeliveryReviewReady(id);

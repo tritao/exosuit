@@ -99,19 +99,22 @@ class AgentProviderTestMain {
 		function pump():Void {server.poll();connection.poll();client.poll();}
 		function refresh():Void {now+=2000;client.refreshAgents();pump();}
 		// Creation before the first catalog must wait for provider negotiation.
-		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"});
+		var failures:Array<String> = [];
+		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"},function(message) failures.push(message));
 		require(client.agentCreation() != null && creates==0,"Claude create was sent before provider negotiation");
 		pump();now+=200;client.poll();pump();
 		var unsupported = client.agentError();
 		require(client.agentCreation() == null && creates==0 && unsupported != null && unsupported.indexOf("does not support")>=0,
 			"Legacy daemon did not produce an actionable error without a create side effect");
+		require(failures.length == 1 && failures[0] == unsupported, "the UI was not told why the unsupported session did not start: " + failures);
 		refresh();
 		require(client.agentError()==unsupported,"Catalog refresh erased the unsupported-provider error");
 		providers=["codex","claude"];
 		refresh();
-		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"});
+		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"},function(message) failures.push(message));
 		pump();
 		require(creates==1 && client.agentError()=="Fixture launch failure" && !opened,"Create failure was lost or opened a tab");
+		require(failures.length == 2 && failures[1] == "Fixture launch failure", "the UI was not told that the session failed to start: " + failures);
 		refresh();
 		require(client.agentError()=="Fixture launch failure","Catalog refresh erased the creation error");
 		succeed=true;

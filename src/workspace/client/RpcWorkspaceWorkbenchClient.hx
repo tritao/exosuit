@@ -129,7 +129,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentsPending = false;
       agentsRequestToken++;
       agentMutation = false;
-      creation = null;
+      dropCreation();
       pendingDiscovery = null;
       discovery = null;
       discoveryToken++;
@@ -185,7 +185,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     pendingDiscovery = null;
     discovery = null;
     discoveryToken++;
-    creation = null;
+    dropCreation();
     agentViews.clear();
     agentHistoryWindows.clear();
     agentTokens.clear();
@@ -417,12 +417,14 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     );
   }
 
-  public function createAgent(group:String,thread:Null<String>,?created:AgentRecord->Void,?defaults:AgentSessionDefaults):Void {
+  public function createAgent(group:String,thread:Null<String>,?created:AgentRecord->Void,?defaults:AgentSessionDefaults,?failed:String->Void):Void {
     var connection=rpc(),workspaceRoot=root();
     if(connection == null || workspaceRoot == null || !canControlAgents() || creation != null) {
       creationError=creation != null ? "A session is already being created. Wait for it to finish."
         : "Connect to a workspace with agent control permission before creating a session.";
-      agentsRevision++;return;
+      agentsRevision++;
+      if(failed != null) failed(creationError);
+      return;
     }
     agentsError=null;creationError=null;
     var query:AgentCreate={workspace:"workspace",instance:instance(),id:WorkspaceIds.create("agent"),group:group,
@@ -432,13 +434,23 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       defaultEffort:thread == null && defaults != null ? defaults.effort : null,
       permissionProfile:thread == null && defaults != null ? defaults.permissionProfile : null,
       directory:defaults == null ? null : defaults.directory};
-    creation=new WorkspaceAgentCreation(query,connection,workspaceRoot,clock()+60000,created);
+    creation=new WorkspaceAgentCreation(query,connection,workspaceRoot,clock()+60000,created,failed);
     agentsRevision++;continueAgentCreate();
   }
 
   function failCreation(operation:WorkspaceAgentCreation,message:String):Void {
     if(creation != operation) return;
     creation=null;creationError=message;agentsRevision++;
+    var report=operation.failed;
+    if(report != null) report(message);
+  }
+
+  /** The connection that carried a session start is gone: the start is over, and the UI hears why. */
+  function dropCreation():Void {
+    var operation=creation;
+    creation=null;
+    var report=operation == null ? null : operation.failed;
+    if(report != null) report("The connection to the workspace ended before the session started.");
   }
 
   function continueAgentCreate():Void {
