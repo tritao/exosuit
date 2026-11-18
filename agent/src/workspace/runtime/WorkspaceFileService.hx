@@ -926,7 +926,7 @@ class WorkspaceFileService {
 	static inline final MAX_SNAPSHOT_NAME_BYTES = 1048576;
 	static inline final MAX_SNAPSHOTS_PER_CLIENT = 4;
 	static inline final MAX_READ_HANDLES_PER_CLIENT = 8;
-	static inline final READ_CHUNK_BYTES = 262144;
+	public static inline final READ_CHUNK_BYTES = 262144;
 	static inline final CURSOR_IDLE_MS = 30000.0;
 
 	final workspace:String;
