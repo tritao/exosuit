@@ -4,7 +4,7 @@ import haxeon.ui.Color;
 import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
-import build.BuildOutputLine;
+import build.BuildLogLine;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.TextStyleOverride;
@@ -20,7 +20,7 @@ import haxeon.ui.widgets.text.Text;
  * The dock's "Build Output" panel, rebuilt fresh from
  * `UiWorkbenchHost.currentBuildOutput` every frame while `BuildController`
  * drains its running process (see `BuildController.update`), so output
- * streams in live. A line `BuildOutput.append` recognized as a diagnostic
+ * streams in live. A line `BuildLog.append` recognized as a diagnostic
  * (`path:line[:column]: ...`) is clickable and opens/navigates to it through
  * `UiWorkbenchHost.activateBuildDiagnostic`; other lines are plain text.
  */
@@ -58,15 +58,14 @@ class BuildOutputPanel implements View {
 		return new ScrollView("build-output-scroll", list, style).build(context);
 	}
 
-	function buildRow(line:BuildOutputLine, index:Int, foreground:Color):View {
+	function buildRow(line:BuildLogLine, index:Int, foreground:Color):View {
 		var diagnostic = line.diagnostic;
 		if (diagnostic == null) {
 			var style = new LayoutStyle();
 			style.width = LayoutAxis.grow();
 			return new Text(line.text, style, foreground, TextStyleOverride.text(12.0));
 		}
-		var button = new Button(line.text, null, function() host.activateBuildDiagnostic(diagnostic), "build-line" + index);
-		button.variant = ButtonVariant.Secondary;
-		return button;
+		return new Button(line.text, null, function() host.activateBuildDiagnostic(diagnostic), "build-line" + index, null,
+			ButtonVariant.Secondary);
 	}
 }

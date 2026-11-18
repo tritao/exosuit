@@ -19,19 +19,23 @@ import ui.WorkbenchRows.WorkbenchRowSource;
 	row by one rule (WorkbenchRows), keyed by workspace and item: the open workspace's always, another's while its row is
 	expanded, from its link's lists or a copy of its catalog. An expanded workspace with nothing to show says so in a
 	child row.
+
+	Observable: `update` and `setInsertion` write `version`, and every tree method reads it, so the TreeView's index
+	and its rows follow each projection. The containers are filled in place and stand behind `version`; the row index
+	below is a layout cache that row builds write, so it is not tracked.
 **/
-class WorkbenchTreeModel implements TreeViewModel {
+class WorkbenchTreeModel implements TreeViewModel implements Observable {
 	/** The machine's workspaces by id. */
-	public final workspaces:Map<String, MachineWorkspace> = [];
+	@:unobservable public final workspaces:Map<String, MachineWorkspace> = [];
 	/** The workspace this window shows, or null when it shows none. */
 	public var openWorkspace(default, null):Null<String>;
 	/** The open workspace's row; null without one. */
 	public var openRow(default, null):Null<String>;
 	public var machine(default, null):Null<WorkbenchMachineView>;
 	/** The rows shown now, per workspace id: the open workspace's, and each expanded one's that has a source. */
-	final shown:Map<String, WorkbenchRows> = [];
+	@:unobservable final shown:Map<String, WorkbenchRows> = [];
 	/** Each workspace's rows as last built, reused while their source has not changed. */
-	final built:Map<String, WorkbenchRows> = [];
+	@:unobservable final built:Map<String, WorkbenchRows> = [];
 	/** Rows built so far: tests and measurements count them. */
 	public var projectionBuilds(default, null):Int = 0;
 	/**
@@ -46,20 +50,20 @@ class WorkbenchTreeModel implements TreeViewModel {
 		there, or the workspace was just made); every other row starts collapsed and stays as it was shown when a click
 		opens it, since only the chevron expands (Workbench design Q1).
 	**/
-	final startsExpanded:Map<String, Bool> = [];
+	@:unobservable final startsExpanded:Map<String, Bool> = [];
 
 	/** The rows under each workspace row (its top-level rows, or a note). */
-	final children:Map<String, Array<String>> = [];
-	final roots:Array<String> = [];
+	@:unobservable final children:Map<String, Array<String>> = [];
+	@:unobservable final roots:Array<String> = [];
 	/** The latest node each row built, to find the row under the pointer while a drag is over the tree. */
-	final nodes:Map<String, ProbedRow> = [];
-	var probes:Int = 0;
+	@:unobservable final nodes:Map<String, ProbedRow> = [];
+	@:unobservable var probes:Int = 0;
 	/** Bumped when rows are built or laid out again; the row index below is valid for one value of it. */
-	var layout:Int = 0;
-	var indexed:Int = -1;
+	@:unobservable var layout:Int = 0;
+	@:unobservable var indexed:Int = -1;
 	/** The tree the rows are laid out in, as last reported; a row that was in it and no longer is has been replaced. */
-	var tree:Null<RenderNode>;
-	var index:Array<RowSpot> = [];
+	@:unobservable var tree:Null<RenderNode>;
+	@:unobservable var index:Array<RowSpot> = [];
 	var version:Int = 0;
 	/** The row an insertion line is drawn at, and whether on its lower edge; null when no drop would land between rows. */
 	public var insertion(default, null):Null<String>;
@@ -258,19 +262,31 @@ class WorkbenchTreeModel implements TreeViewModel {
 		return probe == null ? null : probe.centre();
 	}
 
-	public function rootCount():Int
-		return roots.length;
+	/** Reads `version`, so a build that asks the tree's shape is invalidated by the next projection. */
+	function observe():Void {
+		var current = version;
+	}
 
-	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
+	public function rootCount():Int {
+		observe();
+		return roots.length;
+	}
+
+	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata> {
+		observe();
 		return [
 			for (index in start...Std.int(Math.min(roots.length, start + count)))
 				new TreeRootMetadata(roots[index], initiallyExpanded(roots[index]))
 		];
+	}
 
-	public function rootKeyAt(index:Int):String
+	public function rootKeyAt(index:Int):String {
+		observe();
 		return roots[index];
+	}
 
 	function itemsUnder(key:String):Null<Array<String>> {
+		observe();
 		var items = children.get(key);
 		if (items != null) return items;
 		var rows = rowsOf(key);
@@ -291,6 +307,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 
 	/** A workspace row first shown as the open one starts expanded, and so does every workspace's top-level group. */
 	public function initiallyExpanded(key:String):Bool {
+		observe();
 		if (startsExpanded.get(key) == true) return true;
 		var row = WorkbenchRowKey.parse(key), rows = rowsOf(key);
 		return row != null && row.kind == WorkbenchRowKind.Group && rows != null && rows.top.indexOf(key) >= 0;
@@ -309,10 +326,12 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function extentAt(key:String):Float
 		return WorkbenchSessionLabel.ROW_HEIGHT;
 
+	/** Moves with every projection and insertion line: a cache key for what is worked out from the rows. */
 	public function revision():Int
 		return version;
 
 	public function buildItem(key:String):View {
+		observe();
 		if (WorkbenchRowKey.isMachineRow(key)) return machineItem(key);
 		var row = WorkbenchRowKey.parse(key), rows = rowsOf(key);
 		if (row == null || rows == null) return new Text("");

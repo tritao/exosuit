@@ -77,7 +77,7 @@ class CommandBridge {
 	}
 
 	/** Navigation history takes precedence over TextArea's Alt+arrow word motion. */
-	public static function navigationKey(keymap:Keymap, context:CommandContext, key:Int, modifiers:Int):Bool {
+	public static function navigationKey(keymap:Keymap, context:CommandContext, key:Int, modifiers:UiModifier):Bool {
 		for (binding in keymap.effectiveBindings())
 			if ((binding.commands.indexOf("navigation:go-back") >= 0 || binding.commands.indexOf("navigation:go-forward") >= 0) &&
 				uiKeyFor(binding.key) == key && uiModifiersFor(binding.modifiers) == modifiers)
@@ -123,11 +123,11 @@ class CommandBridge {
 			default: -1;
 		};
 
-	static function uiModifiersFor(modifiers:Int):Int {
-		var result = 0;
-		if ((modifiers & Platform.MOD_SHIFT) != 0) result |= UiModifier.Shift;
-		if ((modifiers & Platform.MOD_CTRL) != 0) result |= UiModifier.Control;
-		if ((modifiers & Platform.MOD_ALT) != 0) result |= UiModifier.Alt;
+	static function uiModifiersFor(modifiers:Int):UiModifier {
+		var result = UiModifier.empty();
+		if ((modifiers & Platform.MOD_SHIFT) != 0) result = result.insert(UiModifier.Shift);
+		if ((modifiers & Platform.MOD_CTRL) != 0) result = result.insert(UiModifier.Control);
+		if ((modifiers & Platform.MOD_ALT) != 0) result = result.insert(UiModifier.Alt);
 		return result;
 	}
 }

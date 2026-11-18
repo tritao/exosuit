@@ -34,10 +34,8 @@ class SessionToolOutputView implements View {
   var action=new Button("",actionStyle,function() {
    if (copy == null) context.clipboard.writeText(source); else {var send:String->Void=cast copy;send(source);}
    copied.update(source);
-  },key+"-copy");
-  action.accessibilityLabel=copied.value==source ? "Copied output" : partial ? "Copy output preview" : "Copy output";
-  action.leadingIcon=copied.value==source ? IconName.Check : IconName.Copy;action.iconSize=16;
-  action.variant=ButtonVariant.Navigation;action.classes.push("viewport-tool");
+  },key+"-copy",null,ButtonVariant.Navigation,null,["viewport-tool"],copied.value==source ? IconName.Check : IconName.Copy,null,null,null,null,null,16,
+   copied.value==source ? "Copied output" : partial ? "Copy output preview" : "Copy output");
   var heading=new LayoutStyle();heading.width=LayoutAxis.grow();heading.childGap=8;heading.childAlignY=LayoutAlignmentY.Center;
   var label=new LayoutStyle();label.width=LayoutAxis.grow();
   var lines=source.split("\n"),longest=0;for (line in lines) if (line.length>longest) longest=line.length;

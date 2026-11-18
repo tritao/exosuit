@@ -48,7 +48,8 @@ class WorkbenchLayoutModes {
 	}
 	public function dispose():Void release();
 	public function suspend():Void depth++;
-	public function resume():Void { if (depth > 0) depth--; previous = signatures(); }
+	/** Every dock change, suspended or not, already updated `previous` (observe), so the edits made meanwhile count as no one's. */
+	public function resume():Void { if (depth > 0) depth--; }
 	public function markLeft():Void { if (ready && depth == 0) leftChanged = true; }
 	function signature(node:DockNode, region:String):String {
 		return switch node {

@@ -31,9 +31,7 @@ class SettingsModelEditor extends StructuredPropertyEditor {
 		var children:Array<KeyedView> = [new KeyedView("picker", picker)];
 		var actions:Array<KeyedView> = [];
 		function action(id:String, label:String, callback:Void->Void):Void {
-			var button = new Button(label, null, callback, key + ":" + id);
-			button.enabled = enabled && !state.loading;
-			actions.push(new KeyedView(id, button));
+			actions.push(new KeyedView(id, new Button(label, null, callback, key + ":" + id, enabled && !state.loading)));
 		}
 		action("refresh", "Refresh models", state.refresh);
 		if (state.hasMore && state.error == null) action("more", "More models", state.more);

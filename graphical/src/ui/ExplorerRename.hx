@@ -72,7 +72,10 @@ class ExplorerRename implements View {
 					done(null); event.preventDefault();
 					var row = node.parent;
 					while (row != null && !row.focusable) row = row.parent;
-					if (row != null) context.requestFocusAfterLayout(row.id);
+					if (row != null) {
+						context.requestFocusAfterLayout(row.id);
+						changed();
+					}
 				}
 				event.stopPropagation();
 			});

@@ -44,6 +44,8 @@ class ScopedSearchPanel implements View {
 	var searchedPartial:Bool = false;
 	/** The query's text input from the last build, so a focus request goes straight to it. */
 	var queryInput:Null<RenderNode>;
+	/** True while restart starts the search, so the search's change callback requests no frame (see restart). */
+	var restarting:Bool = false;
 
 	/** Drop the kept input node, which links the whole old tree and its handlers (GraphicalMain.liveRelease). */
 	public function releaseRetained():Void
@@ -51,8 +53,10 @@ class ScopedSearchPanel implements View {
 
 	public function new(workspace:Workspace, directories:Void->Array<String>, open:SearchMatch->Void, requestFrame:Void->Void, maximum:Void->Int) {
 		this.workspace = workspace; this.directories = directories; this.open = open; this.requestFrame = requestFrame; this.maximum = maximum;
-		search = new WorkspaceSearch(workspace, workspace.jobs, requestFrame, scopedFiles);
+		search = new WorkspaceSearch(workspace, workspace.jobs, searchChanged, scopedFiles);
 	}
+
+	function searchChanged():Void if (!restarting) requestFrame();
 
 	public function update(now:Float):Void search.update(now);
 
@@ -76,13 +80,23 @@ class ScopedSearchPanel implements View {
 	}
 
 	function run(value:String):Void {
+		restart(value);
+		requestFrame();
+	}
+
+	/**
+		Starts `value` over the current folders without requesting a frame, so the build may call it for a new scope: that
+		build shows the restarted search, and a frame requested from inside a build would throw.
+	**/
+	function restart(value:String):Void {
 		query = value == null ? "" : value;
 		searchedDirectories = directories().join("
 ");
 		searchedPartial = false;
+		restarting = true;
 		search.request(query, new SearchOptions(), maximum());
+		restarting = false;
 		scroll.jumpTo(0, 0);
-		requestFrame();
 	}
 
 	/** Files of the scope folders: for each, an open project's files under it, or the window-owned index of the folder. */
@@ -129,7 +143,7 @@ class ScopedSearchPanel implements View {
 		var current = directories();
 		// A new scope reruns the query there instead of showing another folder's results.
 		if (query.length > 0 && (current.join("
-") != searchedDirectories || searchedPartial && !anyIndexing(current))) run(query);
+") != searchedDirectories || searchedPartial && !anyIndexing(current))) restart(query);
 		var style = fill(); style.padding = new Insets(6, 8, 6, 8); style.childGap = 4;
 		var rows:Array<KeyedView> = [new KeyedView("query", new QueryField(new SearchField("scoped-search-query", query, run, null, "Search in folder"),
 			function(input) queryInput = input))];
@@ -143,12 +157,11 @@ class ScopedSearchPanel implements View {
 		rows.push(new KeyedView("results", new VirtualList("scoped-search-results", search.results.length, 48, function(index) {
 			var match = search.results[index];
 			var label = relative(current, match.path) + ":" + (match.line + 1) + ":" + (match.column + 1) + "  " + match.preview;
-			var button = new Button(label, rowStyle(48), function() {
+			return new Button(label, rowStyle(48), function() {
 				if (search.generation == generation) open(match);
 				requestFrame();
-			}, "scoped-search-result-" + index);
-			button.accessibilityLabel = match.path + ":" + (match.line + 1) + ":" + (match.column + 1) + " " + match.preview;
-			return button;
+			}, "scoped-search-result-" + index, null, null, null, null, null, null, null, null, null, null, null,
+				match.path + ":" + (match.line + 1) + ":" + (match.column + 1) + " " + match.preview);
 		}, fill(), null, scroll)));
 		var node = new Column("scoped-search-panel", rows, style).build(context);
 		var input = queryInput;

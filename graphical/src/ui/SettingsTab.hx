@@ -35,15 +35,6 @@ class SettingsTab {
 		app.settingsPanel = new ExosuitSettingsPanel(app.application.settings.store, function() return settingsModels, app.requestFrame, app.desktop, settingsModelPickerState);
 		var tab = new UiSettingsTab(app.settingsPanel);
 		tab.content = function(paneId) {
-			if (tab.panel.catalog.store != app.application.settings.store) {
-				var previous = tab.panel;
-				tab.panel = new ExosuitSettingsPanel(app.application.settings.store, function() return settingsModels, app.requestFrame, app.desktop, settingsModelPickerState);
-				tab.panel.setShowAdvanced(previous.showAdvanced);
-				tab.panel.setModifiedOnly(previous.modifiedOnly);
-				if (previous.restartOnly) tab.panel.showRestartChanges();
-				tab.panel.setFilter(previous.filter);
-				if (previous.selectedCategory != null) tab.panel.select(previous.selectedCategory);
-			}
 			app.settingsPanel = tab.panel;
 			return new SettingsTabView(tab, app.requestFrame, function(bounds, id) app.host.editorResolved(paneId, bounds, id));
 		};
@@ -53,6 +44,7 @@ class SettingsTab {
 		};
 		tab.onClosed = function() {
 			tab.panel.discardUnsavedChanges();
+			tab.panel.dispose();
 			if (app.settingsPanel == tab.panel) {
 				app.settingsPanel = null; settingsModelsToken++; settingsModelsPending = false;
 			}
@@ -67,6 +59,27 @@ class SettingsTab {
 		settingsModelsError = null;
 		// Codex models are loaded by "Refresh models": opening Settings starts no agent program.
 		app.requestFrame();
+	}
+	/**
+		After a settings reload replaced the store, gives each open Settings tab a panel on the new store that shows what
+		the old one showed. Runs before the build (ExosuitApp.submit): the new panel saves its Advanced switch and category
+		into the store and calls requestFrame, and neither is allowed inside a build.
+	**/
+	public function syncStore():Void {
+		var store = app.application.settings.store;
+		for (pane in app.host.panes) for (item in pane.items) {
+			var tab = UiEditorTabs.settings(item);
+			if (tab == null || tab.panel.catalog.store == store) continue;
+			var previous = tab.panel;
+			tab.panel = new ExosuitSettingsPanel(store, function() return settingsModels, app.requestFrame, app.desktop, settingsModelPickerState);
+			tab.panel.setShowAdvanced(previous.showAdvanced);
+			tab.panel.setModifiedOnly(previous.modifiedOnly);
+			if (previous.restartOnly) tab.panel.showRestartChanges();
+			tab.panel.setFilter(previous.filter);
+			if (previous.selectedCategory != null) tab.panel.select(previous.selectedCategory);
+			if (app.settingsPanel == previous) app.settingsPanel = tab.panel;
+			previous.dispose();
+		}
 	}
 	function settingsModelPickerState():SettingsModelPickerState {
 		return new SettingsModelPickerState(settingsModelsPending, settingsModelsError, settingsModelsNext != null,

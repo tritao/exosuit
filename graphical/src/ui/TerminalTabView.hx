@@ -4,6 +4,7 @@ import haxeon.ui.Rect;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiEventPhase;
 import haxeon.ui.core.UiEvent;
 import haxeon.ui.core.View;
 import haxeon.ui.core.WidgetId;
@@ -28,10 +29,10 @@ class TerminalTabView implements View {
 	public function build(context:BuildContext):RenderNode {
 		var node = terminal.panel.build(context);
 		if (commandFilter != null) node.commandShortcutFilter = commandFilter;
-		node.on(UiEventKind.Focus, function(_) activate(), "capture");
+		node.on(UiEventKind.Focus, function(_) activate(), UiEventPhase.Capture);
 		node.on(UiEventKind.PointerDown, function(event) {
 			activate();
-		}, "capture");
+		}, UiEventPhase.Capture);
 		node.on(UiEventKind.PointerDown, function(event) {
 			if (event.defaultPrevented) return;
 			var menu = contextMenu;
