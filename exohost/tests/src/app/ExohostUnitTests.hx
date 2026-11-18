@@ -40,6 +40,7 @@ class ExohostUnitTests {
 		windowFocus();
 		terminalHosts();
 		haxeonClients();
+		languageServers();
 		failures += MachineRemoteUnitTests.run();
 		if (failures > 0) {
 			Sys.println('FAIL: $failures exohost unit check(s)');
@@ -419,17 +420,25 @@ class ExohostUnitTests {
 		check(exohost.ExohostReport.keptTerminals(0) == "" && exohost.ExohostReport.keptTerminals(2).indexOf("2 terminals keep running") == 0, "the polite quit says how many terminals stay");
 	}
 
+	/** The language server is recognized in a bundle and in a source tree, where `haxeon lsp` runs it from the tool cache. */
+	static function languageServers():Void {
+		var bundled = exohost.ExohostClassifier.classify("hl.exe", "C:/s/bundle/haxeon/out/cmake/windows-msvc/hashlink-runtime/hl.exe C:/s/bundle/haxeon/out/haxeon-lsp.hl");
+		var cached = exohost.ExohostClassifier.classify("hl.exe", "C:/w/haxeon/out/cmake/windows-msvc/hashlink-runtime/hl.exe C:/w/haxeon/out/tools/LspMain-0123456789abcdef.hl");
+		check(bundled != null && bundled.kind == ExohostKind.LanguageServer, "a bundle's haxeon-lsp.hl is the language server");
+		check(cached != null && cached.kind == ExohostKind.LanguageServer, "the tool cache's LspMain is the language server");
+	}
+
 	/** A Haxeon client and the worker it starts run on one toolchain: the hl.exe folder, compared as paths are. */
 	static function haxeonClients():Void {
-		var cli = "\"C:/w/Haxeon/.tools/hashlink/hl.exe\" C:/w/haxeon/out/haxeon-cli.hl build --project C:/w/agent/haxeon.json";
-		var worker = "\"C:\\w\\haxeon\\.tools\\hashlink\\hl.exe\" C:/Users/u/AppData/Local/haxeon/compiler/abc.hl C:/Users/u/AppData/Local/haxeon/compiler/k.json";
+		var cli = "\"C:/w/Haxeon/out/cmake/windows-msvc/hashlink-runtime/hl.exe\" C:/w/Haxeon/out/cmake/windows-msvc/hashlink-runtime/haxeon-cli.hl build --project C:/w/agent/haxeon.json";
+		var worker = "\"C:\\w\\haxeon\\out\\cmake\\windows-msvc\\hashlink-runtime\\hl.exe\" C:/Users/u/AppData/Local/haxeon/compiler/abc.hl C:/Users/u/AppData/Local/haxeon/compiler/k.json";
 		var split = exohost.ExohostClassifier.split;
 		check(exohost.ExohostClassifier.isHaxeonClient("hl.exe", split(cli)), "a haxeon-cli build is a Haxeon client");
 		check(!exohost.ExohostClassifier.isHaxeonClient("hl.exe", split(worker)), "a compiler worker is not a client");
 		check(!exohost.ExohostClassifier.isHaxeonClient("python.exe", split("python.exe scripts/haxeon_cli.py build")), "only HashLink running haxeon-cli.hl is a client");
 		var toolchain = exohost.ExohostClassifier.toolchainOf(split(cli));
 		check(toolchain != null && toolchain == exohost.ExohostClassifier.toolchainOf(split(worker)), "a client and its worker share a toolchain");
-		check(toolchain != exohost.ExohostClassifier.toolchainOf(split("C:/other/haxeon/.tools/hashlink/hl.exe x.hl")), "another checkout's hl.exe is another toolchain");
+		check(toolchain != exohost.ExohostClassifier.toolchainOf(split("C:/other/haxeon/out/cmake/windows-msvc/hashlink-runtime/hl.exe x.hl")), "another checkout's hl.exe is another toolchain");
 		check(exohost.ExohostClassifier.toolchainOf(split("hl.exe x.hl")) == null && exohost.ExohostClassifier.toolchainOf([]) == null, "a bare program name names no toolchain");
 		check(exohost.ExohostClassifier.toolchainOf(split("out/hl.exe x.hl")) == null, "a relative program path names no toolchain");
 	}

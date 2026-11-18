@@ -26,15 +26,14 @@ class PluginStatusRegistry {
 		if (value == null || !values.contains(value)) return false;
 		if (side == null) return false;
 		var nextText = text == null ? "" : text;
-		var nextTooltip = tooltip == null ? "" : tooltip;
 		var nextCommand = command == null ? value.command : command;
 		if (value.text == nextText && value.priority == priority && value.side == side && value.icon == icon &&
-			value.tooltip == nextTooltip && value.command == nextCommand) return true;
+			value.tooltip == tooltip && value.command == nextCommand) return true;
 		value.text = nextText;
 		value.priority = priority;
 		value.side = side;
 		value.icon = icon;
-		value.tooltip = nextTooltip;
+		value.tooltip = tooltip;
 		value.command = nextCommand;
 		revision++;
 		return true;

@@ -4,6 +4,7 @@ import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
 import exohost.LinkedEditor;
+import exohost.EditorDirectory;
 import exohost.ExohostRecord.ExohostRecords;
 import exohost.remote.MachineRemote.DeferredReply;
 import workspace.ContextKey;

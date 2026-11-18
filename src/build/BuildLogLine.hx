@@ -1,6 +1,6 @@
 package build;
 
-class BuildOutputLine {
+class BuildLogLine {
 	public final text:String;
 	public final diagnostic:Null<BuildDiagnostic>;
 

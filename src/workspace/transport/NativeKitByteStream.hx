@@ -3,7 +3,6 @@ package workspace.transport;
 import haxe.io.Bytes;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes.Result;
-import nativekit.ffi.NativeKitTypes.TransportError;
 import nativekit.ffi.NativeKitTypes;
 
 /** Owned NativeKit byte stream shared by framed local RPC and relay framing. */
@@ -44,7 +43,7 @@ class NativeKitByteStream implements RelayByteStream {
 		var result = NativeKit.nk_transport_send(handle.borrow(), bytes);
 		if (result == Result.ErrorQueueFull)
 			return false;
-		if (result != 0) {
+		if (result != Result.Ok) {
 			failure = "transport_failed";
 			close();
 			return false;
@@ -59,9 +58,9 @@ class NativeKitByteStream implements RelayByteStream {
 		if (buffer == null || buffer.length == 0)
 			throw "Transport receive buffer must be nonempty";
 		var read = NativeKit.nk_transport_receive(handle.borrow(), buffer);
-		if (read.status == TransportError.WouldBlock)
+		if (read.status == Result.TransportWouldBlock)
 			return 0;
-		if (read.status != 0) {
+		if (read.status != Result.Ok) {
 			failure = "disconnected";
 			close();
 			return -1;

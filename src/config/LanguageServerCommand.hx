@@ -1,5 +1,6 @@
 package config;
 
+import build.HashLinkPath;
 import sys.FileSystem;
 
 /** Resolves argv without shell parsing; environment overrides denote one executable. */
@@ -53,8 +54,9 @@ class LanguageServerCommand {
 		if (configured.length > 0) return configured.copy();
 		if (environment != null && environment.length > 0) return [environment];
 		if (bundledAvailable) return [bundled];
-		// Windows cannot execute the Bash launcher; run the server built by scripts/build.py directly.
-		if (windows) return [compilerRoot + "/.tools/hashlink/hl.exe", compilerRoot + "/out/haxeon-lsp.hl"];
+		// Windows cannot execute the Bash launcher; run what it runs, `haxeon lsp`, with the checkout's own haxeon command,
+		// or the one on PATH when the root has no VM path table (outside a checkout).
+		if (windows) return [try HashLinkPath.executable(compilerRoot, "haxeon") catch (_:Dynamic) "haxeon", "lsp"];
 		return [compilerRoot + "/scripts/haxeon-lsp"];
 	}
 }

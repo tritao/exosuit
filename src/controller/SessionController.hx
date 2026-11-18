@@ -73,7 +73,7 @@ class SessionController {
 		if (entries.length == 0) return false;
 		root.openCommandView(new CommandViewProvider("Recover: ", entries, function(query) {}, function(entry, query, backwards) {
 			if (entry != null) {
-				var selected = Std.parseInt(entry.value);
+				var selected = Std.parseInt(entry.value) ?? 0;
 				if (selected >= 0 && selected < snapshots.length && recovery.restore(application, snapshots[selected])) {
 					recovery.forgetSnapshot(snapshots[selected]);
 					recovery.save(application);

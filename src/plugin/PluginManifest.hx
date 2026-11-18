@@ -39,9 +39,9 @@ class PluginManifest {
 			var key = StringTools.trim(value.substring(0, separator)),
 				setting = StringTools.trim(value.substring(separator + 1));
 			if (key == "manifestVersion")
-				manifestVersion = Std.parseInt(setting);
+				manifestVersion = Std.parseInt(setting) ?? 0;
 			else if (key == "apiVersion")
-				apiVersion = Std.parseInt(setting);
+				apiVersion = Std.parseInt(setting) ?? 0;
 			else if (key == "id")
 				id = setting;
 			else if (key == "version")
@@ -73,7 +73,7 @@ class PluginManifest {
 		var fields = value.split("|");
 		if (fields.length != 4)
 			throw 'plugin command must be name|function|key|modifiers';
-		commands.push(new DynamicCommand(fields[0], fields[1], Std.parseInt(fields[2]), Std.parseInt(fields[3])));
+		commands.push(new DynamicCommand(fields[0], fields[1], Std.parseInt(fields[2]) ?? 0, Std.parseInt(fields[3]) ?? 0));
 	}
 
 	function resolve(value:String):String {

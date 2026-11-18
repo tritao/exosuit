@@ -38,7 +38,7 @@ class ReplacementBackupStore {
 			for (field in 0...4) {
 				var separator = content.indexOf(":", offset);
 				if (separator < 0) throw "corrupt replacement backup lengths";
-				lengths.push(Std.parseInt(content.substring(offset, separator)));
+				lengths.push(Std.parseInt(content.substring(offset, separator)) ?? 0);
 				offset = separator + 1;
 			}
 			var pathLength = lengths[0], textLength = lengths[1], expectedLength = lengths[2], matchCount = lengths[3];
@@ -61,8 +61,7 @@ class ReplacementBackupStore {
 		if (separator <= 0) return true;
 		var parent = path.substring(0, separator);
 		if (FileSystem.exists(parent)) return FileSystem.isDirectory(parent);
-		if (!ensureParent(parent)) return false;
-		FileSystem.createDirectory(parent);
+		try FileSystem.createDirectory(parent) catch (_:Dynamic) return false;
 		return FileSystem.exists(parent) && FileSystem.isDirectory(parent);
 	}
 }

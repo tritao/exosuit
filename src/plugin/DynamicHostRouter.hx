@@ -64,7 +64,7 @@ class DynamicHostRouter {
 			}
 			return Std.string(registration.token);
 		}
-		var registration = registrations.get(Std.parseInt(token));
+		var registration = registrations.get(Std.parseInt(token) ?? 0);
 		if (registration == null) throw "dynamic plugin host token is invalid or retired";
 		var api = registration.context.api;
 		return switch operation {
@@ -95,7 +95,7 @@ class DynamicHostRouter {
 	}
 
 	static function parseInt(value:String):Int {
-		return Std.parseInt(value);
+		return Std.parseInt(value) ?? 0;
 	}
 
 	static function configuration(settings:config.Settings, name:String):String

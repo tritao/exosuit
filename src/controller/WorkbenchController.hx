@@ -219,8 +219,8 @@ class WorkbenchController {
 	public function openGoToLine():Void {
 		if (activeDocument() == null) return;
 		root.openCommandView(new CommandViewProvider("Go to Line: ", [], function(query) {}, function(entry, query, backwards) {
-			var fields = query.split(":"), line = fields.length > 0 ? Std.parseInt(fields[0]) : 0,
-				column = fields.length > 1 ? Std.parseInt(fields[1]) : 1, view = context.activeView();
+			var fields = query.split(":"), line = fields.length > 0 ? Std.parseInt(fields[0]) ?? 0 : 0,
+				column = fields.length > 1 ? Std.parseInt(fields[1]) ?? 0 : 1, view = context.activeView();
 			if (view != null && line > 0 && column > 0) {
 				view.restoreCursor(line - 1, column - 1);
 				view.cursorChanged();

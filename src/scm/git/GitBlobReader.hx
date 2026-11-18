@@ -131,7 +131,7 @@ class GitBlobReader implements JobTask {
 		if (disposed) return true;
 		if (active == null) {
 			while (queued.length > 0 && active == null) {
-				var next = queued.shift();
+				var next = queued.shift() ?? throw "No queued read";
 				if (!next.cancelled) { active = next; stderr = ""; }
 			}
 		}

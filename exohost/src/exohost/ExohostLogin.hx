@@ -176,7 +176,7 @@ class ExohostLogin {
 		}
 		if (queued.length == 0)
 			return false;
-		var next = queued.shift();
+		var next = queued.shift() ?? throw "No queued reg command";
 		try {
 			job = {child: spawnReg(next), deadline: Sys.time() + REG_TIMEOUT_SECONDS, arguments: next};
 		} catch (_:Dynamic) {
@@ -210,7 +210,7 @@ class ExohostLogin {
 			launcher = FileSystem.fullPath(Sys.programPath());
 		if (!ExohostPaths.prepare())
 			throw "exohost's home is not a private directory of this user";
-		createDirectories(Path.directory(scriptPath()));
+		FileSystem.createDirectory(Path.directory(scriptPath()));
 		AtomicFile.write(scriptPath(), script(launcher));
 	}
 
@@ -218,18 +218,11 @@ class ExohostLogin {
 		try if (FileSystem.exists(scriptPath())) FileSystem.deleteFile(scriptPath()) catch (_:Dynamic) {}
 
 	static function writeDesktopEntry():Void {
-		createDirectories(Path.directory(desktopPath()));
+		FileSystem.createDirectory(Path.directory(desktopPath()));
 		AtomicFile.write(desktopPath(), [
 			"[Desktop Entry]", "Type=Application", "Name=Exosuit exohost", "Comment=Exosuit background processes and remote access",
 			"Exec=/bin/sh \"" + scriptPath() + "\"", "X-GNOME-Autostart-enabled=true", ""
 		].join("\n"));
-	}
-
-	static function createDirectories(directory:String):Void {
-		if (directory.length == 0 || FileSystem.exists(directory))
-			return;
-		createDirectories(Path.directory(directory));
-		FileSystem.createDirectory(directory);
 	}
 
 	static function script(launcher:String):String {
@@ -294,7 +287,7 @@ class ExohostLogin {
 	}
 
 	static function spawnReg(arguments:Array<String>):sys.io.ChildProcess
-		return sys.io.Process.spawn(native(systemRoot()) + "\\System32\\reg.exe", arguments, "", null, null, true);
+		return sys.io.ChildProcess.spawn(native(systemRoot()) + "\\System32\\reg.exe", arguments, "", null, null, true);
 
 	/** Blocking, for the CLI: runs reg.exe without a console window; its exit code, or -1 when it could not run or hung. */
 	static function reg(arguments:Array<String>):Int {

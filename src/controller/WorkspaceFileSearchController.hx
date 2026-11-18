@@ -142,7 +142,7 @@ class WorkspaceFileSearchController {
 				for (index in 0...ids.length) rootNames.set(ids[index], distinct[index]);
 			}
 			rootCount = ids.length;
-			activeRoot = ids.shift();
+			activeRoot = ids.shift() ?? throw "No search root";
 			queuedRoots = ids;
 			startRoot(token, attachment, client);
 		}, function(_) {
@@ -227,7 +227,7 @@ class WorkspaceFileSearchController {
 			else if (more) {
 				scannedBefore = scannedEntries;
 				skippedBefore = skippedEntries;
-				activeRoot = queuedRoots.shift();
+				activeRoot = queuedRoots.shift() ?? throw "No queued search root";
 				startRoot(token, attachment, client);
 			}
 		}, function(rpcError) {
@@ -250,7 +250,7 @@ class WorkspaceFileSearchController {
 		searchId = null;
 		scannedBefore = scannedEntries;
 		skippedBefore = skippedEntries;
-		activeRoot = queuedRoots.shift();
+		activeRoot = queuedRoots.shift() ?? throw "No queued search root";
 		startRoot(token, attachment, client);
 		return true;
 	}

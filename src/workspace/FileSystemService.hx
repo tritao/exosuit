@@ -75,7 +75,7 @@ class FileSystemService implements EditorFileSystem {
 
 	public function createFolder(path:String):Bool {
 		if (exists(path)) return false;
-		FileSystem.createDirectory(path);
+		try FileSystem.createDirectory(path) catch (_:Dynamic) return false;
 		return exists(path) && isDirectory(path);
 	}
 
