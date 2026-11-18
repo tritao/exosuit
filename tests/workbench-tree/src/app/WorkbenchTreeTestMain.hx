@@ -23,6 +23,7 @@ import workspace.client.WorkspaceCatalogMirror;
 import ui.WorkbenchPanel;
 import ui.WorkbenchRowKey;
 import ui.WorkbenchTreeModel;
+import ui.WorkbenchTreeSafe;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
@@ -111,6 +112,7 @@ class WorkbenchTreeTestMain {
 
 	static function main():Void {
 		workspaceFolder();
+		hiddenRowsDoNotThrow();
 		scratchStarted();
 		ordering();
 		everyWorkspace();
@@ -383,6 +385,24 @@ class WorkbenchTreeTestMain {
 		model.update(view(machineWorkspaces, "exo"), ["exo" => lists(none)]);
 		require(children(model, "w:exo").join(",") == "s:none|exo", "an empty workspace: " + children(model, "w:exo"));
 		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace,n:folder-workspace", "rows leaked to the roots");
+	}
+
+	/**
+		After a live reload the Workbench asked for a row its rebuilt tree did not show, TreeView threw "selection key is
+		not visible" from a layout or event callback, and the window died. The Workbench's selection waits instead.
+	**/
+	static function hiddenRowsDoNotThrow():Void {
+		var model = new WorkbenchTreeModel();
+		model.update(view(machineWorkspaces, "resume"), ["resume" => lists(catalog("C:/work/resume"), agents("C:/work/resume"))]);
+		var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.height = LayoutAxis.grow();
+		var tree = new TreeView("workbench-tree", model, style);
+		tree.select("w:resume", false);
+		// The exo workspace is collapsed: its (would-be) rows are not in the tree.
+		require(!WorkbenchTreeSafe.select(tree, "g:exo|work"), "a row that is not shown was selected");
+		require(!WorkbenchTreeSafe.select(tree, "nothing", false), "an unknown row was selected");
+		require(tree.selectedKey == "w:resume", "a refused selection moved the selection to " + tree.selectedKey);
+		require(!WorkbenchTreeSafe.scrollTo(tree, "g:exo|work"), "scrolled to a row that is not shown");
+		require(WorkbenchTreeSafe.select(tree, "w:eon", false) && tree.selectedKey == "w:eon", "a shown row was not selected");
 	}
 
 	/** Through a real TreeView: the open workspace is expanded with its groups; the others are collapsed but expandable. */

@@ -290,7 +290,7 @@ class WorkbenchPanel implements View {
 		if (Sys.time() > pendingEnterUntil) { pendingEnterKey = null; return; }
 		if (tree.selectedKey == key) { requestFrame(); return; }
 		pendingEnterKey = null;
-		try tree.select(key, false) catch (_:Dynamic) {}
+		WorkbenchTreeSafe.select(tree, key, false);
 		requestFrame();
 	}
 
@@ -912,12 +912,12 @@ class WorkbenchPanel implements View {
 		var known = clientOf(row.workspace), rows = liveRows(row.workspace);
 		var agent = rows == null ? null : rows.agents.get(row.id);
 		if (known == null || agent == null || !agentCanBeRemoved(agent) || !known.agentService().canControlAgents() || known.agentService().agentBusy()) return;
-		if (select) tree.select(key);
+		if (select) WorkbenchTreeSafe.select(tree, key);
 		var group = agent.group, workspace = row.workspace;
 		known.agentService().deleteAgent(row.id, function() {
 			closeAgentTab(row.id, agent.workspaceRoot);
 			var after = model.rows(workspace);
-			if (select && after != null && after.groups.exists(group)) tree.select(WorkbenchRowKey.group(workspace, group));
+			if (select && after != null && after.groups.exists(group)) WorkbenchTreeSafe.select(tree, WorkbenchRowKey.group(workspace, group));
 			requestFrame();
 		});
 		requestFrame();
@@ -968,7 +968,8 @@ class WorkbenchPanel implements View {
 		var group = WorkbenchRowKey.groupOf(model, key);
 		if (!expandAncestors(row.workspace, group == null ? null : group.id)) return;
 		if (tree.selectedKey != key) {
-			tree.select(key);
+			// A key the tree does not show yet stays wanted: the next frame tries again.
+			if (!WorkbenchTreeSafe.select(tree, key)) { requestFrame(); return; }
 			scrollTarget = key;
 			scrollPasses = 2;
 		}
@@ -1002,7 +1003,7 @@ class WorkbenchPanel implements View {
 		var group = WorkbenchRowKey.groupOf(model, key);
 		var parent = row.kind == WorkbenchRowKind.Group ? (group == null ? null : group.parent) : (group == null ? null : group.id);
 		if (!expandAncestors(row.workspace, parent)) return;
-		tree.select(key);
+		if (!WorkbenchTreeSafe.select(tree, key)) { requestFrame(); return; }
 		scrollTarget = key;
 		scrollPasses = 2;
 		pendingReveal = null;
@@ -1256,7 +1257,7 @@ class WorkbenchPanel implements View {
 			var target = scrollTarget;
 			if (target != null && scrollPasses > 0) {
 				// A second layout uses the expanded tree's updated scroll extent.
-				tree.scrollTo(target);
+				if (!WorkbenchTreeSafe.scrollTo(tree, target)) scrollTarget = null;
 				scrollPasses--;
 				if (scrollPasses == 0) scrollTarget = null;
 				requestFrame();
