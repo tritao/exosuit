@@ -13,7 +13,7 @@ same Workbench the desktop shows (`scripts/machine-acceptance.ps1`).
 | `nativekit/` | Gradle library `io.nativekit`. Its `src/` is a generated copy of `haxeon/vendor/nativekit/android/nativekit/src/main` (made by `build.ps1`, git-ignored). |
 | `haxe/src/` | The Haxe module: `Main`, `UiBridge` (the one entry the JNI calls: start, resize, frame, close), `AndroidUiHost` (UiHostRuntime on a NativeKit surface), `AndroidExosuitFactory` (builds `ExosuitApp` with the filesystem capability, then the workbench and workspace once paired), `PhoneCredentials`/`PhoneLastView`/`HostBridge` (pairing and attachment). |
 | `native/` | `CMakeLists.txt`: one configure per ABI building libhaxeon, NativeKit, GPU, UIKit (with TLS), noisekit, textmate_regex and terminalkit straight from `haxeon/` and `native-packages/`. `exosuit_jni.c`: loads `ui.hl`, forwards JSON commands, creates the GLES3 surface. |
-| `scripts/` | `bootstrap.ps1` (toolchain check), `build.ps1`, `dev.ps1` (fast loop), `run-emulator.ps1`, `machine-acceptance.ps1`, `emulator-lib.ps1`, `env.ps1` (shared). |
+| `scripts/` | `setup.ps1`/`setup.sh` (install the toolchain), `toolchain.json` is beside them in `android/`; `bootstrap.ps1` (toolchain check), `build.ps1`, `dev.ps1` (fast loop), `run-emulator.ps1`, `machine-acceptance.ps1`, `emulator-lib.ps1`, `env.ps1` (shared). |
 
 The Haxe module is compiled with `haxeon build --compiler-only` on the desktop (HashLink bytecode, about 53 MB
 `ui.hl`), shipped as an APK asset, and run by the JIT in `libhaxeon.so`. The app's state lives in its private files
@@ -21,15 +21,35 @@ directory (`PRAGTICAL_PORTABLE`); it never starts a local exohost.
 
 ## Toolchain
 
-Nothing is hard-coded. Set `ANDROID_HOME` (platform-tools, `platforms;android-36`, `build-tools;36.0.0`, NDK
-`30.0.16248370`, emulator, `system-images;android-36;google_apis;x86_64`, cmdline-tools) and `JAVA_HOME` (JDK 21).
-`GRADLE_USER_HOME`, `ANDROID_USER_HOME` and `ANDROID_AVD_HOME` are optional. `cmake` 3.24+ and `ninja` must be on
-`PATH`, and haxeon must be built (`scripts/build-windows.ps1`). Versions: AGP 9.3.3, Gradle 9.5.0, minSdk 34,
-targetSdk 36, native platform android-34 (haxeon needs 28 or newer).
+One command installs everything, from nothing, into a per-user folder outside any checkout. `android/toolchain.json` pins every
+version, download URL and checksum.
+
+| OS | Folder (`EXOSUIT_ANDROID_HOME` overrides it) |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\exosuit-android` |
+| macOS | `~/Library/Application Support/exosuit-android` |
+| Linux | `~/.local/share/exosuit-android` |
 
 ```
-pwsh -NoProfile -File android/scripts/bootstrap.ps1     # reports what is missing
+pwsh -NoProfile -File android/scripts/setup.ps1 [-Check] [-Force] [-SkipAvd]     Windows
+android/scripts/setup.sh [--check] [--force] [--skip-avd]                         macOS and Linux
 ```
+
+It installs, in order: cmdline-tools (SHA-1 checked), Temurin JDK 21.0.13+9 (SHA-256 checked), then through `sdkmanager`
+`platform-tools`, `emulator`, `platforms;android-36`, `build-tools;36.0.0`, NDK `30.0.16248370`, `cmake;3.31.6` (which carries
+the `ninja` the build uses) and `system-images;android-36;google_apis;x86_64` (arm64-v8a on Apple silicon and arm64 Linux), and
+creates the AVD `exosuit-s8` (Pixel 6 profile, 1080x2400). Layout: `sdk/`, `jdk/`, `gradle-home/`, `avd/`, `user-home/`,
+`downloads/` (kept, re-verified), `logs/`. It accepts Google's SDK licenses on the owner's behalf. It is idempotent and resumable (a
+finished item is skipped, a download continues, a half-extracted folder is redone), so running it again repairs a toolchain
+that was partly or wholly deleted. `-Check` / `--check` installs nothing, prints `ok` or `MISSING` per item and exits 1 when
+anything is missing; `bootstrap.ps1` also checks that haxeon is built. About 9 GB, about 5 minutes on a fast line.
+Gradle 9.5.0 (the wrapper) is downloaded into `gradle-home/` by the first build; AGP is 9.3.3.
+
+No environment setup is needed. `env.ps1` (and `env.sh`) default `ANDROID_HOME`, `JAVA_HOME`, `GRADLE_USER_HOME`,
+`ANDROID_AVD_HOME` and `ANDROID_USER_HOME` to that folder when they are unset (or name a folder that does not exist) and put the
+SDK's cmake and ninja first on `PATH`; set the variables yourself to use another toolchain. Every script works from a plain shell.
+haxeon must be built first (`scripts/build-windows.ps1`). Versions: minSdk 34, targetSdk 36, native platform android-34 (haxeon
+needs 28 or newer). The macOS and Linux scripts are written but have not been run; building the APK is Windows only today.
 
 ## Build
 
@@ -52,11 +72,50 @@ machine's own debug key unless `EXOSUIT_ANDROID_KEYSTORE` names a shared debug k
 pwsh -NoProfile -File android/scripts/run-emulator.ps1 [-Tap "78,300"] [-Screenshot out.png] [-KeepRunning]
 ```
 
-Creates the AVD `exosuit-x86_64` (Pixel 6 profile) on first use, starts it headless
+Uses the AVD `exosuit-s8` (setup creates it; the script creates it when missing), starts it headless
 (`-no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect`), installs and launches the app,
 waits 25 s, saves `android/build/screenshot.png` (and `screenshot-after-tap.png` for `-Tap`), then stops the
 emulator. `swiftshader_indirect` renders GLES3 without a window and works.
 
+
+## Morning command: the emulator on the owner's real Exosuit
+
+```
+pwsh -NoProfile -File android/scripts/connect-real.ps1 -DryRun     # reads remote-status only, prints the plan, starts nothing
+pwsh -NoProfile -File android/scripts/connect-real.ps1             # the real thing
+```
+
+Prerequisites: `setup.ps1` done, the APK built (`build.ps1`), the editor running (it started exohost). The owner then has one
+decision to make. In order, the script:
+
+1. Finds exohost's control pipe the way the editor does (`\.\pipe\exosuit-exohost-<user>`; `EXOSUIT_EXOHOST_HOME` or
+   `-ExohostHome` moves it) and sends **`remote-status`** (read only). No exohost: it stops with a message.
+2. Starts the AVD `exosuit-s8` on port 5584 **with a window** (reuses `emulator-5584` when it is up), installs the debug APK,
+   turns the emulator's animations off. The emulator keeps running after the script ends; stop it with
+   `adb -s emulator-5584 emu kill`.
+3. If remote access is **off**, sends **`remote-enable`** with the relay of `src/config/RelayUrl.hx` (the public Exosuit relay, or
+   `-Relay https://...`): the panel's "Enable remote access". If it is already on, nothing is changed, the relay in use stays.
+   Then it waits up to 90 s for exohost to report the relay connected.
+4. Sends **`remote-invite`** (300 s): the panel's "Create pairing invitation". One one-time URL (with the machine key
+   fingerprint), nothing else.
+5. Starts pairing in the app with that URL (the debug build's test-rig extra, which needs the marker `files/automation.on`; the
+   script removes the marker again right after the launch). `-NoAutoPair` instead fills the app's pairing field through an
+   `exosuit://pair` link and you press Pair.
+6. Prints `PHONE CODE` and, once the device is pending in exohost, `EXOHOST CODE`, then waits (10 minutes) until the device is
+   known to exohost. **The owner:** taps "The code matches" on the phone, then in the editor's Remote Access panel compares the
+   code, chooses which workspaces to share and presses Approve. The phone follows later grants without pairing again.
+
+What it does to the real exohost: three kinds of control request over its pipe (`remote-status`, `remote-devices`, and the
+two that change something: `remote-enable` if off, `remote-invite`), all of which the editor's Remote panel sends too. It adds one
+pending pairing (a device id with a one-time key, expiring in 300 s) and, if remote access was off, leaves it on with the
+default relay. It does not approve, grant, revoke, restart or stop anything, does not read or write exohost's home, and
+the owner's editor is not touched. To undo: Remote Access panel, "Disconnect from this relay" (or `exohost remote off`), and
+revoke the device (`exohost remote revoke <id>`).
+
+The tested path used an isolated exohost and a local relay (`-ExohostHome <host>\exohost-home -AutoApprove`, the exohost that
+`mobile-machine-host.py` starts; the script approved as the owner would). Not yet exercised: the public https relay from the
+emulator (TLS trust, `TlsTrust.kt`; the local runs use loopback http). If pairing fails there, the logcat lines
+`exosuit-pairing` and `exosuit-tls` and the `Relay connection:` line in the editor's Remote panel say why.
 
 ## Fast loop
 
@@ -213,7 +272,7 @@ invitation URL and ids; `DIR/pairing.json` the machine's pending code; `stop --o
 python scripts/build.py --only agent
 python scripts/haxeon_cli.py build --project exohost/haxeon.json
 python scripts/haxeon_cli.py build --project tests/mobile-pairing/haxeon.json      (the admin tool that makes the sessions)
-pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-x86_64] [-Port 5554] [-OutDir dir] [-SkipBuild]
+pwsh -NoProfile -File android/scripts/machine-acceptance.ps1 [-Avd exosuit-s8] [-Port 5554] [-OutDir dir] [-SkipBuild]
 ```
 
 The script builds, starts the host and the emulator, pairs once (checking the phone's code equals the machine's before
