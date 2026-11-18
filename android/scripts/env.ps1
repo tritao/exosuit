@@ -5,6 +5,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'toolchain-lib.ps1')
 Set-ToolchainEnvironment
+# Native tools (adb) print UTF-8; a plain pwsh decodes them with the OEM code page (cp437 here) and the phone's labels such as
+# "Alpha · running" arrive as mojibake, so the label-driven taps in machine-acceptance.ps1 never match.
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
 $script:HaxeonRoot = Join-Path $script:RepoRoot 'haxeon'
 $script:BuildRoot = Join-Path $script:AndroidRoot 'build'
 # Where Haxeon keeps its HashLink VM and the CLI's bytecode (scripts/haxeon_paths.py reads haxeon/cmake/hashlink-output-paths.txt).
