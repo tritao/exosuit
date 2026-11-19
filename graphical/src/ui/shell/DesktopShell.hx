@@ -32,13 +32,16 @@ class DesktopShell implements Shell {
 
 	public function kind():ShellKind return Desktop;
 
-	/** The tab with this id: its key, or the id of the agent session or terminal it shows. */
+	/**
+		The tab with this id: its key, or the id of the agent session or terminal it shows (a terminal's resource id, as
+		the phone shell names it; its view id is accepted too).
+	**/
 	function find(id:String):Null<{item:UiEditorTab, pane:UiEditorPane}> {
 		for (pane in app.host.panes) for (item in pane.items) {
 			var agent = UiEditorTabs.agent(item);
 			var terminal = UiEditorTabs.terminal(item);
 			if (UiEditorTabs.key(item) == id || agent != null && (agent.resource == id || agent.id == id)
-				|| terminal != null && terminal.id == id) return {item: item, pane: pane};
+				|| terminal != null && (terminal.resourceId == id || terminal.id == id)) return {item: item, pane: pane};
 		}
 		return null;
 	}
@@ -70,7 +73,7 @@ class DesktopShell implements Shell {
 			var agent = UiEditorTabs.agent(tab);
 			if (agent != null) return agent.resource;
 			var terminal = UiEditorTabs.terminal(tab);
-			return terminal != null ? terminal.id : UiEditorTabs.key(tab);
+			return terminal != null ? terminal.resourceId : UiEditorTabs.key(tab);
 		}
 		return app.sidebar.visible && app.sidebar.activeId != "" ? app.sidebar.activeId : null;
 	}

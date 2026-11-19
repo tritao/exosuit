@@ -71,6 +71,8 @@ class PhoneShell implements Shell implements PhoneHost {
 	var sheet:Null<Sheet>;
 	var snack:Null<Snack>;
 	var renameText = "";
+	/** The pushed session screens whose view was a tab's when pushed: the screen goes when that tab closes. */
+	final tabScreens:Map<String, View> = [];
 
 	public function new(app:ExosuitApp) {
 		this.app = app;
@@ -145,6 +147,7 @@ class PhoneShell implements Shell implements PhoneHost {
 	}
 
 	public function build():View {
+		dropClosedSession();
 		syncRoot();
 		var made = phoneCore.pollNew();
 		if (made != null) pushSession(made.id, made.title, entryOf(made.id), made.view);
@@ -336,8 +339,21 @@ class PhoneShell implements Shell implements PhoneHost {
 		var key = SESSION_PREFIX + id;
 		if (controller.top.id == key) return;
 		var screen = new TerminalScreen(this, title, entry, panel);
+		if (phoneCore.panelLive(panel)) tabScreens.set(key, panel); else tabScreens.remove(key);
 		controller.push({id: key, build: screen.build});
 		app.requestFrame();
+	}
+
+	/** A session screen on top whose tab was closed or disposed (its terminal ended, the tab was closed elsewhere) is popped. */
+	function dropClosedSession():Void {
+		while (controller.depth > 1) {
+			var key = controller.top.id;
+			var panel = tabScreens.get(key);
+			if (panel == null || phoneCore.panelLive(panel)) return;
+			tabScreens.remove(key);
+			controller.pop();
+			app.requestFrame();
+		}
 	}
 
 	function entryOf(id:String):Null<SessionEntry> {

@@ -169,6 +169,16 @@ class PhoneCore {
 		return null;
 	}
 
+	/** Whether `panel` is the view of a terminal or agent tab that is still open. */
+	public function panelLive(panel:View):Bool {
+		for (tab in app.host.allTerminalTabs()) if (!tab.disposed && tab.panel == panel) return true;
+		for (pane in app.host.panes) for (item in pane.items) {
+			var agent = UiEditorTabs.agent(item);
+			if (agent != null && agent.panel == panel) return true;
+		}
+		return false;
+	}
+
 	static function terminalRecord(client:WorkspaceWorkbenchClient, id:String):Null<TerminalRecord> {
 		var catalog = client.terminalCatalog();
 		if (catalog != null) for (record in catalog.terminals) if (record.id == id) return record;
