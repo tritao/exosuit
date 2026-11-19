@@ -33,4 +33,7 @@ interface WorkbenchMachine {
 
 	/** exohost's list of this machine's workspaces, which the window may change (create, rename, folders, remove); null on a device. */
 	function exohost():Null<MachineClient>;
+
+	/** Every session and terminal of the machine's workspaces, built from the catalogs the window holds (WorkbenchSessions); works on a device too. */
+	function sessionIndex():workspace.sessions.SessionIndex;
 }

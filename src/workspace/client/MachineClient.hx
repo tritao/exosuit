@@ -10,6 +10,7 @@ import exohost.ExohostLink;
 import exohost.WindowFocus;
 import exohost.WindowFocus.WindowFocuses;
 import workspace.PathKey;
+import workspace.sessions.SessionIndex;
 
 /**
 	This machine and its workspaces, from exohost (docs/architecture/0005-machines-and-workspaces.md), over the window's
@@ -180,6 +181,33 @@ class MachineClient {
 
 	public function remoteRevoke(deviceId:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
 		remote("remote-revoke", {deviceId: deviceId}, done);
+
+	// ---- Sessions (docs/phone-ui/CONTRACTS.md, D)
+
+	/** Every session and terminal of this machine's running workspaces, as the last `sessions` call read them. */
+	public final sessionIndex:SessionIndex = new SessionIndex();
+	/** The workspaces the last `sessions` call could not read in time (their services did not answer). */
+	public var unavailableWorkspaces(default, null):Array<String> = [];
+
+	/**
+		Asks exohost for the sessions and terminals of every running workspace service and replaces `sessionIndex` with them
+		(its `revision` changes); `done` gets null, or why the call failed (the index is then unchanged). exohost waits up to
+		2 s for each service, so a reply takes that long at most.
+	**/
+	public function sessions(?done:Null<String> -> Void):Void
+		link.call("sessions", {}, function(reply, failure) {
+			if (failure == null) {
+				sessionIndex.replace(SessionIndex.fromJson(reply));
+				var missing:Dynamic = reply == null ? null : Reflect.field(reply, "unavailable");
+				unavailableWorkspaces = Std.isOfType(missing, Array) ? [for (id in (missing : Array<Dynamic>)) if (Std.isOfType(id, String)) (id : String)] : [];
+				revision++;
+			}
+			if (done != null)
+				done(failure);
+		}, SESSIONS_TIMEOUT);
+
+	/** Longer than exohost's 2 s per service. */
+	static inline final SESSIONS_TIMEOUT = 8.0;
 
 	/** The workspace with this id, if the machine has one. */
 	public function workspaceById(id:String):Null<MachineWorkspace> {

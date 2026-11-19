@@ -31,6 +31,11 @@ class DeviceWorkbenchMachine implements WorkbenchMachine {
 		shownView = {machine: null, error: null, openWorkspace: null, revision: 0, manages: false};
 	}
 
+	final sessionSource:workspace.client.SessionIndexSource = new workspace.client.SessionIndexSource();
+
+	public function sessionIndex():workspace.sessions.SessionIndex
+		return WorkbenchSessions.of(this, sessionSource);
+
 	public function exohost():Null<MachineClient>
 		return null;
 

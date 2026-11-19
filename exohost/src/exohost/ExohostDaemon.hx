@@ -93,6 +93,8 @@ class ExohostDaemon {
 	var menuRequested:Bool = false;
 	final idleSeconds:Float;
 	final remote:MachineRemote;
+	/** The `sessions` op: every running service's sessions and terminals (ExohostSessions). */
+	final sessions:ExohostSessions;
 	/** Clients waiting for a pairing step to finish: they send nothing until their reply arrives. */
 	final waiting:Array<{client:NativeRpcTransport, reply:DeferredReply}> = [];
 	var catalog:Null<MachineCatalog> = null;
@@ -158,6 +160,7 @@ class ExohostDaemon {
 			return machine().scratch(id);
 		});
 		remote = new MachineRemote(runtime.events, hub, machine, services);
+		sessions = new ExohostSessions(hub, services);
 		runtime.events.listen(onEvent);
 		inventory = new ExohostInventory(true, directory.editors());
 		refreshedAt = Sys.time();
@@ -190,7 +193,7 @@ class ExohostDaemon {
 	function loop():Void {
 		while (stopAt < 0 || Sys.time() < stopAt) {
 			// A service start turns the loop every 10 ms: its report is answered to the editor that waits on it at once.
-			runtime.events.wait(services.busy() ? 0.01 : jobs.length > 0 || clients.length > 0 || remote.busy() ? 0.1 : 1.0);
+			runtime.events.wait(services.busy() ? 0.01 : jobs.length > 0 || clients.length > 0 || remote.busy() || sessions.busy() ? 0.1 : 1.0);
 			for (_ in 0...128)
 				if (!runtime.events.poll())
 					break;
@@ -217,6 +220,7 @@ class ExohostDaemon {
 					refusedAttaches.splice(refusedIndex, 1);
 				}
 			remote.poll();
+			sessions.poll();
 			ExohostLogin.poll();
 			var index = jobs.length;
 			while (index-- > 0)
@@ -542,6 +546,13 @@ class ExohostDaemon {
 			case "machine":
 				// `windows`: where each editor window is focused, for the Workbench's "open in another window" (M19 Phase 8).
 				return {ok: true, machine: machine().json(serviceOf), windows: directory.windows()};
+			case "sessions":
+				// Every running workspace service's sessions and terminals; `workspaces` (a list of ids) narrows it. The reply waits for the services.
+				var listed:Dynamic = Reflect.field(request, "workspaces");
+				var wanted:Null<Array<String>> = null;
+				if (Std.isOfType(listed, Array))
+					wanted = [for (id in (listed : Array<Dynamic>)) if (Std.isOfType(id, String)) (id : String)];
+				return sessions.ask(machine().state, wanted);
 			case "editors":
 				return {ok: true, editors: directory.editors()};
 			case "control":

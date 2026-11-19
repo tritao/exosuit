@@ -55,6 +55,14 @@ class WorkbenchActions {
 		return known == null ? null : known.exohost();
 	}
 
+	/** Every session and terminal of the machine's workspaces (desktop or paired phone), from the catalogs the window holds; empty before the window has a machine. */
+	public function sessionIndex():workspace.sessions.SessionIndex {
+		var known = machine;
+		return known == null ? emptySessions : known.sessionIndex();
+	}
+
+	final emptySessions:workspace.sessions.SessionIndex = new workspace.sessions.SessionIndex();
+
 	/** The tree's view of the machine. */
 	public function view():WorkbenchMachineView {
 		var known = machine;

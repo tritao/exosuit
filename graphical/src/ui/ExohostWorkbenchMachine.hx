@@ -30,6 +30,11 @@ class ExohostWorkbenchMachine implements WorkbenchMachine {
 		this.links = links;
 	}
 
+	final sessionSource:workspace.client.SessionIndexSource = new workspace.client.SessionIndexSource();
+
+	public function sessionIndex():workspace.sessions.SessionIndex
+		return WorkbenchSessions.of(this, sessionSource);
+
 	public function exohost():Null<MachineClient>
 		return machine;
 

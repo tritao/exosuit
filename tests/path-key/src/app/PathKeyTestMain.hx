@@ -1,6 +1,11 @@
 package app;
 
 import workspace.PathKey;
+import workspace.sessions.SessionIndex;
+import workspace.sessions.SessionIndex.SessionEntry;
+import workspace.sessions.SessionIndex.SessionKind;
+import workspace.sessions.SessionIndex.SessionSectioning;
+import workspace.sessions.SessionIndex.SessionState;
 
 /** Path comparison shared by the Agents scope, its Search and Changes, the group labels and the SCM path lookups. */
 class PathKeyTestMain {
@@ -61,7 +66,47 @@ class PathKeyTestMain {
 		style();
 		edges();
 		hangWatchdog();
+		sessions();
 		Sys.println("PASS: path keys ignore separators, trailing separators and Windows case; containment respects roots and sibling prefixes");
+	}
+
+	/** The phone UI's session index: filters, ordering, sections and the JSON round trip (docs/phone-ui/CONTRACTS.md, D). */
+	static function sessions():Void {
+		var now = Date.now().getTime();
+		function entry(id:String, name:String, workspace:String, path:Array<String>, kind:SessionKind, state:SessionState, age:Float):SessionEntry
+			return {
+				id: id, name: name, machineId: "m", workspaceId: workspace, workspaceName: workspace.toUpperCase(), groupPath: path,
+				groupNames: [for (p in path) "n-" + p], kind: kind, state: state, lastActive: now - age, last: ""
+			};
+		var index = new SessionIndex();
+		index.replace(SessionIndex.fromJson({
+			sessions: SessionIndex.toJson([
+				entry("a", "Alpha", "w1", [], SessionKind.Claude, SessionState.Idle, 1000),
+				entry("b", "Beta", "w1", ["g1"], SessionKind.Terminal, SessionState.Working, 5000),
+				entry("c", "Gamma", "w1", ["g1", "g2"], SessionKind.Codex, SessionState.Attention, 9000),
+				entry("d", "Delta", "w1", ["g1", "g2"], SessionKind.Claude, SessionState.Idle, 100),
+				entry("e", "Epsilon", "w2", [], SessionKind.Terminal, SessionState.Exited, 2 * 86400000.0)
+			])
+		}));
+		require(index.entries.length == 5 && index.entries[2].kind == SessionKind.Codex, "the JSON round trip lost entries");
+		var all = index.query({sectioning: SessionSectioning.None});
+		var order = [for (e in all[0].entries) e.id].join("");
+		require(all.length == 1 && order == "cbdae", "order is attention, working, then recent: " + order);
+		require(index.query({sectioning: SessionSectioning.None, text: "ALP"})[0].entries.length == 1, "text is a case-insensitive name match");
+		require(index.query({sectioning: SessionSectioning.None, groups: ["g1"]})[0].entries.length == 3, "a group selects its descendants");
+		require(index.query({sectioning: SessionSectioning.None, groups: ["g2"], kinds: [SessionKind.Claude]})[0].entries.length == 1,
+			"kinds and groups combine");
+		require(index.query({sectioning: SessionSectioning.None, workspaces: ["w2"], states: [SessionState.Exited]})[0].entries[0].id == "e",
+			"workspace and state filters");
+		var groups = index.query({sectioning: SessionSectioning.Group});
+		var ids = [for (s in groups) s.id].join(",");
+		require(ids == "w1/,w1/g1,w1/g1/g2,w2/", "group sections, parent before child: " + ids);
+		require(groups[2].title.join("/") == "n-g1/n-g2", "a group section is titled with its full path");
+		var states = [for (s in index.query({sectioning: SessionSectioning.State})) s.id].join(",");
+		require(states == "attention,working,recent", "state sections: " + states);
+		require(index.query({sectioning: SessionSectioning.Workspace}).length == 2, "workspace sections");
+		var days = index.query({sectioning: SessionSectioning.Day});
+		require(days.length == 2 && days[0].title[0] == "Today", "day sections, newest first");
 	}
 
 	/** A UI thread that stops ticking leaves a report naming its last phase; one that keeps ticking leaves nothing. */
