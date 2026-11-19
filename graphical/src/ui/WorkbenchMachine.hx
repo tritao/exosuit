@@ -28,6 +28,13 @@ interface WorkbenchMachine {
 	/** Workspace `entry`'s link, made when the window holds none (its service starts if idle), kept for this turn. */
 	function useLink(entry:MachineWorkspace):Null<WorkspaceLink>;
 
+	/**
+		Keeps workspace `entry`'s link for reading its catalog, as an expanded tree row does: an existing link is marked
+		used now; a new one is made only for a running service (never starting one) and within the row-link limits.
+		Call it every time the catalog is read; a link nobody reads closes after WorkspaceLinks.LINGER_MS.
+	**/
+	function readLink(entry:MachineWorkspace):Void;
+
 	/** The client the window shows workspace `id` through, once the window shows it; null before. */
 	function shown(id:String):Null<WorkspaceWorkbenchClient>;
 

@@ -49,15 +49,29 @@ class RemoteMachine {
 		if (machine.connected())
 			for (id in expanded) {
 				if (id == open || rows >= StreamMultiplexer.STREAMS - 2) continue;
-				var entry = machine.workspaceById(id);
-				if (entry == null) continue;
+				if (machine.workspaceById(id) == null) continue;
 				rows++;
-				if (links.touch(id)) continue;
-				if (entry.status != MachineDirectoryProtocol.RUNNING || entry.grants.indexOf(WorkspaceCatalogProtocol.CAPABILITY) < 0) continue;
-				links.use(WorkspaceServiceTarget.remote(id), false);
+				if (!links.touch(id)) readNew(id);
 			}
 		links.poll();
 		return opened;
+	}
+
+	/**
+		A link for reading workspace `id`'s catalog (the session index's), as an expanded row's: an existing one is marked
+		used now, and a new one is made under the same conditions as a row's (connected, running, the catalog granted,
+		room for another stream), never starting a service.
+	**/
+	public function readLink(id:String):Void {
+		if (!links.touch(id) && machine.connected()) readNew(id);
+	}
+
+	function readNew(id:String):Void {
+		var entry = machine.workspaceById(id);
+		if (entry == null || entry.status != MachineDirectoryProtocol.RUNNING || entry.grants.indexOf(WorkspaceCatalogProtocol.CAPABILITY) < 0) return;
+		// The machine stream and the open workspace's link need room besides the row links.
+		if (links.count() >= StreamMultiplexer.STREAMS - 2) return;
+		links.use(WorkspaceServiceTarget.remote(id), false);
 	}
 
 	/** The network came back or changed: dial the machine now, and each link waiting out a backoff. The links ride its channel and reconnect through OPEN. */

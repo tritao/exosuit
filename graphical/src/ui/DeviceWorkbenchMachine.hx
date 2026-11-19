@@ -107,6 +107,11 @@ class DeviceWorkbenchMachine implements WorkbenchMachine {
 		return shown == null ? null : shown.links.use(WorkspaceServiceTarget.remote(entry.id), true);
 	}
 
+	public function readLink(entry:MachineWorkspace):Void {
+		var shown = machine();
+		if (shown != null) shown.readLink(entry.id);
+	}
+
 	public function shown(id:String):Null<WorkspaceWorkbenchClient> {
 		var client = remote.workbenchService(), link = remote.open;
 		return remote.openId == id && link != null && link.ready && app.workbenchClient == client ? client : null;

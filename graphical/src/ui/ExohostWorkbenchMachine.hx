@@ -72,6 +72,12 @@ class ExohostWorkbenchMachine implements WorkbenchMachine {
 	public function useLink(entry:MachineWorkspace):Null<WorkspaceLink>
 		return links.use(machine.serviceTarget(entry), true);
 
+	public function readLink(entry:MachineWorkspace):Void {
+		if (links.touch(entry.id)) return;
+		var service = machine.serviceOf(entry.id);
+		if (service != null && service.running) links.use(machine.serviceTarget(entry), false);
+	}
+
 	public function shown(id:String):Null<WorkspaceWorkbenchClient> {
 		var link = links.get(id);
 		return link != null && current() == id && app.workbenchClient == link ? link : null;
