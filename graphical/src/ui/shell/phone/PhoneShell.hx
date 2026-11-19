@@ -55,7 +55,7 @@ private typedef GroupNode = {
 **/
 class PhoneShell implements Shell implements PhoneHost {
 	/** The device's paired machines, set by the phone factory; null on the desktop in phone form (this machine's card is shown). */
-	public static var remoteMachines:Null<Dynamic>;
+	public static var remoteMachines:Null<workspace.client.MachinesPanelSource>;
 
 	static inline final SESSION_PREFIX = "session:";
 	static inline final SNACK_SECONDS = 4.0;

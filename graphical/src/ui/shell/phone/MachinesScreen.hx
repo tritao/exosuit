@@ -14,6 +14,8 @@ import haxeon.ui.widgets.controls.ButtonVariant;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.TextField;
+import workspace.client.MachinesPanelSource;
+import workspace.client.MachinesPanelSource.PairedMachineCard;
 import workspace.service.MachineDirectoryProtocol;
 
 /**
@@ -23,11 +25,11 @@ import workspace.service.MachineDirectoryProtocol;
 **/
 class MachinesScreen extends PhoneUi implements View {
 	final host:PhoneHost;
-	final remote:() -> Null<Dynamic>;
+	final remote:() -> Null<MachinesPanelSource>;
 	var pairingOpen = false;
 	var pairingUrl = "";
 
-	public function new(host:PhoneHost, remote:() -> Null<Dynamic>) {
+	public function new(host:PhoneHost, remote:() -> Null<MachinesPanelSource>) {
 		this.host = host;
 		this.remote = remote;
 	}
@@ -36,9 +38,9 @@ class MachinesScreen extends PhoneUi implements View {
 		var cards:Array<KeyedView> = [];
 		var devices = remote();
 		if (devices == null) cards.push(kv("this-machine", thisMachine()));
-		else for (machine in (devices.machines : Array<Dynamic>)) {
-			var key = machine.device.machineId + ":" + machine.device.deviceId;
-			cards.push(kv("m:" + key, machine.refusal() != null ? deadPairing(devices, machine, key) : machineCard(devices, machine, key)));
+		else for (machine in devices.pairedMachines()) {
+			var key = machine.machineId + ":" + machine.deviceId;
+			cards.push(kv("m:" + key, machine.refusal != null ? deadPairing(devices, machine, key) : machineCard(devices, machine, key)));
 		}
 		if (devices != null) cards.push(kv("pair", pairing(devices, context)));
 		var list = column("machines-cards", cards, function(s) {
@@ -108,37 +110,38 @@ class MachinesScreen extends PhoneUi implements View {
 		return card("card", rows);
 	}
 
-	function machineCard(devices:Dynamic, machine:Dynamic, key:String):View {
-		var online:Bool = machine.online();
-		var rows = [kv("head", cardHeader("head", machine.name(), online, online ? "online" : "offline"))];
-		var directory = machine.machine.directory;
-		if (directory != null) {
-			for (entry in (directory.workspaces : Array<Dynamic>)) {
+	function machineCard(devices:MachinesPanelSource, machine:PairedMachineCard, key:String):View {
+		var online = machine.online;
+		var rows = [kv("head", cardHeader("head", machine.name, online, online ? "online" : "offline"))];
+		var workspaces = machine.workspaces;
+		if (workspaces != null) {
+			var machineId = machine.machineId, deviceId = machine.deviceId;
+			for (entry in workspaces) {
 				var id = entry.workspace;
 				rows.push(kv("w:" + id, workspaceRow("w", entry.name, countDetail(id, entry.status == MachineDirectoryProtocol.RUNNING), function() {
-					devices.openWorkspace(machine, id);
+					devices.openMachineWorkspace(machineId, deviceId, id);
 					host.scopeTo(id);
 				})));
 			}
 		} else if (!online) {
-			var why = machine.machine.error;
+			var why = machine.error;
 			rows.push(kv("why", column("why", [kv("t", text(why == null ? "Connecting…" : "Cannot reach the machine. Retrying.", 13, SECONDARY))],
 				function(s) s.padding = new Insets(16, 4, 16, 14))));
 		}
 		return card("card", rows);
 	}
 
-	function deadPairing(devices:Dynamic, machine:Dynamic, key:String):View {
-		var refusal = machine.refusal();
+	function deadPairing(devices:MachinesPanelSource, machine:PairedMachineCard, key:String):View {
+		var refusal = machine.refusal;
 		var texts = column("texts", [
-			kv("name", text(clip(machine.name(), 28), 16, TEXT, true)),
+			kv("name", text(clip(machine.name, 28), 16, TEXT, true)),
 			kv("why", text(clip(refusal == null ? "" : refusal, 40), 13, DANGER, true))
 		], function(s) {
 			s.width = LayoutAxis.grow();
 			s.clipHorizontal = true;
 		});
 		var forget = new Button("Forget", null, function() {
-			devices.forget(machine.device.machineId, machine.device.deviceId);
+			devices.forget(machine.machineId, machine.deviceId);
 			host.refresh();
 		}, "forget-" + key);
 		return row("dead", [kv("ring", dot("ring", IDLE)), kv("texts", texts), kv("forget", forget)], function(s) {
@@ -151,9 +154,11 @@ class MachinesScreen extends PhoneUi implements View {
 	}
 
 	/** "Pair a machine" and, once pressed, the invitation field, the code to compare and the status. */
-	function pairing(devices:Dynamic, context:BuildContext):View {
-		var pairingNow:Bool = devices.pairing == true;
-		var open = pairingOpen || pairingNow || devices.authenticationCode != null;
+	function pairing(devices:MachinesPanelSource, context:BuildContext):View {
+		var pairingNow = devices.pairingActive();
+		var code = devices.pairingCode();
+		var keyChanged = devices.pairingMachineKeyChanged();
+		var open = pairingOpen || pairingNow || code != null;
 		var rows:Array<KeyedView> = [];
 		if (!open) {
 			rows.push(kv("button", tappable("pair-open", tile("pair-tile", 52, 14, CHIP, text("Pair a machine", 16, ACCENT)), function() {
@@ -161,15 +166,17 @@ class MachinesScreen extends PhoneUi implements View {
 				host.refresh();
 			})));
 		} else {
-			if (devices.authenticationCode != null) {
+			if (code != null) {
 				rows.push(kv("instruction", text("Compare this code with the machine, then confirm.", 14, SECONDARY)));
-				rows.push(kv("code", text(devices.authenticationCode, 28, TEXT)));
-				if ((devices.machineKeyChanged == true))
+				rows.push(kv("code", text(code, 28, TEXT)));
+				if (keyChanged)
 					rows.push(kv("changed", text("This machine has a different key than the one already paired. Continue only if you reset it yourself.", 13, DANGER)));
-				if (devices.codeConfirmed != true)
-					rows.push(kv("confirm", new Button((devices.machineKeyChanged == true) ? "The code matches: replace the old pairing" : "The code matches", null,
-						devices.confirmCode, "phone-pairing-confirm", true, ButtonVariant.Primary)));
-			} else if (devices.pairing != true) {
+				if (!devices.pairingCodeConfirmed())
+					rows.push(kv("confirm", new Button(keyChanged ? "The code matches: replace the old pairing" : "The code matches", null, function() {
+						devices.confirmCode();
+						host.refresh();
+					}, "phone-pairing-confirm", true, ButtonVariant.Primary)));
+			} else if (!pairingNow) {
 				var address = new TextField("phone-pairing-url", pairingUrl, function(value) {
 					pairingUrl = value;
 					host.refresh();
@@ -189,17 +196,18 @@ class MachinesScreen extends PhoneUi implements View {
 				rows.push(kv("label", text("Pair this device with a machine", 14, SECONDARY)));
 				rows.push(kv("url", fieldRow));
 				rows.push(kv("go", new Button("Pair", null, function() {
-					if (devices.beginPairing(pairingUrl) == true) pairingUrl = "";
+					if (devices.beginPairing(pairingUrl)) pairingUrl = "";
 					host.refresh();
 				}, "phone-pairing-start", pairingUrl.length > 0, ButtonVariant.Primary)));
 			}
-			if (devices.pairing == true) rows.push(kv("cancel", new Button("Cancel pairing", null, function() {
+			if (pairingNow) rows.push(kv("cancel", new Button("Cancel pairing", null, function() {
 				devices.cancelPairing();
 				pairingOpen = false;
 				host.refresh();
 			}, "phone-pairing-cancel")));
-			if (devices.status != "") rows.push(kv("status", text(devices.status, 13, SECONDARY)));
-			if (devices.error != null) rows.push(kv("error", text(devices.error, 13, DANGER)));
+			var status = devices.panelStatus(), error = devices.panelError();
+			if (status != "") rows.push(kv("status", text(status, 13, SECONDARY)));
+			if (error != null) rows.push(kv("error", text(error, 13, DANGER)));
 		}
 		return column("pairing", rows, function(s) {
 			s.width = LayoutAxis.stretch();

@@ -20,7 +20,7 @@ import workspace.transport.NativeRpcHub;
 	  terminals) and as the Workbench's client (the link itself); with none open, the attachment is empty and the
 	  Remote panel lists machines and their workspaces.
 **/
-class RemoteMachines implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements RemoteViewSource {
+class RemoteMachines implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements RemoteViewSource implements MachinesPanelSource {
 	static inline final NOT_PAIRED = "Paste the one-time pairing URL from the machine's Remote Access panel to pair this device.";
 	/** What the Remote panel says: the pairing's progress while one runs, else the connection's. */
 	public var status(get, never):String;
@@ -157,6 +157,36 @@ class RemoteMachines implements WorkspaceAttachment implements WorkspaceRpcEndpo
 	function get_machineKeyChanged():Bool return pairingFlow.machineKeyChanged;
 	function get_machineKeyVerified():Bool return pairingFlow.machineKeyVerified;
 	function get_pairing():Bool return pairingFlow.active;
+
+	// MachinesPanelSource: the same state as methods, for the phone shell's Machines screen
+
+	public function pairedMachines():Array<MachinesPanelSource.PairedMachineCard> {
+		return [for (machine in machines) {
+			var directory = machine.machine.directory;
+			new MachinesPanelSource.PairedMachineCard(machine.device.machineId, machine.device.deviceId, machine.name(), machine.online(), machine.refusal(),
+				machine.machine.error, directory == null ? null : directory.workspaces);
+		}];
+	}
+
+	public function pairingActive():Bool return pairingFlow.active;
+
+	public function pairingCode():Null<String> return pairingFlow.authenticationCode;
+
+	public function pairingCodeConfirmed():Bool return pairingFlow.codeConfirmed;
+
+	public function pairingMachineKeyChanged():Bool return pairingFlow.machineKeyChanged;
+
+	public function panelStatus():String return get_status();
+
+	public function panelError():Null<String> return error;
+
+	public function openMachineWorkspace(machineId:String, deviceId:String, workspace:String):Void {
+		for (machine in machines)
+			if (machine.device.machineId == machineId && machine.device.deviceId == deviceId) {
+				openWorkspace(machine, workspace);
+				return;
+			}
+	}
 
 	// Machines and workspaces
 
