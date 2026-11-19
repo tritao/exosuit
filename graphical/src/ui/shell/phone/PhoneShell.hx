@@ -150,8 +150,9 @@ class PhoneShell implements Shell implements PhoneHost {
 		if (made != null) pushSession(made.id, made.title, entryOf(made.id), made.view);
 		var waited = phoneCore.pollPending();
 		if (waited != null) pushSession(waited.entry.id, waited.entry.name, waited.entry, waited.view);
-		var context = app.hostContext;
-		BottomBar.defaultBottomInset = context == null ? 0.0 : context.safeBottom;
+		// ExosuitApp already lays the shell out inside the safe area; insetting the bar again would pad it twice (and
+		// make it grow while the keyboard is up).
+		BottomBar.defaultBottomInset = 0.0;
 		var page = new NavigationStack("phone-stack", controller, grow());
 		var main:Array<KeyedView> = [new KeyedView("stack", page)];
 		if (controller.depth == 1) main.push(new KeyedView("bar", bottomBar()));
