@@ -234,11 +234,11 @@ class GraphicalMain {
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
 				dialogs, dark, ui.TerminalPane.open,
-				(Sys.systemName() == "Linux" || Sys.systemName() == "Windows") ? function(id,cwd,restored,requestFrame,palette,group,directory)
+				(Sys.systemName() == "Linux" || Sys.systemName() == "Windows" || Sys.systemName() == "Mac") ? function(id,cwd,restored,requestFrame,palette,group,directory)
 					return ui.TerminalPane.openRemote(function() return app == null ? null : app.terminalEndpoint(cwd, id),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
 			instance.formFactorOverride = formFactor;
 			workspace.client.ConnectTimeline.mark("app-constructed");
-			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows") {
+			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows" || Sys.systemName() == "Mac") {
 				try {
 					var clock = function() return NativeKit.nk_time_seconds() * 1000;
 					// The window's link to exohost (the tray daemon), which it starts when it does not answer; never blocks. exohost
