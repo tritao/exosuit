@@ -72,7 +72,19 @@ class PhoneCore {
 	}
 
 	/** Track D's index; cheap to call every frame (it rebuilds only when a catalog changed). */
+	var fixtureIndex:Null<SessionIndex> = null;
+
 	public function index():SessionIndex {
+		// Layout work: EXOSUIT_PHONE_SESSIONS names a JSON file shaped like exohost's `sessions` reply, drawn instead of
+		// the machine's sessions (for states the machine does not have, such as nested groups).
+		var fixture = Sys.getEnv("EXOSUIT_PHONE_SESSIONS");
+		if (fixture != null && fixture != "" && sys.FileSystem.exists(fixture)) {
+			if (fixtureIndex == null) {
+				fixtureIndex = new SessionIndex();
+				fixtureIndex.replace(SessionIndex.fromJson(haxe.Json.parse(sys.io.File.getContent(fixture))));
+			}
+			return fixtureIndex;
+		}
 		var machine = app.workbenchMachine();
 		return machine == null ? new SessionIndex() : machine.sessionIndex();
 	}
