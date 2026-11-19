@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unfolded</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2f55c7}a:hover{color:#1f3f9e}
+</style>
+</helmet>
+<div style="width: 760px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #ffffff; color: #16181d; font-family: 'IBM Plex Sans', sans-serif;">
+  <header style="display: flex; align-items: center; gap: 12px; padding: 0 16px; height: 56px; border-bottom: 1px solid #e2e4e9;">
+    <button aria-label="Switch machine or workspace" style="display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; font-family: inherit; font-size: 17px; font-weight: 600; color: #16181d;">exosuit
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16181d" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <span style="font-size: 13px; color: #555b66; flex-grow: 1;">on cube</span>
+    <span style="font-size: 12px; padding: 4px 10px; border-radius: 10px; background: #e8edfb; color: #1f3f9e;">DesktopShell · width 1968</span>
+  </header>
+  <div style="display: flex; flex-grow: 1; min-height: 0;">
+    <aside style="width: 260px; flex-shrink: 0; background: #f4f5f7; border-right: 1px solid #e2e4e9; display: flex; flex-direction: column;">
+      <div style="display: flex; gap: 6px; padding: 12px 12px 4px; flex-wrap: wrap;">
+        <span style="padding: 6px 10px; border-radius: 14px; background: #ffffff; border: 1px solid #d5d8de; font-size: 12px;">Group ▾</span>
+        <span style="padding: 6px 10px; border-radius: 14px; background: #ffffff; border: 1px solid #d5d8de; font-size: 12px;">Kind ▾</span>
+        <span style="padding: 6px 10px; border-radius: 14px; background: #e8edfb; color: #1f3f9e; font-size: 12px;">Sections: group</span>
+      </div>
+      <span style="padding: 12px 16px 6px; font-size: 12px; font-weight: 600; color: #555b66; letter-spacing: 0.04em;">11-17-26</span>
+      <sc-for list="{{sessions}}" as="s" hint-placeholder-count="5">
+        <span style="display: flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 48px; font-size: 15px; background: {{s.bg}};">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555b66" stroke-width="2" stroke-linecap="round"><path d="M4 6l6 6-6 6M12 18h8"/></svg>
+          <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{s.name}}</span>
+        </span>
+      </sc-for>
+    </aside>
+    <main style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+      <div style="display: flex; border-bottom: 1px solid #e2e4e9;">
+        <span style="padding: 12px 16px; font-size: 14px; color: #555b66;">Claude Code · Terminal</span>
+        <span style="padding: 12px 16px; font-size: 14px; font-weight: 600; border-bottom: 2px solid #2f55c7;">esc not sent to terminal</span>
+      </div>
+      <div style="flex-grow: 1; padding: 14px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; line-height: 19px; white-space: pre-wrap; overflow: hidden;">What changed: Escape now goes as a Windows key event whenever Ctrl, Shift, Alt and Super are all up.
+
+<span style="background: #2b2e35; color: #ffffff;"> ❯ phone test: reply with just OK </span>
+
+  OK
+──────────────────────────────────────────────────────
+❯ <span style="background: #2f55c7; color: #2f55c7;">_</span></div>
+      <div style="display: flex; gap: 6px; padding: 8px; background: #f4f5f7; border-top: 1px solid #e2e4e9;">
+        <button style="min-width: 56px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit;">Esc</button>
+        <button style="min-width: 56px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit;">Tab</button>
+        <button style="min-width: 56px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit;">Ctrl</button>
+        <button style="min-width: 56px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit;">Paste</button>
+      </div>
+    </main>
+  </div>
+  <footer style="padding: 12px 16px; background: #fff8ea; border-top: 1px solid #f0dcb4; font-size: 13px; color: #5c3c00;">Fold → width drops under the breakpoint → the same session reopens in PhoneShell's Terminal screen; back goes to Sessions. Unfold → the session stays focused in this split.</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const n = { bg: 'transparent' }, sel = { bg: '#e2e8f8' };
+    return { sessions: [
+      { name: 'suit to exoshot', ...n },
+      { name: 'exosuit-haxeon-ui-port', ...n },
+      { name: 'esc not sent to terminal', ...sel },
+      { name: 'exosuit-haxeo-ui-port-2', ...n },
+      { name: 'docking-chat-1', ...n }
+    ] };
+  }
+}
+</script>
+</body>
+</html>

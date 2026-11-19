@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terminal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2f55c7}a:hover{color:#1f3f9e}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #ffffff; color: #16181d; font-family: 'IBM Plex Sans', sans-serif;">
+  <header style="display: flex; align-items: center; gap: 8px; padding: 8px 8px; border-bottom: 1px solid #e2e4e9;">
+    <a href="Main.dc.html" aria-label="Back to sessions" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16181d" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
+    </a>
+    <div style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0;">
+      <span style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">esc not sent to terminal</span>
+      <span style="font-size: 12px; color: #555b66;">exosuit · 11-17-26 · you have control</span>
+    </div>
+    <button aria-label="Session menu" style="width: 44px; height: 44px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0;">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="#16181d"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+    </button>
+  </header>
+  <div style="flex-grow: 1; padding: 12px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; line-height: 19px; color: #16181d; white-space: pre-wrap; overflow: hidden;">I'll hold off calling it fixed until you've seen Esc close the workflows view.
+
+<span style="color: #6b7280;">✻ Baked for 3m 12s · done 2:18 PM</span>
+
+<span style="background: #2b2e35; color: #ffffff;"> ❯ phone test: reply with just OK </span>
+
+  OK
+
+<span style="color: #6b7280;">✻ Brewed for 2s · done 2:16 PM</span>
+──────────────────────────────────────
+❯ <span style="background: #2f55c7; color: #2f55c7;">_</span>
+──────────────────────────────────────
+<span style="color: #7c3aed;">Opus 5.5</span> | <span style="color: #0f766e;">~/projects/exosuit</span>
+<span style="color: #a15c00;">⏵⏵ auto mode on</span></div>
+  <div style="display: flex; gap: 6px; padding: 8px 8px; background: #f4f5f7; border-top: 1px solid #e2e4e9; overflow: hidden;">
+    <button style="min-width: 52px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit; font-size: 14px;">Esc</button>
+    <button style="min-width: 52px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit; font-size: 14px;">Tab</button>
+    <button style="min-width: 52px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit; font-size: 14px;">Ctrl</button>
+    <button aria-label="Arrow keys" style="min-width: 60px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit; font-size: 14px;">⇅ ⇆</button>
+    <button style="min-width: 60px; height: 44px; border: 1px solid #d5d8de; border-radius: 8px; background: #ffffff; font-family: inherit; font-size: 14px;">Paste</button>
+    <button style="flex-grow: 1; height: 44px; border: 0; border-radius: 8px; background: #2f55c7; color: #ffffff; font-family: inherit; font-size: 14px; font-weight: 600;">Send</button>
+  </div>
+  <div style="height: 290px; background: #e3e6eb; display: flex; align-items: center; justify-content: center; color: #555b66; font-size: 14px;">system keyboard</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
