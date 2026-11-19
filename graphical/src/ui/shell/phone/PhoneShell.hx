@@ -153,6 +153,8 @@ class PhoneShell implements Shell implements PhoneHost {
 		if (made != null) pushSession(made.id, made.title, entryOf(made.id), made.view);
 		var waited = phoneCore.pollPending();
 		if (waited != null) pushSession(waited.entry.id, waited.entry.name, waited.entry, waited.view);
+		var failed = phoneCore.takeFailure();
+		if (failed != null) notice(failed);
 		// ExosuitApp already lays the shell out inside the safe area; insetting the bar again would pad it twice (and
 		// make it grow while the keyboard is up).
 		BottomBar.defaultBottomInset = 0.0;
@@ -180,8 +182,9 @@ class PhoneShell implements Shell implements PhoneHost {
 
 	public function openSession(entry:SessionEntry):Void {
 		var view = phoneCore.open(entry);
+		var failed = view == null ? phoneCore.takeFailure() : null;
 		if (view != null) pushSession(entry.id, entry.name, entry, view);
-		else notice("Opening " + entry.workspaceName + "…");
+		else notice(failed != null ? failed : "Opening " + entry.workspaceName + "…");
 		app.requestFrame();
 	}
 

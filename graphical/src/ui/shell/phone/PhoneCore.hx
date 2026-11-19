@@ -22,8 +22,12 @@ class PhoneCore {
 	/** The session a tap asked for in a workspace that was not open yet; opened when its link is up. */
 	var pending:Null<SessionEntry>;
 	var pendingSince = 0.0;
+	/** Why the last session asked for could not be opened, until the shell takes it (`takeFailure`). */
+	var failure:Null<String>;
 	var knownIds:Null<Map<String, Bool>>;
 	var knownSince = 0.0;
+	/** The kind `create` started, so `pollNew` only takes a tab of that kind. */
+	var createdKind:Null<SessionKind>;
 	static inline final WAIT_SECONDS = 20.0;
 
 	public function new(app:ExosuitApp) {
@@ -114,34 +118,49 @@ class PhoneCore {
 
 	// ---- opening sessions
 
-	/** The session's view, or null when its workspace is not connected yet (it is asked to open, and `pollPending` finishes). */
+	/**
+		The session's view, or null when it cannot be shown yet: its workspace is opened if needed and `pollPending`
+		finishes once the workspace, its terminal record or its agent list is there. When it cannot be opened at all,
+		`takeFailure` says why.
+	**/
 	public function open(entry:SessionEntry):Null<View> {
+		failure = null;
+		pending = null;
 		var panel = panelFor(entry);
-		if (panel != null) return panel;
-		if (clientOf(entry.workspaceId) == null) {
-			pending = entry;
-			pendingSince = Sys.time();
-			openWorkspace(entry.workspaceId);
-		}
+		if (panel != null || failure != null) return panel;
+		pending = entry;
+		pendingSince = Sys.time();
+		if (clientOf(entry.workspaceId) == null) openWorkspace(entry.workspaceId);
 		return null;
 	}
 
-	/** After `open` returned null: the session once its workspace is up, else null. Gives up after a while. */
+	/** After `open` returned null: the session once it can be shown, else null. Gives up after a while (`takeFailure` says so). */
 	public function pollPending():Null<{entry:SessionEntry, view:View}> {
 		var entry = pending;
 		if (entry == null) return null;
-		if (Sys.time() - pendingSince > WAIT_SECONDS) {
-			pending = null;
+		var panel = panelFor(entry);
+		if (panel == null) {
+			if (failure != null) pending = null;
+			else if (Sys.time() - pendingSince > WAIT_SECONDS) {
+				pending = null;
+				failure = "Could not open " + entry.name + ".";
+			}
 			return null;
 		}
-		var panel = panelFor(entry);
-		if (panel == null) return null;
 		pending = null;
 		return {entry: entry, view: panel};
 	}
 
+	/** Why the last session asked for cannot be opened, once; null when nothing failed. */
+	public function takeFailure():Null<String> {
+		var why = failure;
+		failure = null;
+		return why;
+	}
+
 	public function cancelPending():Void pending = null;
 
+	/** The session's view, opening its tab when its workspace has it; null while it is not there yet. Sets `failure` when it cannot be opened. */
 	function panelFor(entry:SessionEntry):Null<View> {
 		var found = existingPanel(entry.id);
 		if (found != null) return found;
@@ -150,6 +169,7 @@ class PhoneCore {
 		var record = terminalRecord(client, entry.id);
 		if (record != null) {
 			if (app.terminalTabs.openCatalogTerminal(client, record)) return existingPanel(entry.id);
+			failure = !record.available ? entry.name + " is not available right now." : entry.name + " cannot be opened from here.";
 			return null;
 		}
 		var agents = client.agentService().agents();
@@ -201,6 +221,7 @@ class PhoneCore {
 	public function create(kind:SessionKind):Void {
 		knownIds = openIds();
 		knownSince = Sys.time();
+		createdKind = kind;
 		switch kind {
 			case Terminal: app.terminalTabs.newTerminal();
 			case Codex: app.agentTabs.createProviderAgent("codex", "");
@@ -208,7 +229,10 @@ class PhoneCore {
 		}
 	}
 
-	/** The session `create` started, as soon as its tab exists (title and view), else null. */
+	/**
+		The session `create` started, as soon as its tab exists (title and view), else null. Only a new tab of the kind
+		created counts, and not the tab of a session `open` is waiting for.
+	**/
 	public function pollNew():Null<{id:String, title:String, view:View}> {
 		var known = knownIds;
 		if (known == null) return null;
@@ -216,13 +240,18 @@ class PhoneCore {
 			knownIds = null;
 			return null;
 		}
-		for (tab in app.host.allTerminalTabs()) if (!tab.disposed && !known.exists(tab.resourceId)) {
-			knownIds = null;
-			return {id: tab.resourceId, title: tab.title, view: tab.panel};
+		var waiting = pending;
+		var skip = waiting == null ? null : waiting.id;
+		if (createdKind == SessionKind.Terminal) {
+			for (tab in app.host.allTerminalTabs()) if (!tab.disposed && !known.exists(tab.resourceId) && tab.resourceId != skip) {
+				knownIds = null;
+				return {id: tab.resourceId, title: tab.title, view: tab.panel};
+			}
+			return null;
 		}
 		for (pane in app.host.panes) for (item in pane.items) {
 			var agent = UiEditorTabs.agent(item);
-			if (agent != null && !known.exists(agent.resource)) {
+			if (agent != null && !known.exists(agent.resource) && agent.resource != skip) {
 				knownIds = null;
 				return {id: agent.resource, title: agent.title, view: agent.panel};
 			}
