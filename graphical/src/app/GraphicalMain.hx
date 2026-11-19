@@ -158,8 +158,13 @@ class GraphicalMain {
 		host.title = titleOverride != null && titleOverride.length > 0 ? titleOverride : stableChannel ? "Exosuit Stable" : "exosuit";
 		host.icons = ApplicationIcons.create();
 		host.customTitlebar = true;
-		host.width = 1280;
-		host.height = 840;
+		// EXOSUIT_FORM_FACTOR=phone|desktop forces a shell (ADR 0007); phone opens a 412x915 window that takes mouse input as touch.
+		var formFactor = Sys.getEnv("EXOSUIT_FORM_FACTOR");
+		if (formFactor != "phone" && formFactor != "desktop") formFactor = null;
+		var phoneForm = formFactor == "phone";
+		host.width = phoneForm ? 412 : 1280;
+		host.height = phoneForm ? 915 : 840;
+		if (phoneForm) haxeon.ui.core.NativeInputAdapter.mouseAsTouch = true;
 		host.minimumWidth = 320;
 		host.minimumHeight = 200;
 		host.captureDirectory = captureDirectory;
@@ -169,7 +174,7 @@ class GraphicalMain {
 		host.inputScriptPath = inputScriptPath;
 		var benchmark = captureDirectory != null || recordPath != null || inputScriptPath != null
 			|| titleOverride != null && titleOverride.length > 0;
-		placementFile = benchmark ? null : new WindowPlacementFile();
+		placementFile = benchmark || phoneForm ? null : new WindowPlacementFile();
 		if (!benchmark && Sys.getEnv("EXOSUIT_HANG_WATCHDOG") != "0") {
 			hangWatchdog = new devtools.HangWatchdog(devtools.HangWatchdog.defaultFile());
 			hangWatchdog.start();
@@ -217,6 +222,12 @@ class GraphicalMain {
 			placementReader = context.windowPlacement;
 			workspace.client.ConnectTimeline.mark("window-open");
 			var dark = prefersDark(themeChoice);
+			if (phoneForm) {
+				context.touchPrimary = true;
+				// TODO(track A): context density = Density.Touch once UiContext.density exists (set it on the UiContext the app builds).
+			}
+			// Scripted "back" input goes where the system Back button does.
+			haxeon.ui.host.ScriptedInput.backHandler = context.handleBack;
 			// Input and dialogs a program driving this window over exohost's control plane goes through (EditorControl).
 			var input = new ui.control.SyntheticInput(context.events, context.window);
 			var dialogs = new ui.control.DrivenDialogs(new NativeDesktopServices(context), input.driven);
@@ -225,6 +236,7 @@ class GraphicalMain {
 				dialogs, dark, ui.TerminalPane.open,
 				(Sys.systemName() == "Linux" || Sys.systemName() == "Windows") ? function(id,cwd,restored,requestFrame,palette,group,directory)
 					return ui.TerminalPane.openRemote(function() return app == null ? null : app.terminalEndpoint(cwd, id),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
+			instance.formFactorOverride = formFactor;
 			workspace.client.ConnectTimeline.mark("app-constructed");
 			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows") {
 				try {

@@ -528,7 +528,7 @@ class AgentTabs {
   New Agent Session: a `provider` session in `group` of the open workspace, at once and with no dialog (Workbench
   design Q7), in the folder the group gives it.
  **/
- function createProviderAgent(provider:String, group:String):Void createProviderAgentIn(provider, group, sessionDirectory(group));
+ public function createProviderAgent(provider:String, group:String):Void createProviderAgentIn(provider, group, sessionDirectory(group));
  /**
   The folder to send for a new session or terminal in `group`: null lets the service resolve it, as it does from the
   group's folder, else the workspace's first. A service keeps the folder it started in, so one started in the scratch
@@ -625,6 +625,8 @@ class AgentTabs {
   if(groups != null) app.application.activeContext.openSessionGroup(record.group,groups.groups,record.workspaceRoot);
   var id=ResourceViewIdentity.view(record.workspaceRoot,record.id,"agent");
   app.host.attachAgent(makeAgentTab(id,record.id,record.workspaceRoot,record.name));
+  // Its view is read only once the client knows it is shown; the list may not change again to say so.
+  client.agentService().showAgents(UiEditorTabs.agentResources(app.host.panes,record.workspaceRoot));
   if (app.phoneLayoutActive && app.sidebar.visible) app.sidebar.setVisible(false);
   app.requestFrame();
  }

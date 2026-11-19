@@ -71,6 +71,7 @@ class AndroidExosuitFactory {
 		credentials.load(credentialDocument, credentialsUnreadable);
 		if (credentialDocument != null) for (index in 0...credentialDocument.length) credentialDocument.set(index, 0);
 		var phone = new RemoteMachines(context.events, function() return NativeKit.nk_time_seconds() * 1000, credentials, redraw);
+		ui.shell.phone.PhoneShell.remoteMachines = phone;
 		// A workspace terminal is a service-owned PTY the phone attaches to (never a local shell); the pane gets the touch
 		// extra-keys row and finger scrolling because this host's primary input is touch.
 		var openTerminal = function(id:String, cwd:String, restored:Bool, requestFrame:Void->Void, palette:ui.TerminalPalette, group:Null<String>,

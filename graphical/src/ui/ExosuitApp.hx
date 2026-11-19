@@ -78,6 +78,10 @@ import workspace.PathKey;
 import controller.WorkspaceFileSearchController;
 import scm.ScmGroupId;
 import scm.ScmSource;
+import ui.shell.DesktopShell;
+import ui.shell.Shell;
+import ui.shell.ShellSelector;
+import ui.shell.phone.PhoneShell;
 
 /**
  * exosuit's graphical shell: `DesktopUiHost` owns the window, GPU, and frame
@@ -92,7 +96,7 @@ import scm.ScmSource;
  * via `overlayView()`), and `CommandBridge` for how `application.commands`
  * reaches this shell's command picker through `ui.commands`.
  */
-@:allow(ui.WorkbenchActions, ui.ExohostWorkbenchMachine, ui.ScmPanelController, ui.AgentTabs, ui.TerminalTabs, ui.RemoteFileTabs, ui.ExosuitDiagnostics, ui.ExplorerPanelController, ui.ServedFolders, ui.SettingsTab, ui.ResponsiveLayout, ui.ContextSwitching, ui.DeviceWorkbenchMachine)
+@:allow(ui.WorkbenchActions, ui.ExohostWorkbenchMachine, ui.ScmPanelController, ui.AgentTabs, ui.TerminalTabs, ui.RemoteFileTabs, ui.ExosuitDiagnostics, ui.ExplorerPanelController, ui.ServedFolders, ui.SettingsTab, ui.ResponsiveLayout, ui.ContextSwitching, ui.DeviceWorkbenchMachine, ui.shell.DesktopShell, ui.shell.phone.PhoneShell)
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 
@@ -685,6 +689,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (saveAsHandler != null) { resolveSaveAs(true); return true; }
 		if (saveConfirmation != null) { resolveSaveConfirmation("cancel"); return true; }
 		if (trashConfirmation != null) { resolveTrashConfirmation(false); return true; }
+		// The phone shell pops its own screens and sheets before any desktop overlay logic (which would send Escape).
+		if (shellBack != null && shellBack()) return true;
 		if (settingsClosePending) { settingsClosePending = false; closingSettingsTab = null; requestFrame(); return true; }
 		if (contextMenu != null) { contextMenu = null; requestFrame(); return true; }
 		if (agentAttach != null) { agentAttach = null; requestFrame(); return true; }
@@ -948,47 +954,64 @@ class ExosuitApp implements DesktopUiApplication {
 	function hasSafeArea():Bool
 		return hostContext != null && (hostContext.safeLeft > 0 || hostContext.safeTop > 0 || hostContext.safeRight > 0 || hostContext.safeBottom > 0);
 
+	/** The shell that draws the window (ADR 0007): made on the first frame, swapped when the form factor changes. */
+	var shell:Null<Shell>;
+	/** `phone` or `desktop` (EXOSUIT_FORM_FACTOR) to force a shell; null chooses by width and touch (ShellSelector). */
+	public var formFactorOverride:Null<String>;
+	/** The views opened through the shell, by id, so a swapped-in shell can open the one the user was on. */
+	final shellViews:Map<String, ShellView> = [];
+	/** Set by the phone shell: handles system Back inside its navigation stack and returns true when it consumed it. */
+	public var shellBack:Null<Void->Bool>;
+
+	/** Whether touch is the primary input (an Android host, or the phone form-factor override). */
+	public function touchPrimary():Bool
+		return hostContext != null && hostContext.touchPrimary;
+
+	function currentShell():Shell {
+		if (shell == null) swapShell(ShellSelector.choose(viewportWidth, touchPrimary(), formFactorOverride), false);
+		return shell;
+	}
+
+	/** Disposes the shell and builds the one for `kind`; the view the user was on opens in it. */
+	function swapShell(kind:ShellKind, request:Bool = true):Void {
+		var focused = shell == null ? null : shell.focusedView();
+		if (shell != null) shell.dispose();
+		shellBack = null;
+		shell = switch kind {
+			case Desktop: new DesktopShell(this);
+			case Phone: new PhoneShell(this);
+		};
+		if (focused != null) {
+			var known = shellViews.get(focused);
+			if (known != null) shell.open(known); else shell.focus(focused);
+		}
+		if (request) requestFrame();
+	}
+
+	/** Shows the view in the shell (focusing it when open). */
+	public function openView(view:ShellView):Void {
+		shellViews.set(view.id, view);
+		currentShell().open(view);
+	}
+
+	public function focusView(id:String):Void currentShell().focus(id);
+
+	public function closeView(id:String):Void {
+		shellViews.remove(id);
+		currentShell().close(id);
+	}
+
 	public function view():View {
 		// Read first, so every root build depends on it: a bump makes the next frame a full build.
 		frameTick.value;
 		pruneStaleEditorPanes(host.allViews());
-		for (pane in host.panes) {
-			var found = false;
-			for (content in dockPanelContents) if (content.panelId == pane.id) { found = true; break; }
-			if (!found) {
-				var paneId = pane.id;
-				dockPanelContents.push(new DockPanelContent(paneId, function(_) return editorPanel(paneId)));
-			}
-		}
-		var workspaceView = new DockWorkspace("exosuit-workspace", dock, dockPanelContents);
-		workspaceView.headerActions = function(ids, _) return layoutControls.isToolGroup(ids) ? bottomPanelActions() : null;
-		workspaceView.headerActionsRevision = Std.string(layoutControls.bottomMaximized);
-		workspaceView.expandedGroup = layoutControls.expandedPanels();
-		workspaceView.hiddenPanels = responsiveRightHidden ? ["context-panel"] : [];
-		var surfaceInset = phoneLayoutActive ? 0.0 : WorkbenchSurface.INSET * 2;
-		workspaceView.availableWidth = workbenchAvailableWidth();
-		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT - surfaceInset);
-		var activityBar = new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
-			application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu);
-		activityBar.onContextMenu = showActivityBarMenu;
-		activityBar.onMove = activityMenu.move;
-		activityBar.hiddenIds = layoutModes.hiddenOnRail();
-		var workspace:View = new Row("workspace-with-activity-bar", [
-			new KeyedView("activity-bar", activityBar),
-			new KeyedView("workspace:" + host.layoutContextKey, phoneLayoutActive ? workspaceView : new WorkbenchSurface(workspaceView))
-		], fillStyle());
-		var body = new Column("exosuit-body", [
-			new KeyedView("workspace", workspace),
-			new KeyedView("status", statusBar())
-		], fillStyle());
-		var shellStyle = fillStyle();
-		shellStyle.background = theme.tokens.surface;
-		var shell:View = new AppShell("exosuit-shell", body, topBar(), null, null, shellStyle);
+		// The dock, activity rail, tab strip and status bar are the shell's (DesktopShell holds them, unchanged).
+		var shellRoot:View = currentShell().build();
 		var safe = hostContext;
-		var shellChild = new StackChild("shell", shell, 0.0, 0.0, 0, LayoutAxis.grow(), LayoutAxis.grow());
+		var shellChild = new StackChild("shell", shellRoot, 0.0, 0.0, 0, LayoutAxis.grow(), LayoutAxis.grow());
 		if (safe != null && hasSafeArea()) {
 			// System bars, a display cutout or the keyboard cover part of the surface: the shell stays inside what is left.
-			shellChild = new StackChild("shell", shell, safe.safeLeft, safe.safeTop, 0,
+			shellChild = new StackChild("shell", shellRoot, safe.safeLeft, safe.safeTop, 0,
 				LayoutAxis.fixed(viewportWidth), LayoutAxis.fixed(viewportHeight));
 		}
 		var layers:Array<StackChild> = [shellChild];
@@ -1136,16 +1159,11 @@ class ExosuitApp implements DesktopUiApplication {
 		var widthChanged = viewportWidth != safeWidth;
 		viewportWidth = safeWidth;
 		viewportHeight = safeHeight;
-		layoutModes.suspend();
-		responsive.syncResponsiveDockLayout();
-		keepSidebarFullHeight();
-		if (widthChanged && !phoneLayoutActive && dock.isOpen("explorer")) {
-			var mode = sidebar.selected();
-			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, workbenchAvailableWidth(),
-				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
-		}
-		responsive.syncResponsiveRightLayout();
-		layoutModes.resume();
+		// The shell follows the form factor: a change disposes the old shell and re-opens the focused view in the new one.
+		var wanted = ShellSelector.choose(viewportWidth, touchPrimary(), formFactorOverride);
+		if (shell == null || shell.kind() != wanted) swapShell(wanted);
+		var desktopShell = Std.downcast(shell, DesktopShell);
+		if (desktopShell != null) desktopShell.fitWindow(widthChanged);
 		var problems = host.getProblems();
 		if (problems.revision != badgedProblems) {
 			badgedProblems = problems.revision;
@@ -1266,6 +1284,9 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchActions.attach(shown);
 		requestFrame();
 	}
+
+	/** For PhoneShell: the machine the Workbench shows. */
+	public function workbenchMachine():Null<WorkbenchMachine> return workbenchActions.machine;
 
 	/** A device's Workbench machine (the phone, the browser: DeviceWorkbenchMachine), made by the device's factory. */
 	public function attachWorkbenchMachine(machine:WorkbenchMachine):Void {
@@ -1822,6 +1843,8 @@ class ExosuitApp implements DesktopUiApplication {
 		return diagnostics.diagnosticState();
 
 	public function dispose():Void {
+		if (shell != null) shell.dispose();
+		shell = null;
 		layoutModes.dispose();
 		layoutControls.dispose();
 		if (contextFiles != null) contextFiles.dispose();

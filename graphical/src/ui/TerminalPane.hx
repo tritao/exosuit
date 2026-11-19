@@ -54,6 +54,8 @@ class TerminalPane implements AgentTerminalPanel {
 		Desktop panes leave it off and are unchanged.
 	**/
 	public var touchKeys:Bool = false;
+	/** The touch row's Enter key label (PhoneShell shows "Send"). */
+	public var enterLabel:String = "\u23CE";
 	/** Draw stand-ins for symbols the host's fonts lack (Android); see TerminalGlyphs. */
 	public var substituteGlyphs:Bool = false;
 	var ctrlSticky:Bool = false;
@@ -559,7 +561,7 @@ class TerminalPane implements AgentTerminalPanel {
 		var keys = [
 			{id: "esc", label: "Esc"}, {id: "tab", label: "Tab"}, {id: "shift-tab", label: "S-Tab"}, {id: "ctrl", label: "Ctrl"},
 			{id: "left", label: "\u2190"}, {id: "down", label: "\u2193"}, {id: "up", label: "\u2191"}, {id: "right", label: "\u2192"},
-			{id: "paste", label: "Paste"}, {id: "enter", label: "\u23CE"}
+			{id: "paste", label: "Paste"}, {id: "enter", label: enterLabel}
 		];
 		var result:Array<haxeon.ui.widgets.KeyedView> = [];
 		for (key in keys) {
