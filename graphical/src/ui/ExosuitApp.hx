@@ -251,6 +251,8 @@ class ExosuitApp implements DesktopUiApplication {
 	/** The title bar's frames-per-second reading, written once a second by pollBackground and read by the toolbar. */
 	final frameRateLabel = new haxeon.reactive.Signal<String>("");
 	var nextBackgroundPoll:Float = 0.0;
+	/** A shell's timed change (a snackbar running out) redraws at this time; 0 is none. */
+	public var shellRedrawAt:Float = 0.0;
 	/**
 		Until then the background poll runs on every turn of the host loop instead of twenty times a second. Connecting to a
 		workspace is a chain of small replies (pipe, handshake, identity, catalog, first reads), each handled by a poll: at
@@ -1609,6 +1611,10 @@ class ExosuitApp implements DesktopUiApplication {
 		syncLayoutService();
 		if (zoomOverlayUntil > 0 && now >= zoomOverlayUntil) {
 			zoomOverlayUntil = 0;
+			requestFrame();
+		}
+		if (shellRedrawAt > 0 && now >= shellRedrawAt) {
+			shellRedrawAt = 0;
 			requestFrame();
 		}
 		if (host.syncSideBySidePanes()) requestFrame();

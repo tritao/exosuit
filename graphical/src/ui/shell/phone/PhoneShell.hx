@@ -128,6 +128,7 @@ class PhoneShell implements Shell implements PhoneHost {
 
 	public function notice(text:String, ?actionLabel:String, ?action:Void->Void):Void {
 		snack = {text: text, label: actionLabel, action: action, until: Sys.time() + SNACK_SECONDS};
+		app.shellRedrawAt = Sys.time() + SNACK_SECONDS + 0.05;
 		app.requestFrame();
 	}
 
