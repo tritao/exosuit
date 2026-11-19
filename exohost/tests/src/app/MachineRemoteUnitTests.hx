@@ -310,6 +310,12 @@ private class FakeMachine implements MachineSessionHost {
 		return {machine: "machine-1", name: "test", revision: revision(), workspaces: listed, relay: null};
 	}
 
+	public function listSessions(deviceId:String):exohost.remote.DeferredReply {
+		var reply = new exohost.remote.DeferredReply();
+		reply.resolve({ok: true, sessions: [], unavailable: []});
+		return reply;
+	}
+
 	public function openService(deviceId:String, workspace:String, grants:Array<String>, start:Bool,
 			done:(Null<MessageTransport>, Null<workspace.client.OpenedService>, Null<String>) -> Void):Void {
 		var pipe = MemoryTransport.pair();

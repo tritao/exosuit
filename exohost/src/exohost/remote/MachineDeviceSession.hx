@@ -8,6 +8,9 @@ import haxeon.rpc.RpcPeerOptions;
 import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
+import workspace.service.MachineDirectoryProtocol.MachineSessions;
+import exohost.remote.DeferredReply;
+import workspace.service.MachineDirectoryProtocol.MachineSessionEntry;
 import workspace.service.MachineGrants;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 import workspace.transport.StreamMultiplexer;
@@ -27,6 +30,8 @@ interface MachineSessionHost {
 		idle and `start` is true. `done` gets the connection and the service it reached, or an error code
 		(`unknown_workspace`, `workspace_unavailable`).
 	**/
+	/** The sessions of `deviceId`'s readable running workspaces, as exohost's `sessions` op answers (polled until `reply` is set). */
+	function listSessions(deviceId:String):DeferredReply;
 	function openService(deviceId:String, workspace:String, grants:Array<String>, start:Bool,
 		done:(Null<MessageTransport>, Null<workspace.client.OpenedService>, Null<String>) -> Void):Void;
 }
@@ -67,6 +72,8 @@ class MachineDeviceSession {
 	var nextStream:Int = 1;
 	var shownRevision:Int;
 	var closed:Bool = false;
+	/** SESSIONS requests waiting for their workspaces' services. */
+	final asked:Array<{reply:DeferredReply, answer:MachineSessions->Void}> = [];
 
 	public function new(deviceId:String, secure:MessageTransport, host:MachineSessionHost, clock:Void->Float) {
 		this.deviceId = deviceId;
@@ -133,6 +140,7 @@ class MachineDeviceSession {
 		}
 		pumpStreams();
 		checkGrants();
+		answerSessions();
 		var revision = host.revision();
 		if (revision != shownRevision && current != null) {
 			shownRevision = revision;
@@ -204,6 +212,14 @@ class MachineDeviceSession {
 			shownRevision = host.revision();
 			context.respond(host.directory(deviceId));
 		});
+		current.register(MachineDirectoryProtocol.SESSIONS, function(request, context) {
+			var wanted = request.machine;
+			if (wanted != null && wanted != host.machineId()) {
+				context.fail({code: "machine_mismatch", message: "This is not that machine", ambiguous: false});
+				return;
+			}
+			asked.push({reply: host.listSessions(deviceId), answer: function(value) context.respond(value)});
+		});
 		current.register(MachineDirectoryProtocol.OPEN, function(request, context) {
 			if (!MachineDirectoryProtocol.validOpen(request)) {
 				context.fail({code: "invalid_request", message: "Invalid workspace reference", ambiguous: false});
@@ -257,6 +273,30 @@ class MachineDeviceSession {
 			closeStream(request.stream, false);
 			context.respond({stream: request.stream});
 		});
+	}
+
+	/** Answers the SESSIONS requests whose services have all replied (or timed out), in exohost's `sessions` reply shape. */
+	function answerSessions():Void {
+		var at = asked.length;
+		while (--at >= 0) {
+			var item = asked[at];
+			var reply:Dynamic = item.reply.reply;
+			if (reply == null)
+				continue;
+			asked.splice(at, 1);
+			var entries:Array<MachineSessionEntry> = [];
+			for (entry in workspace.sessions.SessionIndex.fromJson(reply))
+				entries.push({id: entry.id, name: entry.name, workspace: entry.workspaceId, workspaceName: entry.workspaceName,
+					groupPath: entry.groupPath, groupNames: entry.groupNames, kind: (entry.kind : String), state: (entry.state : String),
+					lastActive: entry.lastActive, last: entry.last});
+			var unavailable:Array<String> = [];
+			var listed:Dynamic = Reflect.field(reply, "unavailable");
+			if (Std.isOfType(listed, Array))
+				for (id in (listed : Array<Dynamic>))
+					if (Std.isOfType(id, String))
+						unavailable.push(id);
+			item.answer({sessions: entries, unavailable: unavailable});
+		}
 	}
 
 	public function close():Void {

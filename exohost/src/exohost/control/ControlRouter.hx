@@ -6,7 +6,7 @@ import haxe.io.Path;
 import exohost.LinkedEditor;
 import exohost.EditorDirectory;
 import exohost.ExohostRecord.ExohostRecords;
-import exohost.remote.MachineRemote.DeferredReply;
+import exohost.remote.DeferredReply;
 import workspace.ContextKey;
 import workspace.PathKey;
 import workspace.transport.NativeRpcTransport;

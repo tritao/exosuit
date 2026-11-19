@@ -12,7 +12,7 @@ import exohost.ExohostInventory.ExohostProcess;
 import exohost.control.ControlRouter;
 import exohost.control.PragticalPipes;
 import exohost.remote.MachineRemote;
-import exohost.remote.MachineRemote.DeferredReply;
+import exohost.remote.DeferredReply;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
@@ -161,6 +161,7 @@ class ExohostDaemon {
 		});
 		remote = new MachineRemote(runtime.events, hub, machine, services);
 		sessions = new ExohostSessions(hub, services);
+		remote.askSessions = function(ids) return sessions.ask(machine().state, ids);
 		runtime.events.listen(onEvent);
 		inventory = new ExohostInventory(true, directory.editors());
 		refreshedAt = Sys.time();

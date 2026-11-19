@@ -61,6 +61,29 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 	@:id(1) var stream:Int;
 }
 
+/** One session or terminal in a granted workspace, as the phone's session index holds it (ADR 0007). */
+@:wire typedef MachineSessionEntry = {
+	@:id(1) var id:String;
+	@:id(2) var name:String;
+	@:id(3) var workspace:String;
+	@:id(4) var workspaceName:String;
+	@:id(5) var groupPath:Array<String>;
+	@:id(6) var groupNames:Array<String>;
+	/** `claude`, `codex`, `terminal`, `chat` or `other`. */
+	@:id(7) var kind:String;
+	/** `attention`, `working`, `idle` or `exited`. */
+	@:id(8) var state:String;
+	/** Milliseconds since the epoch. */
+	@:id(9) var lastActive:Float;
+	@:id(10) var last:String;
+}
+
+/** SESSIONS: every session of the running workspaces the device may read; a service that did not answer is in `unavailable`. */
+@:wire typedef MachineSessions = {
+	@:id(1) var sessions:Array<MachineSessionEntry>;
+	@:id(2) var unavailable:Array<String>;
+}
+
 /** A hint that the device's directory changed; DIRECTORY reads it. */
 @:wire typedef DirectoryChange = {
 	@:id(1) var revision:Int;
@@ -91,6 +114,10 @@ class MachineDirectoryProtocol {
 	public static final DIRECTORY = new RpcMethod<MachineQuery, MachineDirectory>(180, function(v:MachineQuery) return MessagePack.encode(v),
 		function(b:Bytes):MachineQuery return MessagePack.decode(b), function(v:MachineDirectory) return MessagePack.encode(v),
 		function(b:Bytes):MachineDirectory return MessagePack.decode(b));
+	/** Sessions of the device's readable, running workspaces; exohost asks each service, as its own `sessions` op does. */
+	public static final SESSIONS = new RpcMethod<MachineQuery, MachineSessions>(184, function(v:MachineQuery) return MessagePack.encode(v),
+		function(b:Bytes):MachineQuery return MessagePack.decode(b), function(v:MachineSessions) return MessagePack.encode(v),
+		function(b:Bytes):MachineSessions return MessagePack.decode(b));
 	public static final OPEN = new RpcMethod<OpenWorkspace, WorkspaceStream>(181, function(v:OpenWorkspace) return MessagePack.encode(v),
 		function(b:Bytes):OpenWorkspace return MessagePack.decode(b), function(v:WorkspaceStream) return MessagePack.encode(v),
 		function(b:Bytes):WorkspaceStream return MessagePack.decode(b));

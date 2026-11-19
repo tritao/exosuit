@@ -295,7 +295,7 @@ class SessionIndex {
 		return result;
 	}
 
-	static function kindOf(value:Dynamic):SessionKind
+	public static function kindOf(value:Dynamic):SessionKind
 		return switch text(value) {
 			case "claude": SessionKind.Claude;
 			case "codex": SessionKind.Codex;
@@ -304,7 +304,7 @@ class SessionIndex {
 			default: SessionKind.Other;
 		}
 
-	static function stateOf(value:Dynamic):SessionState
+	public static function stateOf(value:Dynamic):SessionState
 		return switch text(value) {
 			case "attention": SessionState.Attention;
 			case "working": SessionState.Working;

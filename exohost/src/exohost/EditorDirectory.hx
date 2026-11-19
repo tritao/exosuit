@@ -5,7 +5,7 @@ import haxe.io.Bytes;
 import exohost.ExohostRecord.ExohostRecords;
 import exohost.LinkedEditor;
 import exohost.control.ControlError;
-import exohost.remote.MachineRemote.DeferredReply;
+import exohost.remote.DeferredReply;
 import workspace.transport.NativeRpcTransport;
 
 private typedef Entry = {

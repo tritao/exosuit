@@ -5,7 +5,7 @@ import haxeon.rpc.RpcClientState;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcPeerOptions;
 import exohost.MachineCatalog.MachineState;
-import exohost.remote.MachineRemote.DeferredReply;
+import exohost.remote.DeferredReply;
 import workspace.client.WorkspaceCatalogMirror;
 import workspace.client.WorkspaceCatalogWatch;
 import workspace.service.WorkspaceAgentProtocol;

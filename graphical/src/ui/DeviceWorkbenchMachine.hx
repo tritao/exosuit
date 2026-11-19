@@ -33,8 +33,34 @@ class DeviceWorkbenchMachine implements WorkbenchMachine {
 
 	final sessionSource:workspace.client.SessionIndexSource = new workspace.client.SessionIndexSource();
 
-	public function sessionIndex():workspace.sessions.SessionIndex
-		return WorkbenchSessions.of(this, sessionSource);
+	final merged:workspace.sessions.SessionIndex = new workspace.sessions.SessionIndex();
+	var mergedKey = "";
+
+	/**
+		The index from the catalogs this device reads (WorkbenchSessions), plus the machine's SESSIONS answer for
+		workspaces whose catalog it has not read yet, so every readable session is listed before its workspace is linked.
+	**/
+	public function sessionIndex():workspace.sessions.SessionIndex {
+		var own = WorkbenchSessions.of(this, sessionSource);
+		var shown = machine();
+		var device = shown == null ? null : shown.machine;
+		var relay = device == null ? null : device.sessions;
+		if (device == null || relay == null || relay.length == 0)
+			return own;
+		var key = own.revision + ":" + device.revision;
+		if (key != mergedKey) {
+			mergedKey = key;
+			var covered:Map<String, Bool> = [];
+			for (entry in own.entries)
+				covered.set(entry.workspaceId, true);
+			var entries = own.entries.copy();
+			for (entry in relay)
+				if (!covered.exists(entry.workspaceId))
+					entries.push(entry);
+			merged.replace(entries);
+		}
+		return merged;
+	}
 
 	public function exohost():Null<MachineClient>
 		return null;

@@ -132,6 +132,9 @@ class DeviceMachine {
 	public var error(default, null):Null<String>;
 	/** Changes whenever `directory`, `error` or `connected` does. */
 	public var revision(default, null):Int = 0;
+	/** The sessions of the readable running workspaces, from the machine's SESSIONS answer; null until the first one. */
+	public var sessions(default, null):Null<Array<workspace.sessions.SessionIndex.SessionEntry>> = null;
+	var readingSessions = false;
 	/** The terminal error code when the machine refused this device for good (revoked, bad identity); null otherwise. */
 	public var refusal(default, null):Null<String>;
 
@@ -237,6 +240,28 @@ class DeviceMachine {
 		read(connection);
 	}
 
+	/** Reads SESSIONS after each directory read; an older machine without it leaves `sessions` null. */
+	function readSessions(connection:RpcConnection):Void {
+		if (readingSessions)
+			return;
+		readingSessions = true;
+		connection.call(MachineDirectoryProtocol.SESSIONS, {machine: machineId}, CALL_TIMEOUT, function(value) {
+			readingSessions = false;
+			if (machineConnection != connection)
+				return;
+			var listed:Array<workspace.sessions.SessionIndex.SessionEntry> = [];
+			for (entry in value.sessions)
+				listed.push({id: entry.id, name: entry.name, machineId: machineId == null ? "" : machineId, workspaceId: entry.workspace,
+					workspaceName: entry.workspaceName, groupPath: entry.groupPath, groupNames: entry.groupNames,
+					kind: workspace.sessions.SessionIndex.kindOf(entry.kind), state: workspace.sessions.SessionIndex.stateOf(entry.state),
+					lastActive: entry.lastActive, last: entry.last});
+			sessions = listed;
+			revision++;
+		}, function(_) {
+			readingSessions = false;
+		});
+	}
+
 	function read(connection:RpcConnection):Void {
 		if (reading) {
 			dirty = true;
@@ -262,6 +287,7 @@ class DeviceMachine {
 				directory = value;
 				revision++;
 			}
+			readSessions(connection);
 			if (dirty)
 				read(connection);
 		}, function(failure) {

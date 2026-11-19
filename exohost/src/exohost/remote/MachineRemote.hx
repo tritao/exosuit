@@ -29,17 +29,6 @@ import workspace.transport.NativeRpcHub;
 import workspace.transport.RelayMachineEndpoint;
 import workspace.transport.RelayRegistrationProver;
 
-/** A reply a control request gets later, when the pairing step it started completes. */
-class DeferredReply {
-	public var reply(default, null):Null<Dynamic> = null;
-	public final started:Float = Sys.time();
-
-	public function new() {}
-
-	public function resolve(value:Dynamic):Void
-		reply = value;
-}
-
 /** An approval in flight: answered once the device has it, or when it fails. */
 private typedef PendingApproval = {
 	var deviceId:String;
@@ -372,6 +361,20 @@ class MachineRemote implements MachineSessionHost {
 		}
 		// The relay id names the pairing to the device; the machine's own id is the catalog's (they differ for relays set up now).
 		return {machine: machine.id, name: machine.name, revision: revision(), workspaces: listed, relay: endpoint == null ? null : endpoint.machineId};
+	}
+
+	/** Set by the daemon: its machine-wide `sessions` op, narrowed to the given workspace ids. */
+	public var askSessions:Null<Array<String>->DeferredReply> = null;
+
+	public function listSessions(deviceId:String):DeferredReply {
+		// Only workspaces the device may read; an empty list would mean "every workspace" to the op, so answer that here.
+		var readable = [for (entry in directory(deviceId).workspaces) if (entry.grants.indexOf(workspace.service.WorkspaceProtocol.READ) >= 0) entry.workspace];
+		var ask = askSessions;
+		if (ask != null && readable.length > 0)
+			return ask(readable);
+		var empty = new DeferredReply();
+		empty.resolve({ok: true, sessions: [], unavailable: []});
+		return empty;
 	}
 
 	public function openService(deviceId:String, workspace:String, grants:Array<String>, start:Bool,

@@ -5,7 +5,7 @@ import haxe.io.Path;
 import haxeon.platform.event.EventPump;
 import nativekit.ffi.NativeKitTypes;
 import exohost.LinkedEditor;
-import exohost.remote.MachineRemote.DeferredReply;
+import exohost.remote.DeferredReply;
 import sys.FileSystem;
 import workspace.transport.NativeKitByteStream;
 import workspace.transport.NativeRpcHub;
