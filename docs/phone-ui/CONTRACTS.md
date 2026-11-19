@@ -109,8 +109,10 @@ workspaces, machine client, views, commands) and holds one `shell:Shell`.
 - exohost control op `sessions`: request `{"op":"sessions"}`; reply
   `{"ok":true,"machine":{"id","name"},"sessions":[SessionEntry JSON]}` merging every running workspace service's
   sessions and terminals (ask each service as the Workbench does today; a service that does not answer in 2 s is
-  listed in `"unavailable":[workspaceId]`). Also over the relay for paired devices with `workspace.read` grants
-  (only granted workspaces).
+  listed in `"unavailable":[workspaceId]`). Changed while building: there is no relay variant. A paired phone
+  builds the same index from the workspaces it is granted (`WorkbenchSessions.of` links every running granted
+  workspace and reads its catalog), so a second path over the relay would only duplicate it; the desktop and the
+  phone share that one call.
 - `SessionIndex.query(q:SessionQuery):Array<SessionSection>`: filter by workspace ids, group ids (a group selects
   its descendants), kinds, states, text (name contains, case-insensitive); sort: attention, working, then
   `lastActive` descending; section by `None | Workspace | Group | State | Day`. Group sections are flat, titled with
