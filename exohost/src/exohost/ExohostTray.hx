@@ -68,8 +68,8 @@ class ExohostMenu implements ExohostMenuModel.ExohostMenuSink {
 }
 
 /**
-	The Windows notification-area icon. A click asks for the menu; the daemon builds it from a fresh
-	inventory each time, so it never shows stale processes.
+	The Windows notification-area icon, or the macOS menu-bar item. A click asks for the menu; the daemon
+	builds it from a fresh inventory each time, so it never shows stale processes.
 **/
 class ExohostTray {
 	final tray:OwnedTrayHandle;

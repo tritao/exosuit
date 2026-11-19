@@ -168,7 +168,7 @@ class ExohostDaemon {
 		sys.io.AtomicFile.write(Path.join([ExohostPaths.home(), "daemon.json"]),
 			Json.stringify({version: 1, pid: Sys.getPid(), endpoint: ExohostPaths.endpoint()}) + "\n");
 		ExohostLogin.refresh();
-		if (Sys.systemName() == "Windows" && Sys.getEnv("EXOSUIT_EXOHOST_TRAY") != "0") {
+		if ((Sys.systemName() == "Windows" || Sys.systemName() == "Mac") && Sys.getEnv("EXOSUIT_EXOHOST_TRAY") != "0") {
 			try tray = new ExohostTray(inventory.summary(), findIcon()) catch (_:Dynamic) tray = null;
 		}
 	}
