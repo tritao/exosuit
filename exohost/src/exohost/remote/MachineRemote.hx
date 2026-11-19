@@ -363,15 +363,38 @@ class MachineRemote implements MachineSessionHost {
 		return {machine: machine.id, name: machine.name, revision: revision(), workspaces: listed, relay: endpoint == null ? null : endpoint.machineId};
 	}
 
-	/** Set by the daemon: its machine-wide `sessions` op, narrowed to the given workspace ids. */
-	public var askSessions:Null<Array<String>->DeferredReply> = null;
+	/**
+		Set by the daemon: its machine-wide `sessions` op, narrowed to the given workspace ids, listing terminal rows only
+		of the second list's workspaces and agent session rows only of the third's.
+	**/
+	public var askSessions:Null<(Array<String>, Array<String>, Array<String>) -> DeferredReply> = null;
 
+	/**
+		The sessions a device may see, by its grants per workspace: a workspace is asked only when the device may read it
+		and its catalog; its terminal rows are listed only with the terminal read grant, its agent sessions only with the
+		agent read grant.
+	**/
 	public function listSessions(deviceId:String):DeferredReply {
-		// Only workspaces the device may read; an empty list would mean "every workspace" to the op, so answer that here.
-		var readable = [for (entry in directory(deviceId).workspaces) if (entry.grants.indexOf(workspace.service.WorkspaceProtocol.READ) >= 0) entry.workspace];
+		var readable:Array<String> = [], terminals:Array<String> = [], agents:Array<String> = [];
+		for (entry in directory(deviceId).workspaces) {
+			var grants = entry.grants;
+			if (grants.indexOf(workspace.service.WorkspaceProtocol.READ) < 0
+				|| grants.indexOf(workspace.service.WorkspaceCatalogProtocol.CAPABILITY) < 0)
+				continue;
+			var seesTerminals = grants.indexOf(workspace.service.WorkspaceTerminalProtocol.READ) >= 0;
+			var seesAgents = grants.indexOf(workspace.service.WorkspaceAgentProtocol.READ) >= 0;
+			if (!seesTerminals && !seesAgents)
+				continue;
+			readable.push(entry.workspace);
+			if (seesTerminals)
+				terminals.push(entry.workspace);
+			if (seesAgents)
+				agents.push(entry.workspace);
+		}
+		// An empty list would mean "every workspace" to the op, so answer that here.
 		var ask = askSessions;
 		if (ask != null && readable.length > 0)
-			return ask(readable);
+			return ask(readable, terminals, agents);
 		var empty = new DeferredReply();
 		empty.resolve({ok: true, sessions: [], unavailable: []});
 		return empty;

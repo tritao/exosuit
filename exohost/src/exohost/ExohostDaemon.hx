@@ -161,7 +161,7 @@ class ExohostDaemon {
 		});
 		remote = new MachineRemote(runtime.events, hub, machine, services);
 		sessions = new ExohostSessions(hub, services);
-		remote.askSessions = function(ids) return sessions.ask(machine().state, ids);
+		remote.askSessions = function(ids, terminals, agents) return sessions.ask(machine().state, ids, terminals, agents);
 		runtime.events.listen(onEvent);
 		inventory = new ExohostInventory(true, directory.editors());
 		refreshedAt = Sys.time();

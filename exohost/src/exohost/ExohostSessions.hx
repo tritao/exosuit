@@ -34,6 +34,11 @@ private typedef Ask = {
 	var probes:Array<Probe>;
 	var deadline:Float;
 	var wanted:Null<Array<String>>;
+	/** Running workspaces whose read could not start: listed in `unavailable`. */
+	var failed:Array<String>;
+	/** The workspaces whose terminal rows, and whose agent session rows, are listed; null for all. */
+	var terminalsOf:Null<Array<String>>;
+	var sessionsOf:Null<Array<String>>;
 }
 
 /**
@@ -64,11 +69,13 @@ class ExohostSessions {
 
 	/**
 		Starts reading the running services' catalogs; the reply is a DeferredReply resolved by `poll`. `wanted` limits the
-		workspaces (null for all); `machine` is the machine's catalog.
+		workspaces (null for all); `machine` is the machine's catalog. `terminalsOf` and `sessionsOf` (null for all) name
+		the workspaces whose terminal rows and agent session rows the reply may list (a paired device's grants).
 	**/
-	public function ask(machine:MachineState, wanted:Null<Array<String>>):DeferredReply {
+	public function ask(machine:MachineState, wanted:Null<Array<String>>, ?terminalsOf:Array<String>, ?sessionsOf:Array<String>):DeferredReply {
 		var reply = new DeferredReply();
 		var probes:Array<Probe> = [];
+		var failed:Array<String> = [];
 		for (workspace in machine.workspaces) {
 			if (wanted != null && wanted.indexOf(workspace.id) < 0)
 				continue;
@@ -78,8 +85,11 @@ class ExohostSessions {
 			var probe = start(workspace.id, workspace.name, service.endpoint);
 			if (probe != null)
 				probes.push(probe);
+			else
+				failed.push(workspace.id);
 		}
-		asks.push({reply: reply, machine: machine, probes: probes, deadline: Sys.time() + TIMEOUT_SECONDS, wanted: wanted});
+		asks.push({reply: reply, machine: machine, probes: probes, deadline: Sys.time() + TIMEOUT_SECONDS, wanted: wanted, failed: failed,
+			terminalsOf: terminalsOf, sessionsOf: sessionsOf});
 		return reply;
 	}
 
@@ -146,16 +156,24 @@ class ExohostSessions {
 
 	function finish(ask:Ask):Void {
 		var entries:Array<SessionEntry> = [];
-		var unavailable:Array<String> = [];
+		var unavailable:Array<String> = ask.failed.copy();
+		var terminalsOf = ask.terminalsOf, sessionsOf = ask.sessionsOf;
 		for (probe in ask.probes) {
 			var mirror = probe.mirror;
 			if (mirror == null)
 				unavailable.push(probe.workspace);
 			else
-				entries = entries.concat(source.entriesOf(ask.machine.id, probe.workspace, probe.name, mirror));
-			probe.client.close();
-			if (probe.watch != null)
-				probe.watch.dispose();
+				entries = entries.concat(source.entriesOf(ask.machine.id, probe.workspace, probe.name, mirror,
+					sessionsOf == null || sessionsOf.indexOf(probe.workspace) >= 0, terminalsOf == null || terminalsOf.indexOf(probe.workspace) >= 0));
+			// A failing close must not leave the reply unresolved.
+			try {
+				probe.client.close();
+			} catch (_:Dynamic) {}
+			var watch = probe.watch;
+			if (watch != null)
+				try {
+					watch.dispose();
+				} catch (_:Dynamic) {}
 		}
 		ask.reply.resolve({
 			ok: true,

@@ -51,10 +51,14 @@ class SessionIndexSource {
 		return index;
 	}
 
-	/** The sessions and terminals of one workspace's catalog as entries. */
-	public function entriesOf(machineId:String, workspaceId:String, workspaceName:String, mirror:WorkspaceCatalogMirror):Array<SessionEntry> {
+	/**
+		The sessions and terminals of one workspace's catalog as entries. `sessions` and `terminals` leave out the agent
+		session rows or the terminal rows (a paired device sees only what its grants allow).
+	**/
+	public function entriesOf(machineId:String, workspaceId:String, workspaceName:String, mirror:WorkspaceCatalogMirror, sessions:Bool = true,
+			terminals:Bool = true):Array<SessionEntry> {
 		var result:Array<SessionEntry> = [];
-		for (session in mirror.sessionList()) {
+		if (sessions) for (session in mirror.sessionList()) {
 			var kind = switch session.provider {
 				case null, "codex": SessionKind.Codex;
 				case "claude": SessionKind.Claude;
@@ -63,7 +67,7 @@ class SessionIndexSource {
 			result.push(entry(machineId, workspaceId, workspaceName, mirror, session.id, session.name, session.group, kind,
 				stateOf(session.state, session.attention)));
 		}
-		for (terminal in mirror.terminalList()) {
+		if (terminals) for (terminal in mirror.terminalList()) {
 			var kind = switch terminal.agentProvider {
 				case null, "": SessionKind.Terminal;
 				case "codex": SessionKind.Codex;
