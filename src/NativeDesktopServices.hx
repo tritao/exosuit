@@ -171,7 +171,7 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 
 	static function require(result:Result, operation:String):Void
 		if (result != Result.Ok)
-			throw 'NativeKit could not $operation (${(result : Int)}): ${NativeKit.nk_last_error()}';
+			throw 'NativeKit could not $operation (${(cast result : Int)}): ${NativeKit.nk_last_error()}';
 
 	/** Converts a `file://` resource URI to a local filesystem path. */
 	public static function localPath(uri:String):String {

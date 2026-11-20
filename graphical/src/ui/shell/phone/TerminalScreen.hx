@@ -45,28 +45,28 @@ class TerminalScreen extends PhoneUi {
 	}
 
 	public function build():View {
-		var back = tappableFit("back", tile("back-tile", 44, 0, SURFACE, icon("back", IconName.ArrowLeft, 22, TEXT)), host.back);
-		var texts = column("titles", [
-			kv("name", text(clip(title, 40), 16, TEXT, true)),
-			kv("sub", text(clip(subtitle(), 56), 12, SECONDARY, true))
+		var back = PhoneUi.tappableFit("back", PhoneUi.tile("back-tile", 44, 0, PhoneUi.SURFACE, PhoneUi.icon("back", IconName.ArrowLeft, 22, PhoneUi.TEXT)), host.back);
+		var texts = PhoneUi.column("titles", [
+			PhoneUi.kv("name", PhoneUi.text(PhoneUi.clip(title, 40), 16, PhoneUi.TEXT, true)),
+			PhoneUi.kv("sub", PhoneUi.text(PhoneUi.clip(subtitle(), 56), 12, PhoneUi.SECONDARY, true))
 		], function(s) {
 			s.width = LayoutAxis.grow();
 			s.clipHorizontal = true;
 		});
-		var parts = [kv("back", back), kv("titles", texts)];
+		var parts = [PhoneUi.kv("back", back), PhoneUi.kv("titles", texts)];
 		var menuEntry = entry;
 		if (menuEntry != null)
-			parts.push(kv("menu", tappableFit("menu", tile("menu-tile", 44, 0, SURFACE, text("⋮", 24, TEXT)), function() host.sessionMenu(menuEntry))));
-		var header = row("terminal-header", parts, function(s) {
+			parts.push(PhoneUi.kv("menu", PhoneUi.tappableFit("menu", PhoneUi.tile("menu-tile", 44, 0, PhoneUi.SURFACE, PhoneUi.text("⋮", 24, PhoneUi.TEXT)), function() host.sessionMenu(menuEntry))));
+		var header = PhoneUi.row("terminal-header", parts, function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(8, 8, 8, 8);
 			s.childGap = 8;
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 		});
-		var body = column("terminal-body", [kv("panel", panel)], function(s) {
+		var body = PhoneUi.column("terminal-body", [PhoneUi.kv("panel", panel)], function(s) {
 			s.width = LayoutAxis.grow();
 			s.height = LayoutAxis.grow();
 		});
-		return PhoneChrome.screen("terminal-screen", [kv("header", header), kv("rule", rule("rule")), kv("body", body)], false);
+		return PhoneChrome.screen("terminal-screen", [PhoneUi.kv("header", header), PhoneUi.kv("rule", PhoneUi.rule("rule")), PhoneUi.kv("body", body)], false);
 	}
 }

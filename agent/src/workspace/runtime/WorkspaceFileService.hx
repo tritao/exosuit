@@ -1270,7 +1270,8 @@ class WorkspaceFileService {
 		var revision = new StringBuf();
 		addHashField(revision, workspace);
 		addHashField(revision, root);
-		addHashField(revision, Std.string((entry.get_kind() : Int)));
+		var kind:Int = cast entry.get_kind();
+		addHashField(revision, Std.string(kind));
 		addHashField(revision, Int64.toStr(entry.get_size()));
 		addHashField(revision, Int64.toStr(entry.get_modified_unix_ns()));
 		addHashField(revision, Int64.toStr(entry.get_changed_unix_ns()));

@@ -51,7 +51,7 @@ class InspectionAgent {
 				if (node.styleType == "devtools-overlay") return;
 				if (node.invalidationFlags == UiDirtyFlag.None) return;
 				if (events.length >= 64) { truncated = true; return; }
-				events.push({id:node.id.value, kind:"invalidation", flags:(node.invalidationFlags : Int), type:node.styleType});
+				events.push({id:node.id.value, kind:"invalidation", flags:(cast node.invalidationFlags : Int), type:node.styleType});
 			});
 			frameEvents.set(lastFrame, {id:lastFrame, events:events, truncated:truncated});
 		}

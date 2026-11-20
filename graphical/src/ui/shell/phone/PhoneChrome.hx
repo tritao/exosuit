@@ -16,50 +16,50 @@ import workspace.sessions.SessionIndex.SessionSectioning;
 class PhoneChrome extends PhoneUi {
 	/** A screen: the children stacked, filling the stack's page on the ground colour. */
 	public static function screen(key:String, children:Array<KeyedView>, background = true):View
-		return column(key, children, function(s) {
+		return PhoneUi.column(key, children, function(s) {
 			s.width = LayoutAxis.grow();
 			s.height = LayoutAxis.stretch();
-			if (background) s.background = GROUND;
+			if (background) s.background = PhoneUi.GROUND;
 		});
 
 	/** `Machines`, `Files`: a plain heading over a white band. */
 	public static function heading(title:String):View
-		return column("heading", [
-			kv("t", text(title, 26, TEXT)),
-			kv("rule", filler("gap", 12))
+		return PhoneUi.column("heading", [
+			PhoneUi.kv("t", PhoneUi.text(title, 26, PhoneUi.TEXT)),
+			PhoneUi.kv("rule", PhoneUi.filler("gap", 12))
 		], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 20, 16, 0);
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 		});
 
 	/** The title switcher: `name ▾` over a subtitle. */
 	public static function switcher(host:PhoneHost, title:String, subtitle:String, trailing:Null<View>, belowRule:Bool):View {
-		var label = row("switch-label", [
-			kv("t", text(clip(title, 24), 22, TEXT)),
-			kv("c", icon("c", IconName.ChevronDown, 18, TEXT))
+		var label = PhoneUi.row("switch-label", [
+			PhoneUi.kv("t", PhoneUi.text(PhoneUi.clip(title, 24), 22, PhoneUi.TEXT)),
+			PhoneUi.kv("c", PhoneUi.icon("c", IconName.ChevronDown, 18, PhoneUi.TEXT))
 		], function(s) s.childGap = 6);
-		var block = column("switch-block", [
-			kv("tap", tappableFit("tap", label, host.chooseScope)),
-			kv("sub", text(clip(subtitle, 52), 13, SECONDARY))
+		var block = PhoneUi.column("switch-block", [
+			PhoneUi.kv("tap", PhoneUi.tappableFit("tap", label, host.chooseScope)),
+			PhoneUi.kv("sub", PhoneUi.text(PhoneUi.clip(subtitle, 52), 13, PhoneUi.SECONDARY))
 		], function(s) {
 			s.width = LayoutAxis.grow();
 			s.childGap = 2;
 		});
-		var parts = [kv("block", block)];
-		if (trailing != null) parts.push(kv("trailing", trailing));
-		var bar = row("switch-bar", parts, function(s) {
+		var parts = [PhoneUi.kv("block", block)];
+		if (trailing != null) parts.push(PhoneUi.kv("trailing", trailing));
+		var bar = PhoneUi.row("switch-bar", parts, function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 14, 16, 14);
 			s.childGap = 12;
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 		});
-		return belowRule ? column("switch-framed", [kv("bar", bar), kv("rule", rule("rule"))], function(s) s.width = LayoutAxis.stretch()) : bar;
+		return belowRule ? PhoneUi.column("switch-framed", [PhoneUi.kv("bar", bar), PhoneUi.kv("rule", PhoneUi.rule("rule"))], function(s) s.width = LayoutAxis.stretch()) : bar;
 	}
 
 	/** The round accent "+" button. */
 	public static function newButton(host:PhoneHost):View
-		return tappableFit("new-session", tile("new-tile", 44, 22, ACCENT, icon("plus", IconName.Plus, 20, WHITE)), host.newSession);
+		return PhoneUi.tappableFit("new-session", PhoneUi.tile("new-tile", 44, 22, PhoneUi.ACCENT, PhoneUi.icon("plus", IconName.Plus, 20, PhoneUi.WHITE)), host.newSession);
 
 	static function groupName(index:SessionIndex, id:String):String {
 		for (entry in index.entries) for (i in 0...entry.groupPath.length)
@@ -69,7 +69,7 @@ class PhoneChrome extends PhoneUi {
 
 	static function filterChip(key:String, none:String, names:Array<String>, onOpen:Void->Void, onClear:Void->Void):View {
 		if (names.length == 0) return new Chip(key, none, onOpen, false, ChipTrailing.Chevron);
-		var label = names.length == 1 ? clip(names[0], 18) : none + " · " + names.length;
+		var label = names.length == 1 ? PhoneUi.clip(names[0], 18) : none + " · " + names.length;
 		return new Chip(key, label, onOpen, true, ChipTrailing.Clear(onClear));
 	}
 
@@ -101,16 +101,16 @@ class PhoneChrome extends PhoneUi {
 	/** `Sections: group`, the tinted pill that opens the sectioning choice. */
 	public static function sectionsPill(host:PhoneHost, value:SessionSectioning, all:Bool, compact:Bool):View {
 		var label = "Sections: " + PhoneState.sectioningLabel(value);
-		var pillView = compact ? pill("pill", label, ACCENT_TINT, ACCENT_DARK, 13, 12, 7, 16) : pill("pill", label, ACCENT_TINT, ACCENT_DARK, 14, 14, 8, 18);
-		return tappableFit("sections", pillView, function() host.chooseSectioning(all));
+		var pillView = compact ? PhoneUi.pill("pill", label, PhoneUi.ACCENT_TINT, PhoneUi.ACCENT_DARK, 13, 12, 7, 16) : PhoneUi.pill("pill", label, PhoneUi.ACCENT_TINT, PhoneUi.ACCENT_DARK, 14, 14, 8, 18);
+		return PhoneUi.tappableFit("sections", pillView, function() host.chooseSectioning(all));
 	}
 
 	public static function chipRow(key:String, chips:Array<KeyedView>):View
-		return row(key, chips, function(s) {
+		return PhoneUi.row(key, chips, function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 10, 16, 10);
 			s.childGap = 8;
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 			s.clipHorizontal = true;
 		});
 }

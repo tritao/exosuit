@@ -184,7 +184,7 @@ class NativeRpcHub {
 				} else if (kind == EventKind.TransportFailed || kind == EventKind.TransportClosed) {
 					pending.remove(key);
 					// Why NativeKit ended the stream, for whoever logs the lost connection.
-					var code:Int = (result : Int);
+					var code:Int = cast result;
 					if (byteStream.failure == null && code != 0)
 						byteStream.failure = code == RECEIVE_OVERFLOW ? "receive_overflow" : "transport_error " + code;
 					if (connecting != null && !connecting.attempt.complete) {

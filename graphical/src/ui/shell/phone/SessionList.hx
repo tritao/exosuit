@@ -29,16 +29,16 @@ class SessionList extends PhoneUi {
 
 	public static function stateColor(state:SessionState):Color
 		return switch state {
-			case Attention: ATTENTION;
-			case Working: ACCENT;
-			case Idle | Exited: IDLE;
+			case Attention: PhoneUi.ATTENTION;
+			case Working: PhoneUi.ACCENT;
+			case Idle | Exited: PhoneUi.IDLE;
 		};
 
 	static function badgeColors(state:SessionState):{fill:Color, ink:Color}
 		return switch state {
-			case Attention: {fill: ATTENTION_TINT, ink: ATTENTION_TEXT};
-			case Working: {fill: ACCENT_TINT, ink: ACCENT_DARK};
-			case Idle | Exited: {fill: CHIP, ink: SECTION};
+			case Attention: {fill: PhoneUi.ATTENTION_TINT, ink: PhoneUi.ATTENTION_TEXT};
+			case Working: {fill: PhoneUi.ACCENT_TINT, ink: PhoneUi.ACCENT_DARK};
+			case Idle | Exited: {fill: PhoneUi.CHIP, ink: PhoneUi.SECTION};
 		};
 
 	static function lastGroup(entry:SessionEntry):String
@@ -73,7 +73,7 @@ class SessionList extends PhoneUi {
 
 	/**
 		Builds the list: for each section a header (collapsible with a count when the sectioning is Group), then its rows.
-		`tiles` picks the Sessions row (icon tile, last line, state badge); otherwise the All sessions row (state dot,
+		`tiles` picks the Sessions PhoneUi.row (icon tile, last line, state badge); otherwise the All sessions PhoneUi.row (state dot,
 		workspace · group · kind, age).
 	**/
 	public static function build(host:PhoneHost, sections:Array<SessionSection>, sectioning:SessionSectioning, tiles:Bool):View {
@@ -81,17 +81,17 @@ class SessionList extends PhoneUi {
 		var collapsible = sectioning == SessionSectioning.Group;
 		for (section in sections) {
 			var folded = collapsible && host.state().collapsed.exists(section.id);
-			if (sectioning != SessionSectioning.None) children.push(kv("h:" + section.id, header(host, section, sectioning, collapsible, folded)));
+			if (sectioning != SessionSectioning.None) children.push(PhoneUi.kv("h:" + section.id, header(host, section, sectioning, collapsible, folded)));
 			if (folded) continue;
 			for (entry in section.entries)
-				children.push(kv("r:" + entry.workspaceId + ":" + entry.id, tiles ? tileRow(host, entry) : dotRow(host, entry)));
+				children.push(PhoneUi.kv("r:" + entry.workspaceId + ":" + entry.id, tiles ? tileRow(host, entry) : dotRow(host, entry)));
 		}
 		if (sections.length == 0 || children.length == 0)
-			children.push(kv("empty", column("empty", [kv("t", text("No sessions match.", 15, SECONDARY))], function(s) {
+			children.push(PhoneUi.kv("empty", PhoneUi.column("empty", [PhoneUi.kv("t", PhoneUi.text("No sessions match.", 15, PhoneUi.SECONDARY))], function(s) {
 				s.padding = new Insets(16, 24, 16, 24);
 			})));
-		children.push(kv("end", filler("end", 24)));
-		var content = column("list-content", children, function(s) s.width = LayoutAxis.stretch());
+		children.push(PhoneUi.kv("end", PhoneUi.filler("end", 24)));
+		var content = PhoneUi.column("list-content", children, function(s) s.width = LayoutAxis.stretch());
 		var viewport = new LayoutStyle();
 		viewport.width = LayoutAxis.stretch();
 		viewport.height = LayoutAxis.grow();
@@ -100,32 +100,32 @@ class SessionList extends PhoneUi {
 
 	static function stateInk(section:SessionSection):Color {
 		var first = section.entries.length == 0 ? null : section.entries[0].state;
-		if (first == SessionState.Attention) return ATTENTION_TEXT;
-		return first == SessionState.Working ? ACCENT_DARK : SECTION;
+		if (first == SessionState.Attention) return PhoneUi.ATTENTION_TEXT;
+		return first == SessionState.Working ? PhoneUi.ACCENT_DARK : PhoneUi.SECTION;
 	}
 
 	static function header(host:PhoneHost, section:SessionSection, sectioning:SessionSectioning, collapsible:Bool, folded:Bool):View {
 		var parts:Array<KeyedView> = [];
 		var title = section.title.length == 0 ? ["Ungrouped"] : section.title;
-		if (collapsible) parts.push(kv("chev", icon("chev", folded ? IconName.ChevronRight : IconName.ChevronDown, 14, SECTION)));
+		if (collapsible) parts.push(PhoneUi.kv("chev", PhoneUi.icon("chev", folded ? IconName.ChevronRight : IconName.ChevronDown, 14, PhoneUi.SECTION)));
 		if (sectioning == SessionSectioning.Group && title.length > 1) {
 			var parents = title.slice(0, title.length - 1).join(" / ") + " /";
-			parts.push(kv("parents", text(parents, 12, MUTED, false, 0.6)));
-			parts.push(kv("last", text(title[title.length - 1].toUpperCase(), 12, SECTION, true, 0.6)));
+			parts.push(PhoneUi.kv("parents", PhoneUi.text(parents, 12, PhoneUi.MUTED, false, 0.6)));
+			parts.push(PhoneUi.kv("last", PhoneUi.text(title[title.length - 1].toUpperCase(), 12, PhoneUi.SECTION, true, 0.6)));
 		} else {
 			var label = sectioning == SessionSectioning.Group ? title[0] : title.join(" / ").toUpperCase();
-			parts.push(kv("title", text(label, 12, sectioning == SessionSectioning.State ? stateInk(section) : SECTION, true, 0.6)));
+			parts.push(PhoneUi.kv("title", PhoneUi.text(label, 12, sectioning == SessionSectioning.State ? stateInk(section) : PhoneUi.SECTION, true, 0.6)));
 		}
 		if (collapsible)
-			parts.push(kv("count", text(section.entries.length + (folded ? " · collapsed" : ""), 12, SECONDARY)));
-		var line = row("header", parts, function(s) {
+			parts.push(PhoneUi.kv("count", PhoneUi.text(section.entries.length + (folded ? " · collapsed" : ""), 12, PhoneUi.SECONDARY)));
+		var line = PhoneUi.row("header", parts, function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 14, 16, 6);
 			s.childGap = 8;
 		});
 		if (!collapsible) return line;
 		var id = section.id;
-		return tappable("header-tap", line, function() {
+		return PhoneUi.tappable("header-tap", line, function() {
 			if (host.state().collapsed.exists(id)) host.state().collapsed.remove(id); else host.state().collapsed.set(id, true);
 			host.refresh();
 		});
@@ -133,54 +133,54 @@ class SessionList extends PhoneUi {
 
 	static function tileRow(host:PhoneHost, entry:SessionEntry):View {
 		var colors = badgeColors(entry.state);
-		var tileIcon = icon("i", entry.kind == SessionKind.Chat ? IconName.InfoCircle : IconName.Terminal, 20, ACCENT);
-		var texts = column("texts", [
-			kv("name", text(clip(entry.name, 48), 16, TEXT, true)),
-			kv("last", text(clip(secondLine(entry), 60), 13, SECONDARY, true))
+		var tileIcon = PhoneUi.icon("i", entry.kind == SessionKind.Chat ? IconName.InfoCircle : IconName.Terminal, 20, PhoneUi.ACCENT);
+		var texts = PhoneUi.column("texts", [
+			PhoneUi.kv("name", PhoneUi.text(PhoneUi.clip(entry.name, 48), 16, PhoneUi.TEXT, true)),
+			PhoneUi.kv("last", PhoneUi.text(PhoneUi.clip(secondLine(entry), 60), 13, PhoneUi.SECONDARY, true))
 		], function(s) {
 			s.width = LayoutAxis.grow();
 			s.clipHorizontal = true;
 		});
-		var line = row("row", [
-			kv("tile", tile("tile", 40, 10, ACCENT_TINT, tileIcon)),
-			kv("texts", texts),
-			kv("badge", badge("badge", entry.state, colors.fill, colors.ink))
+		var line = PhoneUi.row("row", [
+			PhoneUi.kv("tile", PhoneUi.tile("tile", 40, 10, PhoneUi.ACCENT_TINT, tileIcon)),
+			PhoneUi.kv("texts", texts),
+			PhoneUi.kv("badge", PhoneUi.badge("badge", entry.state, colors.fill, colors.ink))
 		], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.height = LayoutAxis.fit(72);
 			s.padding = new Insets(16, 14, 16, 14);
 			s.childGap = 14;
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 		});
 		return entryView(host, entry, line);
 	}
 
 	static function dotRow(host:PhoneHost, entry:SessionEntry):View {
-		var texts = column("texts", [
-			kv("name", text(clip(entry.name, 48), 15, TEXT, true)),
-			kv("where", text(clip(whereLine(entry), 60), 13, SECONDARY, true))
+		var texts = PhoneUi.column("texts", [
+			PhoneUi.kv("name", PhoneUi.text(PhoneUi.clip(entry.name, 48), 15, PhoneUi.TEXT, true)),
+			PhoneUi.kv("where", PhoneUi.text(PhoneUi.clip(whereLine(entry), 60), 13, PhoneUi.SECONDARY, true))
 		], function(s) {
 			s.width = LayoutAxis.grow();
 			s.clipHorizontal = true;
 		});
-		var line = row("row", [
-			kv("dot", dot("dot", stateColor(entry.state))),
-			kv("texts", texts),
-			kv("age", text(age(entry.lastActive), 12, SECONDARY))
+		var line = PhoneUi.row("row", [
+			PhoneUi.kv("dot", PhoneUi.dot("dot", stateColor(entry.state))),
+			PhoneUi.kv("texts", texts),
+			PhoneUi.kv("age", PhoneUi.text(PhoneUi.age(entry.lastActive), 12, PhoneUi.SECONDARY))
 		], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.height = LayoutAxis.fit(64);
 			s.padding = new Insets(16, 10, 16, 10);
 			s.childGap = 12;
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 		});
 		return entryView(host, entry, line);
 	}
 
 	static function entryView(host:PhoneHost, entry:SessionEntry, line:View):View {
-		return column("entry", [
-			kv("tap", tappable("tap", line, function() host.openSession(entry), function() host.sessionMenu(entry))),
-			kv("rule", rule("rule", RULE_SOFT))
+		return PhoneUi.column("entry", [
+			PhoneUi.kv("tap", PhoneUi.tappable("tap", line, function() host.openSession(entry), function() host.sessionMenu(entry))),
+			PhoneUi.kv("rule", PhoneUi.rule("rule", PhoneUi.RULE_SOFT))
 		], function(s) s.width = LayoutAxis.stretch());
 	}
 }

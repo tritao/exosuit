@@ -28,7 +28,7 @@ class ClaudeTransport extends AgentLineTransport {
 		switch (type) {
 			case "control_response":
 				var response = Reflect.field(v, "response");
-				var id = textId(Reflect.field(response, "request_id"));
+				var id = AgentLineTransport.textId(Reflect.field(response, "request_id"));
 				if (id == null) throw "Invalid Claude response id";
 				settle(id, Reflect.field(response, "response"),
 					Reflect.field(response, "subtype") == "success" ? null : Std.string(Reflect.field(response, "error")));

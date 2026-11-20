@@ -37,13 +37,13 @@ class MachinesScreen extends PhoneUi implements View {
 	public function build(context:BuildContext):RenderNode {
 		var cards:Array<KeyedView> = [];
 		var devices = remote();
-		if (devices == null) cards.push(kv("this-machine", thisMachine()));
+		if (devices == null) cards.push(PhoneUi.kv("this-machine", thisMachine()));
 		else for (machine in devices.pairedMachines()) {
 			var key = machine.machineId + ":" + machine.deviceId;
-			cards.push(kv("m:" + key, machine.refusal != null ? deadPairing(devices, machine, key) : machineCard(devices, machine, key)));
+			cards.push(PhoneUi.kv("m:" + key, machine.refusal != null ? deadPairing(devices, machine, key) : machineCard(devices, machine, key)));
 		}
-		if (devices != null) cards.push(kv("pair", pairing(devices, context)));
-		var list = column("machines-cards", cards, function(s) {
+		if (devices != null) cards.push(PhoneUi.kv("pair", pairing(devices, context)));
+		var list = PhoneUi.column("machines-cards", cards, function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 16, 16, 16);
 			s.childGap = 12;
@@ -52,26 +52,26 @@ class MachinesScreen extends PhoneUi implements View {
 		viewport.width = LayoutAxis.stretch();
 		viewport.height = LayoutAxis.grow();
 		return PhoneChrome.screen("machines-screen", [
-			kv("heading", PhoneChrome.heading("Machines")),
-			kv("rule", rule("rule")),
-			kv("scroll", new ScrollView("machines-scroll", list, viewport))
+			PhoneUi.kv("heading", PhoneChrome.heading("Machines")),
+			PhoneUi.kv("rule", PhoneUi.rule("rule")),
+			PhoneUi.kv("scroll", new ScrollView("machines-scroll", list, viewport))
 		]).build(context);
 	}
 
 	static function card(key:String, children:Array<KeyedView>):View
-		return column(key, children, function(s) {
+		return PhoneUi.column(key, children, function(s) {
 			s.width = LayoutAxis.stretch();
-			s.background = SURFACE;
-			radius(s, 14);
+			s.background = PhoneUi.SURFACE;
+			PhoneUi.radius(s, 14);
 			s.clipHorizontal = true;
 			s.clipVertical = true;
 		});
 
 	static function cardHeader(key:String, name:String, online:Bool, state:String):View
-		return row(key, [
-			kv("dot", online ? dot("dot", ONLINE) : dot("dot", MUTED)),
-			kv("name", text(clip(name, 28), 17, TEXT, true)),
-			kv("state", text(state, 13, online ? ONLINE_TEXT : SECONDARY))
+		return PhoneUi.row(key, [
+			PhoneUi.kv("dot", online ? PhoneUi.dot("dot", PhoneUi.ONLINE) : PhoneUi.dot("dot", PhoneUi.MUTED)),
+			PhoneUi.kv("name", PhoneUi.text(PhoneUi.clip(name, 28), 17, PhoneUi.TEXT, true)),
+			PhoneUi.kv("state", PhoneUi.text(state, 13, online ? PhoneUi.ONLINE_TEXT : PhoneUi.SECONDARY))
 		], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 14, 16, 14);
@@ -79,18 +79,18 @@ class MachinesScreen extends PhoneUi implements View {
 		});
 
 	function workspaceRow(key:String, name:String, detail:String, onTap:Void->Void):View {
-		var line = row("line", [
-			kv("icon", icon("icon", IconName.FolderClosed, 20, SECONDARY)),
-			kv("name", text(clip(name, 28), 16, TEXT, true)),
-			kv("detail", text(detail, 13, SECONDARY)),
-			kv("chev", icon("chev", IconName.ChevronRight, 16, MUTED))
+		var line = PhoneUi.row("line", [
+			PhoneUi.kv("icon", PhoneUi.icon("icon", IconName.FolderClosed, 20, PhoneUi.SECONDARY)),
+			PhoneUi.kv("name", PhoneUi.text(PhoneUi.clip(name, 28), 16, PhoneUi.TEXT, true)),
+			PhoneUi.kv("detail", PhoneUi.text(detail, 13, PhoneUi.SECONDARY)),
+			PhoneUi.kv("chev", PhoneUi.icon("chev", IconName.ChevronRight, 16, PhoneUi.MUTED))
 		], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.height = LayoutAxis.fit(56);
 			s.padding = new Insets(16, 0, 16, 0);
 			s.childGap = 12;
 		});
-		return column(key, [kv("rule", rule("rule", RULE_SOFT)), kv("tap", tappable("tap", line, onTap))], function(s) s.width = LayoutAxis.stretch());
+		return PhoneUi.column(key, [PhoneUi.kv("rule", PhoneUi.rule("rule", PhoneUi.RULE_SOFT)), PhoneUi.kv("tap", PhoneUi.tappable("tap", line, onTap))], function(s) s.width = LayoutAxis.stretch());
 	}
 
 	function countDetail(workspace:String, running:Bool):String {
@@ -100,10 +100,10 @@ class MachinesScreen extends PhoneUi implements View {
 
 	function thisMachine():View {
 		var core = host.core();
-		var rows = [kv("head", cardHeader("head", core.machineName(), core.machineOnline(), core.machineOnline() ? "online" : "offline"))];
+		var rows = [PhoneUi.kv("head", cardHeader("head", core.machineName(), core.machineOnline(), core.machineOnline() ? "online" : "offline"))];
 		for (workspace in core.workspaces()) {
 			var id = workspace.id;
-			rows.push(kv("w:" + id, workspaceRow("w", workspace.name, countDetail(id, core.workspaceRunning(id)), function() {
+			rows.push(PhoneUi.kv("w:" + id, workspaceRow("w", workspace.name, countDetail(id, core.workspaceRunning(id)), function() {
 				host.scopeTo(id);
 			})));
 		}
@@ -112,20 +112,20 @@ class MachinesScreen extends PhoneUi implements View {
 
 	function machineCard(devices:MachinesPanelSource, machine:PairedMachineCard, key:String):View {
 		var online = machine.online;
-		var rows = [kv("head", cardHeader("head", machine.name, online, online ? "online" : "offline"))];
+		var rows = [PhoneUi.kv("head", cardHeader("head", machine.name, online, online ? "online" : "offline"))];
 		var workspaces = machine.workspaces;
 		if (workspaces != null) {
 			var machineId = machine.machineId, deviceId = machine.deviceId;
 			for (entry in workspaces) {
 				var id = entry.workspace;
-				rows.push(kv("w:" + id, workspaceRow("w", entry.name, countDetail(id, entry.status == MachineDirectoryProtocol.RUNNING), function() {
+				rows.push(PhoneUi.kv("w:" + id, workspaceRow("w", entry.name, countDetail(id, entry.status == MachineDirectoryProtocol.RUNNING), function() {
 					devices.openMachineWorkspace(machineId, deviceId, id);
 					host.scopeTo(id);
 				})));
 			}
 		} else if (!online) {
 			var why = machine.error;
-			rows.push(kv("why", column("why", [kv("t", text(why == null ? "Connecting…" : "Cannot reach the machine. Retrying.", 13, SECONDARY))],
+			rows.push(PhoneUi.kv("why", PhoneUi.column("why", [PhoneUi.kv("t", PhoneUi.text(why == null ? "Connecting…" : "Cannot reach the machine. Retrying.", 13, PhoneUi.SECONDARY))],
 				function(s) s.padding = new Insets(16, 4, 16, 14))));
 		}
 		return card("card", rows);
@@ -133,9 +133,9 @@ class MachinesScreen extends PhoneUi implements View {
 
 	function deadPairing(devices:MachinesPanelSource, machine:PairedMachineCard, key:String):View {
 		var refusal = machine.refusal;
-		var texts = column("texts", [
-			kv("name", text(clip(machine.name, 28), 16, TEXT, true)),
-			kv("why", text(clip(refusal == null ? "" : refusal, 40), 13, DANGER, true))
+		var texts = PhoneUi.column("texts", [
+			PhoneUi.kv("name", PhoneUi.text(PhoneUi.clip(machine.name, 28), 16, PhoneUi.TEXT, true)),
+			PhoneUi.kv("why", PhoneUi.text(PhoneUi.clip(refusal == null ? "" : refusal, 40), 13, PhoneUi.DANGER, true))
 		], function(s) {
 			s.width = LayoutAxis.grow();
 			s.clipHorizontal = true;
@@ -144,12 +144,12 @@ class MachinesScreen extends PhoneUi implements View {
 			devices.forget(machine.machineId, machine.deviceId);
 			host.refresh();
 		}, "forget-" + key);
-		return row("dead", [kv("ring", dot("ring", IDLE)), kv("texts", texts), kv("forget", forget)], function(s) {
+		return PhoneUi.row("dead", [PhoneUi.kv("ring", PhoneUi.dot("ring", PhoneUi.IDLE)), PhoneUi.kv("texts", texts), PhoneUi.kv("forget", forget)], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 14, 16, 14);
 			s.childGap = 12;
-			s.background = SURFACE;
-			radius(s, 14);
+			s.background = PhoneUi.SURFACE;
+			PhoneUi.radius(s, 14);
 		});
 	}
 
@@ -161,18 +161,18 @@ class MachinesScreen extends PhoneUi implements View {
 		var open = pairingOpen || pairingNow || code != null;
 		var rows:Array<KeyedView> = [];
 		if (!open) {
-			rows.push(kv("button", tappable("pair-open", tile("pair-tile", 52, 14, CHIP, text("Pair a machine", 16, ACCENT)), function() {
+			rows.push(PhoneUi.kv("button", PhoneUi.tappable("pair-open", PhoneUi.tile("pair-tile", 52, 14, PhoneUi.CHIP, PhoneUi.text("Pair a machine", 16, PhoneUi.ACCENT)), function() {
 				pairingOpen = true;
 				host.refresh();
 			})));
 		} else {
 			if (code != null) {
-				rows.push(kv("instruction", text("Compare this code with the machine, then confirm.", 14, SECONDARY)));
-				rows.push(kv("code", text(code, 28, TEXT)));
+				rows.push(PhoneUi.kv("instruction", PhoneUi.text("Compare this code with the machine, then confirm.", 14, PhoneUi.SECONDARY)));
+				rows.push(PhoneUi.kv("code", PhoneUi.text(code, 28, PhoneUi.TEXT)));
 				if (keyChanged)
-					rows.push(kv("changed", text("This machine has a different key than the one already paired. Continue only if you reset it yourself.", 13, DANGER)));
+					rows.push(PhoneUi.kv("changed", PhoneUi.text("This machine has a different key than the one already paired. Continue only if you reset it yourself.", 13, PhoneUi.DANGER)));
 				if (!devices.pairingCodeConfirmed())
-					rows.push(kv("confirm", new Button(keyChanged ? "The code matches: replace the old pairing" : "The code matches", null, function() {
+					rows.push(PhoneUi.kv("confirm", new Button(keyChanged ? "The code matches: replace the old pairing" : "The code matches", null, function() {
 						devices.confirmCode();
 						host.refresh();
 					}, "phone-pairing-confirm", true, ButtonVariant.Primary)));
@@ -192,24 +192,24 @@ class MachinesScreen extends PhoneUi implements View {
 						host.refresh();
 					}) catch (_:Dynamic) {}
 				}, "phone-pairing-paste");
-				var fieldRow = new Row("pairing-row", [kv("field", address), kv("paste", paste)], rowStyle());
-				rows.push(kv("label", text("Pair this device with a machine", 14, SECONDARY)));
-				rows.push(kv("url", fieldRow));
-				rows.push(kv("go", new Button("Pair", null, function() {
+				var fieldRow = new Row("pairing-row", [PhoneUi.kv("field", address), PhoneUi.kv("paste", paste)], rowStyle());
+				rows.push(PhoneUi.kv("label", PhoneUi.text("Pair this device with a machine", 14, PhoneUi.SECONDARY)));
+				rows.push(PhoneUi.kv("url", fieldRow));
+				rows.push(PhoneUi.kv("go", new Button("Pair", null, function() {
 					if (devices.beginPairing(pairingUrl)) pairingUrl = "";
 					host.refresh();
 				}, "phone-pairing-start", pairingUrl.length > 0, ButtonVariant.Primary)));
 			}
-			if (pairingNow) rows.push(kv("cancel", new Button("Cancel pairing", null, function() {
+			if (pairingNow) rows.push(PhoneUi.kv("cancel", new Button("Cancel pairing", null, function() {
 				devices.cancelPairing();
 				pairingOpen = false;
 				host.refresh();
 			}, "phone-pairing-cancel")));
 			var status = devices.panelStatus(), error = devices.panelError();
-			if (status != "") rows.push(kv("status", text(status, 13, SECONDARY)));
-			if (error != null) rows.push(kv("error", text(error, 13, DANGER)));
+			if (status != "") rows.push(PhoneUi.kv("status", PhoneUi.text(status, 13, PhoneUi.SECONDARY)));
+			if (error != null) rows.push(PhoneUi.kv("error", PhoneUi.text(error, 13, PhoneUi.DANGER)));
 		}
-		return column("pairing", rows, function(s) {
+		return PhoneUi.column("pairing", rows, function(s) {
 			s.width = LayoutAxis.stretch();
 			s.childGap = 8;
 		});

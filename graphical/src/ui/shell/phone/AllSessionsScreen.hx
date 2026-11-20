@@ -22,30 +22,30 @@ class AllSessionsScreen extends PhoneUi {
 		fieldStyle.width = LayoutAxis.stretch();
 		fieldStyle.height = LayoutAxis.fixed(44);
 		fieldStyle.padding = new Insets(12, 0, 12, 0);
-		fieldStyle.background = CHIP;
-		radius(fieldStyle, 10);
+		fieldStyle.background = PhoneUi.CHIP;
+		PhoneUi.radius(fieldStyle, 10);
 		var field = new SearchField("session-search", state.text, function(value) {
 			state.text = value;
 			host.refresh();
 		}, fieldStyle, "Search sessions on " + core.machineName());
-		var searchRow = column("search-row", [kv("field", field)], function(s) {
+		var searchRow = PhoneUi.column("search-row", [PhoneUi.kv("field", field)], function(s) {
 			s.width = LayoutAxis.stretch();
 			s.padding = new Insets(16, 0, 16, 10);
-			s.background = SURFACE;
+			s.background = PhoneUi.SURFACE;
 		});
 		var chips:Array<KeyedView> = [
-			kv("workspace", PhoneChrome.workspaceChip(host)),
-			kv("group", PhoneChrome.groupChip(host)),
-			kv("kind", PhoneChrome.kindChip(host)),
-			kv("sections", PhoneChrome.sectionsPill(host, state.allSectioning, true, true))
+			PhoneUi.kv("workspace", PhoneChrome.workspaceChip(host)),
+			PhoneUi.kv("group", PhoneChrome.groupChip(host)),
+			PhoneUi.kv("kind", PhoneChrome.kindChip(host)),
+			PhoneUi.kv("sections", PhoneChrome.sectionsPill(host, state.allSectioning, true, true))
 		];
 		var sections = SessionList.mergeByTitle(core.index().query(state.allQuery()));
 		return PhoneChrome.screen("all-sessions-screen", [
-			kv("header", PhoneChrome.switcher(host, core.machineName(), subtitle, null, false)),
-			kv("search", searchRow),
-			kv("chips", PhoneChrome.chipRow("chips", chips)),
-			kv("rule", rule("rule")),
-			kv("list", SessionList.build(host, sections, state.allSectioning, false))
+			PhoneUi.kv("header", PhoneChrome.switcher(host, core.machineName(), subtitle, null, false)),
+			PhoneUi.kv("search", searchRow),
+			PhoneUi.kv("chips", PhoneChrome.chipRow("chips", chips)),
+			PhoneUi.kv("rule", PhoneUi.rule("rule")),
+			PhoneUi.kv("list", SessionList.build(host, sections, state.allSectioning, false))
 		]);
 	}
 }

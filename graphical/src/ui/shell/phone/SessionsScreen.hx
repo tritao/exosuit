@@ -16,16 +16,16 @@ class SessionsScreen extends PhoneUi {
 		var subtitle = "on " + core.machineName() + " · " + (core.machineOnline() ? "online" : "offline") + " · " + count
 			+ (count == 1 ? " session" : " sessions");
 		var chips:Array<KeyedView> = [
-			kv("group", PhoneChrome.groupChip(host)),
-			kv("kind", PhoneChrome.kindChip(host)),
-			kv("sections", PhoneChrome.sectionsPill(host, state.sessionsSectioning, false, false))
+			PhoneUi.kv("group", PhoneChrome.groupChip(host)),
+			PhoneUi.kv("kind", PhoneChrome.kindChip(host)),
+			PhoneUi.kv("sections", PhoneChrome.sectionsPill(host, state.sessionsSectioning, false, false))
 		];
 		var sections = SessionList.mergeByTitle(core.index().query(state.sessionsQuery()));
 		return PhoneChrome.screen("sessions-screen", [
-			kv("header", PhoneChrome.switcher(host, core.workspaceName(state.workspace), subtitle, PhoneChrome.newButton(host), true)),
-			kv("chips", PhoneChrome.chipRow("chips", chips)),
-			kv("rule", rule("rule")),
-			kv("list", SessionList.build(host, sections, state.sessionsSectioning, true))
+			PhoneUi.kv("header", PhoneChrome.switcher(host, core.workspaceName(state.workspace), subtitle, PhoneChrome.newButton(host), true)),
+			PhoneUi.kv("chips", PhoneChrome.chipRow("chips", chips)),
+			PhoneUi.kv("rule", PhoneUi.rule("rule")),
+			PhoneUi.kv("list", SessionList.build(host, sections, state.sessionsSectioning, true))
 		]);
 	}
 }

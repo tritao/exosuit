@@ -27,7 +27,7 @@ class PiTransport extends AgentLineTransport {
 			notification(type, v);
 			return;
 		}
-		var id = textId(Reflect.field(v, "id"));
+		var id = AgentLineTransport.textId(Reflect.field(v, "id"));
 		if (id == null) throw "Invalid Pi response id";
 		settle(id, Reflect.field(v, "data"), Reflect.field(v, "success") == true ? null : Std.string(Reflect.field(v, "error")));
 	}
