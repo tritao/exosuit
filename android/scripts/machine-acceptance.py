@@ -240,8 +240,11 @@ def main():
         r.ctl("grant", "--device", device)  # no workspaces: takes everything back
         r.wait_log(r"exosuit-machine: \S.* online \[\]", 60); time.sleep(2); r.shot("8-revoked.png")
         r.tap("^Machines$", role=18, after=2)
+        r.wait_element("^Pair a machine$|^this machine$", 30)  # the Machines screen is showing
         if r.elements(r"^%s$" % re.escape(a.workspace)):
-            raise SystemExit("the revoked workspace is still listed on the phone")
+            r.shot("8-revoked-machines-FAILED.png")
+            raise SystemExit("the revoked workspace is still listed on the Machines tab")
+        r.shot("8-revoked-machines.png")
         passed("revoke: the workspace left the phone's list")
         print(f"OK: evidence in {a.out}; look at each screenshot")
     finally:
