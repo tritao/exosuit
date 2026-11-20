@@ -236,6 +236,7 @@ def main():
             raise SystemExit("the restarted app asked to pair again")
         passed("reconnect: back online from the stored pairing, no new code")
 
+        r.adb_("logcat", "-c")  # the wait below must not match the "online []" of the reconnect
         r.ctl("grant", "--device", device)  # no workspaces: takes everything back
         r.wait_log(r"exosuit-machine: \S.* online \[\]", 60); time.sleep(2); r.shot("8-revoked.png")
         passed("revoke: the workspace left the phone's list")

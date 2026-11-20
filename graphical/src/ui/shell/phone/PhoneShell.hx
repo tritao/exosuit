@@ -134,6 +134,13 @@ class PhoneShell implements Shell implements PhoneHost {
 		app.requestFrame();
 	}
 
+	/** notice() for build(): the frame being built shows it, and requestFrame's tick may not be written in a tracked build. */
+	function noticeFromBuild(text:String):Void {
+		snack = {text: text, label: null, action: null, until: Sys.time() + SNACK_SECONDS};
+		app.shellRedrawAt = Sys.time() + SNACK_SECONDS + 0.05;
+		app.scheduleFrame();
+	}
+
 	public function choose(title:String, choices:Array<ShellChoice>, selected:Array<String>, multi:Bool, done:Array<String>->Void):Void {
 		var items:Array<ChoiceItem> = [for (choice in choices) {id: choice.id, label: choice.label, detail: choice.detail, depth: choice.depth}];
 		var chosen = selected.copy();
@@ -154,7 +161,7 @@ class PhoneShell implements Shell implements PhoneHost {
 		var waited = phoneCore.pollPending();
 		if (waited != null) pushSession(waited.entry.id, waited.entry.name, waited.entry, waited.view, true);
 		var failed = phoneCore.takeFailure();
-		if (failed != null) notice(failed);
+		if (failed != null) noticeFromBuild(failed);
 		// ExosuitApp already lays the shell out inside the safe area; insetting the bar again would pad it twice (and
 		// make it grow while the keyboard is up).
 		BottomBar.defaultBottomInset = 0.0;
