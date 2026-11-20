@@ -30,7 +30,7 @@ ninja on PATH, so every script works from a plain shell. Never set these by hand
   for build only. It accepts Google's SDK licenses. Apple silicon and arm64 Linux get the arm64-v8a image.
 - haxeon first: `pwsh -NoProfile -File scripts\build-windows.ps1` (the Android build needs `haxeon-cli.hl` and `hl.exe`).
 - Build the APK (about 6 min): `pwsh -NoProfile -File android/scripts/build.ps1` gives
-  `android/app/build/outputs/apk/debug/app-debug.apk`. Windows only today; logs in `android/build/`.
+  `android/app/build/outputs/apk/debug/app-debug.apk`. `android/scripts/build.sh` does the same on macOS and Linux (arm64-v8a only on Apple silicon). Logs in `android/build/`.
 - Headless emulator and screenshot: `android/scripts/run-emulator.ps1 [-Avd exosuit-s8] [-Port 5584]`.
 - Acceptance (16 checked screens, about 3 minutes, isolated test host, headless):
   `android/scripts/machine-acceptance.ps1 -Avd exosuit-s8 -Port 5584 -OutDir <dir>`; then LOOK at the screenshots.

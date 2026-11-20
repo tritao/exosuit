@@ -30,6 +30,7 @@ done
 NDK_VERSION="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['ndk'])" "$ANDROID_ROOT/toolchain.json")"
 NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
 [ -f "$NDK/build/cmake/android.toolchain.cmake" ] || { echo "NDK $NDK_VERSION is missing: run android/scripts/setup.sh" >&2; exit 1; }
+command -v ninja >/dev/null || { echo "ninja is not on PATH: run android/scripts/setup.sh (it comes with the SDK cmake package)" >&2; exit 1; }
 [ -x "${JAVA_HOME:-/nonexistent}/bin/java" ] || { echo "JAVA_HOME is not set: run android/scripts/setup.sh" >&2; exit 1; }
 VM_DIR="$(python3 "$REPO_ROOT/scripts/haxeon_paths.py" "$HAXEON_ROOT" | head -n 1)"
 HL="$VM_DIR/hl"; CLI="$VM_DIR/haxeon-cli.hl"
