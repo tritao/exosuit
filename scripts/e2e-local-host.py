@@ -80,6 +80,14 @@ def pid_alive(pid: int) -> bool:
         return False
 
 
+def names_rig(pid: int, directory: Path) -> bool:
+    """POSIX: whether `pid` is still one of this rig's processes (a recorded pid may have been recycled since): its command line names
+    the run folder, wrangler.js or e2e-tls-proxy.mjs."""
+    result = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=30)
+    command = result.stdout.strip()
+    return bool(command) and any(marker in command for marker in (str(directory), "wrangler.js", "e2e-tls-proxy.mjs"))
+
+
 def kill_tree(pid: int) -> None:
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=30, creationflags=NO_WINDOW)
@@ -97,7 +105,7 @@ def kill_under(directory: Path) -> list[int]:
         recorded = read_json(directory / "pids.json") or {}
         killed = []
         for pid in recorded.values():
-            if isinstance(pid, int) and pid != os.getpid() and pid_alive(pid):
+            if isinstance(pid, int) and pid != os.getpid() and pid_alive(pid) and names_rig(pid, directory):
                 kill_tree(pid)
                 killed.append(pid)
         return killed
@@ -262,6 +270,7 @@ def start(arguments) -> int:
             if process.poll() is None:
                 kill_tree(process.pid)
         leftovers = kill_under(out)
+        (out / "pids.json").unlink(missing_ok=True)
         log("stopped", leftoversKilled=leftovers)
         for handle in handles:
             handle.close()
@@ -279,7 +288,7 @@ def stop(arguments) -> int:
             time.sleep(0.3)
         if pid_alive(host):
             for pid in recorded.values():
-                if pid and pid != os.getpid() and pid_alive(pid):
+                if pid and pid != os.getpid() and pid_alive(pid) and (os.name == "nt" or names_rig(pid, out)):
                     kill_tree(pid)
     killed = kill_under(out)
     print(json.dumps({"stopped": True, "killedByCommandLine": killed}))
