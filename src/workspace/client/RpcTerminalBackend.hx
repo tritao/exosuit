@@ -123,7 +123,18 @@ class RpcTerminalBackend implements TerminalBackend {
       The value is `<pid>:<key>` and counts only in the process that made it: every child (exohost, services, their
       shells, an editor run from one of those) inherits the variable, and must not take terminal control as this
       editor without the takeover prompt. */
+  #if wasm
+  /** A Wasm module has no process environment to write: the key lives in this static (a page reload is a new client anyway). */
+  static var wasmClientKey:Null<String> = null;
+  #end
   static function clientKey():String {
+    #if wasm
+    var kept = wasmClientKey;
+    if (kept != null) return kept;
+    var generated = haxe.crypto.Sha256.encode(Sys.time() + ":" + Math.random() + ":" + Sys.getPid()).substr(0, 32);
+    wasmClientKey = generated;
+    return generated;
+    #else
     var owner = Sys.getPid() + ":";
     var value = Sys.getEnv(CLIENT_KEY);
     if (value != null && StringTools.startsWith(value, owner) && value.length > owner.length)
@@ -131,13 +142,18 @@ class RpcTerminalBackend implements TerminalBackend {
     var key = haxe.crypto.Sha256.encode(Sys.time() + ":" + Math.random() + ":" + Sys.getPid()).substr(0, 32);
     Sys.putEnv(CLIENT_KEY, owner + key);
     return key;
+    #end
   }
   /** For a host whose app process is killed and started again (the phone): the key persists across processes, so the
       service sees a restarted client as the same one and lets it replace its own old control lease. It still counts only
       in this process (see clientKey), like a generated one. Call before the first terminal opens. */
   public static function adoptClientKey(key:String):Void {
     if (key == null || key.length < 16 || key.length > 128) return;
+    #if wasm
+    wasmClientKey = key;
+    #else
     Sys.putEnv(CLIENT_KEY, Sys.getPid() + ":" + key);
+    #end
   }
   public function id():String return terminalId;
   /** A Claude Code, Codex or Pi terminal: restarting it continues the same conversation. */

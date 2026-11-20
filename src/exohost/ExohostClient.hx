@@ -125,9 +125,13 @@ class ExohostClient {
 
 	/** Spawns `hl <launcher> daemon`, detached, with exohost's native libraries on the library path. */
 	public static function startDaemon(launcher:String):Void {
+		#if wasm
+		throw "A Wasm module cannot start exohost";
+		#else
 		var child = sys.io.ChildProcess.spawn(Sys.executablePath(), [launcher, "daemon"], Path.directory(launcher), [libraryVariable()],
 			[nativePath(launcher)], true);
 		child.close();
+		#end
 	}
 
 	/** The exohost bytecode: `EXOSUIT_EXOHOST_LAUNCHER`, a source build's exohost/build/host/main.hl, or a bundle's tools/exosuit-exohost.hl. */

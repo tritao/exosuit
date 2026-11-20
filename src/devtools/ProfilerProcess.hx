@@ -21,7 +21,11 @@ class ProfilerProcess {
 		var runtime = Sys.getEnv("HAXEON_DEVTOOLS_RUNTIME");
 		if (bridge == null || runtime == null) throw "Launch with scripts/devtools.py to prepare the profiler adapter";
 		// The marker lets exohost recognise the bridge (exohost.ExohostKinds.HELPER_MARKER); the bridge reads no arguments.
+		#if wasm
+		throw "A Wasm module cannot start the profiler bridge";
+		#else
 		process = sys.io.ChildProcess.spawn(runtime, [bridge, exohost.ExohostKind.ExohostKinds.HELPER_MARKER + "profiler-bridge"]);
+		#end
 		if (port > 0) command("connect", {port:port, host:"127.0.0.1", maxEntries:20, leafCapacity:128, eventCapacity:128});
 	}
 

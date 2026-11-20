@@ -143,6 +143,7 @@ class BrowserPairedMachines implements PairedMachines {
 			return;
 		}
 		var next = loading.shift();
+		if (next == null) return;
 		loadingRequest = nextRequest++;
 		begin(loadingRequest, LOAD);
 		Sys.println("exosuit-remote-load:" + Json.stringify({request: loadingRequest, machineId: next.machineId, deviceId: next.deviceId}));
