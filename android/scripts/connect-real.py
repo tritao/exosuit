@@ -50,6 +50,14 @@ def endpoint(home: str | None) -> str:
     return "\\\\.\\pipe\\" + name
 
 
+def refuse_real_home(home: str | None) -> None:
+    """approve and grant belong to isolated test hosts: refuse the user's default home."""
+    configured = home or os.environ.get("EXOSUIT_EXOHOST_HOME")
+    real = Path.home() / ".local" / "state" / "exosuit" / "exohost"
+    if configured and Path(configured).expanduser().resolve() == real.resolve():
+        raise SystemExit(json.dumps({"ok": False, "error": "refusing: this is the user's own exohost home"}))
+
+
 def default_relay() -> str:
     """The relay the Remote panel proposes: RelayUrl.DEFAULT (src/config/RelayUrl.hx)."""
     text = (ROOT / "src" / "config" / "RelayUrl.hx").read_text(encoding="utf-8")
@@ -155,12 +163,14 @@ def main() -> int:
     elif arguments.command == "disable":
         reply = control(home, {"op": "remote-disable"}, timeout=30)
     elif arguments.command == "grant":
+        refuse_real_home(home)
         if not (home or os.environ.get("EXOSUIT_EXOHOST_HOME")):
             raise SystemExit(json.dumps({"ok": False, "error": "grant only runs against an isolated exohost (--home)"}))
         reply = control(home, {"op": "remote-grant", "deviceId": arguments.device, "workspaces": [{"workspace": w, "preset": "all"} for w in arguments.workspace]})
     elif arguments.command == "invite":
         reply = control(home, {"op": "remote-invite", "ttl": arguments.ttl}, timeout=40)
     else:
+        refuse_real_home(home)
         if not (home or os.environ.get("EXOSUIT_EXOHOST_HOME")):
             raise SystemExit(json.dumps({"ok": False, "error": "approve only runs against an isolated exohost (--home): the owner approves a real one in the editor"}))
         devices = control(home, {"op": "remote-devices"})
