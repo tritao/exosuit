@@ -51,7 +51,7 @@ def endpoint(home: str | None) -> str:
 
 
 def refuse_real_home(home: str | None) -> None:
-    """approve and grant belong to isolated test hosts: refuse the user's default home."""
+    """approve, grant and create-workspace belong to isolated test hosts: refuse the user's default home."""
     configured = home or os.environ.get("EXOSUIT_EXOHOST_HOME")
     real = Path.home() / ".local" / "state" / "exosuit" / "exohost"
     if configured and Path(configured).expanduser().resolve() == real.resolve():
@@ -165,6 +165,7 @@ def main() -> int:
     elif arguments.command == "create-workspace":
         if not (home or os.environ.get("EXOSUIT_EXOHOST_HOME")):
             raise SystemExit(json.dumps({"ok": False, "error": "create-workspace only runs against an isolated exohost (--home)"}))
+        refuse_real_home(home)
         if len(arguments.workspace) != 2:
             raise SystemExit(json.dumps({"ok": False, "error": "usage: create-workspace --workspace NAME --workspace FOLDER"}))
         reply = control(home, {"op": "workspace-create", "name": arguments.workspace[0], "folders": [arguments.workspace[1]]})
