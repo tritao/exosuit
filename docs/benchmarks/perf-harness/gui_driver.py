@@ -1,6 +1,6 @@
 """Drives a real editor window over exohost's control plane and checks what the app says afterwards.
 
-Everything goes through exohost's pipe (docs/design/exohostctl/TDD-exosuit-ctl.md §8.4): `exosuit.ui.snapshot` gives every
+Everything goes through exohost's pipe (docs/design/exosuitctl/TDD-exosuit-ctl.md §8.4): `exosuit.ui.snapshot` gives every
 labelled element with its bounds and the app's state (context, workspaces, groups, tabs, the persisted session lines,
 ...); clicks, keys and text are `exosuit.ui.*` calls the window turns into synthetic events in its own input queue;
 dialogs wait for `exosuit.dialog.answer`. The real mouse and keyboard are never touched, and the window need not be in

@@ -16,7 +16,7 @@ private typedef Pending = {
 }
 
 /**
-	The window's dialogs while it is driven (docs/design/exohostctl/TDD-exosuit-ctl.md §8.4 T5): every file and folder
+	The window's dialogs while it is driven (docs/design/exosuitctl/TDD-exosuit-ctl.md §8.4 T5): every file and folder
 	dialog and every question the window asks goes through this one seam. While a program drives the window
 	(SyntheticInput.driven) a dialog does not show; it waits in `pending` until the program answers it with
 	`exosuit.dialog.answer`, as a user would in the native dialog. Otherwise the native dialog shows as usual, and a

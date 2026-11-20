@@ -17,7 +17,7 @@ private typedef Outgoing = {
 }
 
 /**
-	An editor window's one persistent link to exohost (docs/design/exohostctl/TDD-exosuit-ctl.md §5.3, §7). exohost is always
+	An editor window's one persistent link to exohost (docs/design/exosuitctl/TDD-exosuit-ctl.md §5.3, §7). exohost is always
 	on: the link starts exohost when it does not answer and reconnects when exohost restarts. It replaces the registry record
 	an editor once wrote. Over it:
 

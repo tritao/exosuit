@@ -182,7 +182,7 @@ function Start-Editor {
     $launcher = Start-Child $python $arguments (Join-Path $RunDir 'editor.log') $extra $RepoRoot
     $state.editorLauncher = $launcher.Id
     Save-State $state
-    # Ready once the window has linked to the rig's exohost (exohostctl list names its process).
+    # Ready once the window has linked to the rig's exohost (exosuitctl list names its process).
     $deadline = (Get-Date).AddSeconds(600)
     $editor = $null
     $ready = $false
@@ -246,8 +246,8 @@ function Start-App {
     Say ("app launch to workspaces listed: {0:N1} s ({1})" -f $timer.Elapsed.TotalSeconds, $line)
 }
 
-# exohostctl against the rig's exohost (its EXOSUIT_EXOHOST_HOME from the fixture): the output, or $null when it failed.
-function Invoke-ExohostCtl([string[]]$Arguments) {
+# exosuitctl against the rig's exohost (its EXOSUIT_EXOHOST_HOME from the fixture): the output, or $null when it failed.
+function Invoke-ExosuitCtl([string[]]$Arguments) {
     $cfg = Get-Content (Join-Path $editorDir 'ENV.json') -Raw | ConvertFrom-Json
     $saved = $env:EXOSUIT_EXOHOST_HOME
     try {
@@ -260,7 +260,7 @@ function Invoke-ExohostCtl([string[]]$Arguments) {
 
 # The window id exohost knows the editor process `$ProcessId` by, or $null while it has not linked.
 function Get-EditorInstance([int]$ProcessId) {
-    $listed = Invoke-ExohostCtl @('--output', 'json', 'list')
+    $listed = Invoke-ExosuitCtl @('--output', 'json', 'list')
     if (-not $listed) { return $null }
     $found = @(($listed | ConvertFrom-Json).instances | Where-Object { $_.pid -eq $ProcessId })
     if ($found.Count -eq 0) { return $null }
@@ -268,7 +268,7 @@ function Get-EditorInstance([int]$ProcessId) {
 }
 
 # A real editor restart, for the `restart-editor` step: asks the editor to quit the way closing its window does
-# (`exohostctl quit --mode prompt`, no mouse),
+# (`exosuitctl quit --mode prompt`, no mouse),
 # waits for the process to go, then starts the editor again exactly as `up` does. The request and the answer are files in the
 # run folder; the answer holds the epoch seconds of the close and of the moment the editor was ready again.
 function Restart-Editor {
@@ -278,7 +278,7 @@ function Restart-Editor {
     if ([int]$state.editorPid -gt 0) { $editor = Get-Process -Id ([int]$state.editorPid) -ErrorAction SilentlyContinue }
     if ($editor) {
         $instance = Get-EditorInstance $editor.Id
-        if ($instance) { Invoke-ExohostCtl @('--instance', $instance, '--timeout', '20', 'quit', '--mode', 'prompt') | Out-Null }
+        if ($instance) { Invoke-ExosuitCtl @('--instance', $instance, '--timeout', '20', 'quit', '--mode', 'prompt') | Out-Null }
         if (-not $editor.WaitForExit(20000)) { Say 'the editor did not quit in 20 s; ending it'; $editor.Kill() }
     }
     $closed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0

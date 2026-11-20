@@ -124,7 +124,7 @@ submenu is one step away when you want another provider.
 takes milliseconds. exohost holds it. Nothing starts at login (your earlier rule), and exohost exits when nothing needs it.
 - (a) The spare exists while at least one editor window is open. The first start after you launch the editor can
   find the spare still loading, which costs a fraction of a second once.
-- (b) The spare exists whenever exohost runs, also with no editor open, for example while only exohostctl or the phone uses
+- (b) The spare exists whenever exohost runs, also with no editor open, for example while only exosuitctl or the phone uses
   the machine.
 - (c) A spare exists only after the first workspace start of the session, to be ready for the next one.
 

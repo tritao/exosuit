@@ -1297,7 +1297,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/**
-		exohost asks the window to quit (`exosuit.quit`, docs/design/exohostctl/TDD-exosuit-ctl.md Q4): `prompt` asks about
+		exohost asks the window to quit (`exosuit.quit`, docs/design/exosuitctl/TDD-exosuit-ctl.md Q4): `prompt` asks about
 		unsaved work as closing the window does, `recover` keeps it for the next start and closes at once, `save` saves
 		every document first. `answer` gets `{closing: true}` once the window has committed to closing, or why not.
 	**/

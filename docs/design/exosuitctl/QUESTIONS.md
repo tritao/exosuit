@@ -1,7 +1,7 @@
-# exohostctl: questions
+# exosuitctl: questions
 
 ## Rounds 1 and 2, answered
-Q1 A · Q2 (b) · Q3 (a) · Q4 (d) · Q5 (a) · Q6 (a) · Q7 (a), named `exohostctl` · Q8 (a) · Q9 (a) · Q10 (b) · Q11 (a) ·
+Q1 A · Q2 (b) · Q3 (a) · Q4 (d) · Q5 (a) · Q6 (a) · Q7 (a), named `exosuitctl` · Q8 (a) · Q9 (a) · Q10 (b) · Q11 (a) ·
 Q12 (a) · Q13 (a) · Q14 (a) · Q15 (a), plus the Workbench redesign. The decisions table in `TDD-exosuit-ctl.md`
 (header) records them.
 
@@ -12,7 +12,7 @@ Pragtical ignores. The command line needs a way to pass them. On Windows `C:\a.t
 drive letter's colon. Options:
 - **(a)** `path:line[:col]`, parsed only when the trailing parts are digits and the whole string is not an existing
   file. This is the form compilers print, so it can be pasted from build output.
-- **(b)** An explicit flag only: `exohostctl open --line 12 --column 3 PATH`, and `exosuit --goto 12:3 PATH`.
+- **(b)** An explicit flag only: `exosuitctl open --line 12 --column 3 PATH`, and `exosuit --goto 12:3 PATH`.
 - **(c)** Both.
 
 ➡️ (c). (a) for pasting from compiler output, and (b) for scripts that must never be misparsed. The rule "only when
@@ -35,7 +35,7 @@ Options:
 will carry many more events (`ui.changed`, terminal output, `exosuit.state`), which most CLI calls never want.
 Options:
 - **(a)** On exohost's main pipe, a client subscribes explicitly (`exosuit.events.subscribe {names, instance?}`), and
-  `exohostctl watch [EVENT...]` streams the events as JSON lines. The Pragtical pipes keep Pragtical's behaviour but send
+  `exosuitctl watch [EVENT...]` streams the events as JSON lines. The Pragtical pipes keep Pragtical's behaviour but send
   only Pragtical's two event names.
 - **(b)** Every client gets every event, as in Pragtical.
 

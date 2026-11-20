@@ -16,7 +16,7 @@ private typedef Action = {
 }
 
 /**
-	Element input for a program that drives the window (docs/design/exohostctl/TDD-exosuit-ctl.md §8.4 T6, Q10=b): pointer,
+	Element input for a program that drives the window (docs/design/exosuitctl/TDD-exosuit-ctl.md §8.4 T6, Q10=b): pointer,
 	key and text events dispatched into the window's own event pump, the path the OS's input takes once NativeKit decoded
 	it. Nothing goes to the OS: the real mouse and keyboard are never moved, and the window is never raised.
 

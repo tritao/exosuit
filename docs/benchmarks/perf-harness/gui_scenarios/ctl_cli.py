@@ -1,16 +1,16 @@
-"""exohostctl, pragtical-ctl and launch forwarding against a running window (docs/design/exohostctl/TDD-exosuit-ctl.md §16
+"""exosuitctl, pragtical-ctl and launch forwarding against a running window (docs/design/exosuitctl/TDD-exosuit-ctl.md §16
 steps 4–7), with no input to the window at all:
 
-- `exohostctl list`, `status`, `call control.ping`, a bad command (exit 2) and an unknown window (exit 3);
-- `exohostctl open <folder>`: the window opens the workspace that holds it, and a folder no workspace holds becomes a
-  workspace named after it and opens; `exohostctl open <file>:<line>` opens a tab; `exohostctl documents` lists it;
-- `exohostctl project add <folder>` adds a folder to the window's workspace, and `exohostctl watch project.changed` prints the
+- `exosuitctl list`, `status`, `call control.ping`, a bad command (exit 2) and an unknown window (exit 3);
+- `exosuitctl open <folder>`: the window opens the workspace that holds it, and a folder no workspace holds becomes a
+  workspace named after it and opens; `exosuitctl open <file>:<line>` opens a tab; `exosuitctl documents` lists it;
+- `exosuitctl project add <folder>` adds a folder to the window's workspace, and `exosuitctl watch project.changed` prints the
   event;
 - `exosuit <file>` (the editor started with a path) hands the file to this window and exits, and no second window stays;
 - with PRAGTICAL_CTL naming Pragtical's console program (pragtical.com; it is run with --ctl) in a folder with no
   `user` folder: `list`, `open` and `documents` through exohost's Pragtical pipe, with PRAGTICAL_USERDIR set to exohost's
   home;
-- last, `exohostctl quit --mode recover` closes the window."""
+- last, `exosuitctl quit --mode recover` closes the window."""
 import json
 import os
 from pathlib import Path
@@ -24,10 +24,10 @@ FIXTURE = {"workspaces": ["alpha", "beta"], "folders": ["loose", "extra"], "open
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
 
 
-def exohostctl(*arguments, timeout=30):
+def exosuitctl(*arguments, timeout=30):
     done = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "exohost.py"), "--ctl", *arguments],
                           capture_output=True, text=True, timeout=timeout)
-    print("exohostctl %s -> %d %s%s" % (" ".join(arguments), done.returncode, done.stdout.strip()[:300], done.stderr.strip()[:300]), flush=True)
+    print("exosuitctl %s -> %d %s%s" % (" ".join(arguments), done.returncode, done.stdout.strip()[:300], done.stderr.strip()[:300]), flush=True)
     return done
 
 
@@ -55,61 +55,61 @@ def run(gui):
     gui.open_workspace(alpha)
     attached(gui, "Alpha")
 
-    gui.step("exohostctl's basic commands")
-    listed = exohostctl("list")
-    gui.check("exohostctl list names this window", lambda s: listed.returncode == 0 and gui.instance in listed.stdout, 1, detail=lambda s: listed.stdout)
-    status = exohostctl("--output", "json", "status")
-    gui.check("exohostctl status is this window's", lambda s: status.returncode == 0 and json.loads(status.stdout)["instance_id"] == gui.instance, 1,
+    gui.step("exosuitctl's basic commands")
+    listed = exosuitctl("list")
+    gui.check("exosuitctl list names this window", lambda s: listed.returncode == 0 and gui.instance in listed.stdout, 1, detail=lambda s: listed.stdout)
+    status = exosuitctl("--output", "json", "status")
+    gui.check("exosuitctl status is this window's", lambda s: status.returncode == 0 and json.loads(status.stdout)["instance_id"] == gui.instance, 1,
               detail=lambda s: status.stdout)
-    ping = exohostctl("call", "control.ping", "{}")
-    gui.check("exohostctl call control.ping prints {\"ok\":true}", lambda s: ping.returncode == 0 and json.loads(ping.stdout) == {"ok": True}, 1,
+    ping = exosuitctl("call", "control.ping", "{}")
+    gui.check("exosuitctl call control.ping prints {\"ok\":true}", lambda s: ping.returncode == 0 and json.loads(ping.stdout) == {"ok": True}, 1,
               detail=lambda s: ping.stdout)
-    bad = exohostctl("frobnicate")
+    bad = exosuitctl("frobnicate")
     gui.check("a bad command exits 2", lambda s: bad.returncode == 2, 1, detail=lambda s: bad.returncode)
-    missing = exohostctl("--instance", "w1-1", "status")
+    missing = exosuitctl("--instance", "w1-1", "status")
     gui.check("an unknown window exits 3", lambda s: missing.returncode == 3, 1, detail=lambda s: (missing.returncode, missing.stderr))
 
-    gui.step("exohostctl open <folder>: the workspace that holds it")
-    opened = exohostctl("open", os.path.join(fixture, "beta"))
-    gui.check("exohostctl open beta's folder exits 0", lambda s: opened.returncode == 0, 1, detail=lambda s: opened.stderr)
+    gui.step("exosuitctl open <folder>: the workspace that holds it")
+    opened = exosuitctl("open", os.path.join(fixture, "beta"))
+    gui.check("exosuitctl open beta's folder exits 0", lambda s: opened.returncode == 0, 1, detail=lambda s: opened.stderr)
     gui.check("the window opened Beta", lambda s: is_attached(s["state"], beta), 30, detail=lambda s: s["state"]["openWorkspace"])
     gui.shot("opened-beta")
 
-    gui.step("exohostctl open <folder no workspace holds>: a new workspace named after it")
+    gui.step("exosuitctl open <folder no workspace holds>: a new workspace named after it")
     loose = os.path.join(fixture, "loose")
-    opened = exohostctl("open", loose)
-    gui.check("exohostctl open the loose folder exits 0", lambda s: opened.returncode == 0, 1, detail=lambda s: opened.stderr)
+    opened = exosuitctl("open", loose)
+    gui.check("exosuitctl open the loose folder exits 0", lambda s: opened.returncode == 0, 1, detail=lambda s: opened.stderr)
     gui.check("exohost lists a workspace of the loose folder", lambda s: any(any(norm(f) == norm(loose) for f in w["folders"])
               for w in s["state"]["machineWorkspaces"]), 15, detail=lambda s: s["state"]["machineWorkspaces"])
     made = lambda s: next((w for w in s["state"]["machineWorkspaces"] if any(norm(f) == norm(loose) for f in w["folders"])), None)
     gui.check("it is named after the folder and the window is on it", lambda s: made(s) and made(s)["name"].lower() == "loose"
               and is_attached(s["state"], made(s)["id"]), 30, detail=lambda s: (made(s), s["state"]["openWorkspace"]))
 
-    gui.step("exohostctl open <file>:<line>; documents")
+    gui.step("exosuitctl open <file>:<line>; documents")
     target = os.path.join(fixture, "alpha", "a2.txt")
-    opened = exohostctl("open", target + ":2")
-    gui.check("exohostctl open a2.txt:2 exits 0", lambda s: opened.returncode == 0, 1, detail=lambda s: opened.stderr)
+    opened = exosuitctl("open", target + ":2")
+    gui.check("exosuitctl open a2.txt:2 exits 0", lambda s: opened.returncode == 0, 1, detail=lambda s: opened.stderr)
     gui.check("a2.txt is open in a tab", lambda s: "a2.txt" in tab_names(s), 10, detail=tab_names)
-    documents = exohostctl("--output", "json", "documents")
-    gui.check("exohostctl documents lists a2.txt", lambda s: documents.returncode == 0 and any(norm(d.get("path") or "") == norm(target)
+    documents = exosuitctl("--output", "json", "documents")
+    gui.check("exosuitctl documents lists a2.txt", lambda s: documents.returncode == 0 and any(norm(d.get("path") or "") == norm(target)
               for d in json.loads(documents.stdout)["documents"]), 1, detail=lambda s: documents.stdout)
 
-    gui.step("exohostctl project add, and exohostctl watch prints project.changed")
+    gui.step("exosuitctl project add, and exosuitctl watch prints project.changed")
     watched = os.path.join(gui.out, "watch.txt")
     with open(watched, "w") as sink:  # exohost.py runs exohost under it: its output goes to a file, and the tree is stopped
         watcher = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "exohost.py"), "--ctl", "watch", "project.changed"],
                                    stdout=sink, stderr=subprocess.STDOUT)
     time.sleep(2)
     extra = os.path.join(fixture, "extra")
-    added = exohostctl("project", "add", extra)
-    gui.check("exohostctl project add exits 0", lambda s: added.returncode == 0, 1, detail=lambda s: added.stderr)
+    added = exosuitctl("project", "add", extra)
+    gui.check("exosuitctl project add exits 0", lambda s: added.returncode == 0, 1, detail=lambda s: added.stderr)
     gui.check("the window's workspace has the folder", lambda s: any(norm(f) == norm(extra) for w in s["state"]["machineWorkspaces"]
               for f in w["folders"]), 15, detail=lambda s: s["state"]["machineWorkspaces"])
     time.sleep(1)
     subprocess.run(["taskkill", "/PID", str(watcher.pid), "/T", "/F"], capture_output=True)
     watcher.wait(10)
     printed = open(watched, encoding="utf-8", errors="replace").read()
-    gui.check("exohostctl watch printed project.changed", lambda s: '"project.changed"' in printed, 1, detail=lambda s: printed[-400:])
+    gui.check("exosuitctl watch printed project.changed", lambda s: '"project.changed"' in printed, 1, detail=lambda s: printed[-400:])
 
     gui.step("exosuit <file> with this window open: the file comes here")
     hl, bytecode, env = editor_environment()
@@ -141,14 +141,14 @@ def run(gui):
     else:
         print("SKIP pragtical-ctl: PRAGTICAL_CTL is not set", flush=True)
 
-    gui.step("exohostctl quit --mode recover closes the window")
-    quit = exohostctl("quit", "--mode", "recover")
+    gui.step("exosuitctl quit --mode recover closes the window")
+    quit = exosuitctl("quit", "--mode", "recover")
     end = time.monotonic() + 15
     while time.monotonic() < end and gui.exohost.instance_of(gui.pid):
         time.sleep(0.3)
     gone = gui.exohost.instance_of(gui.pid) is None
     # The window is gone, so these are recorded without a snapshot of it.
-    for name, ok, note in (("exohostctl quit exits 0", quit.returncode == 0, quit.stderr.strip()),
+    for name, ok, note in (("exosuitctl quit exits 0", quit.returncode == 0, quit.stderr.strip()),
                            ("the window closed and unlinked", gone, "")):
         gui.results.append({"check": name, "ok": ok, "note": note})
         print(("PASS " if ok else "FAIL ") + name + (" -- " + note if note and not ok else ""), flush=True)

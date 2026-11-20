@@ -183,7 +183,7 @@ public static class PreviewWindowBounds {
 		$result = Invoke-Guarded -FilePath python -ArgumentList $runArgs -WorkingDirectory $root -TimeoutSeconds $DeadlineSeconds -LogPath $log -OnTick $tickDrive
 		Format-GuardResult $result | Set-Content (Join-Path $out 'guard.txt')
 		Note (Format-GuardResult $result)
-		# A scenario may end the editor itself (exohostctl quit) and still have checks to record: it gets 20 s to finish.
+		# A scenario may end the editor itself (exosuitctl quit) and still have checks to record: it gets 20 s to finish.
 		if ($state.scenario -and -not $state.scenario.HasExited -and $result.ExitCode -notin 124, 125) { [void]$state.scenario.WaitForExit(20000) }
 		if ($state.scenario -and -not $state.scenario.HasExited) { Stop-Process -Id $state.scenario.Id -Force -ErrorAction SilentlyContinue }
 		if ($state.scenario) { Get-Content (Join-Path $out 'scenario.log') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ } }

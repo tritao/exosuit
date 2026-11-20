@@ -21,7 +21,7 @@ private typedef Asked = {
 }
 
 /**
-	The editor windows linked to exohost (ExohostLink on the editor's side; docs/design/exohostctl/TDD-exosuit-ctl.md §5.3).
+	The editor windows linked to exohost (ExohostLink on the editor's side; docs/design/exosuitctl/TDD-exosuit-ctl.md §5.3).
 	A window is listed from its `editor-attach` until its link closes, which is how exohost learns that it exited: there is
 	no registry record for editors. The directory carries the window's requests to exohost's op handler, pushes events to
 	every window, sends a window requests (control methods, `exosuit.quit`) and hands the events a window sends to
@@ -171,7 +171,7 @@ class EditorDirectory {
 	}
 
 	/**
-		Asks the window `window` to run a control method (docs/design/exohostctl/TDD-exosuit-ctl.md §8). `done` gets its
+		Asks the window `window` to run a control method (docs/design/exosuitctl/TDD-exosuit-ctl.md §8). `done` gets its
 		result, or the error the window answered or why there is none. False when no such window is linked.
 	**/
 	public function request(window:String, method:String, params:Dynamic, done:(Null<Dynamic>, Null<ControlError>) -> Void):Bool {

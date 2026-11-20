@@ -59,7 +59,7 @@ class ExohostPaths {
 	}
 
 	/**
-		The Pragtical control protocol pipe of editor window `instance` (docs/design/exohostctl/TDD-exosuit-ctl.md §5.4):
+		The Pragtical control protocol pipe of editor window `instance` (docs/design/exosuitctl/TDD-exosuit-ctl.md §5.4):
 		`\\.\pipe\exosuit-exohostctl-<user>-<instance>` on Windows, a socket in exohost's runtime folder elsewhere.
 	**/
 	public static function instanceEndpoint(instance:String):String

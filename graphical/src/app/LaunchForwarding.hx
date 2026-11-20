@@ -7,7 +7,7 @@ typedef LaunchPath = {path:String, line:Null<Int>, column:Null<Int>};
 
 /**
 	`exosuit <folder|file>...` with an Exosuit window already open hands the paths to it instead of opening another
-	window (docs/design/exohostctl/TDD-exosuit-ctl.md §8.3, Q3=a). Each path goes to exohost as `editor.open`, which exohost routes
+	window (docs/design/exosuitctl/TDD-exosuit-ctl.md §8.3, Q3=a). Each path goes to exohost as `editor.open`, which exohost routes
 	to the window whose workspaces hold it, else to the most recently used window (§6); that window opens it the way it
 	opens any path (a folder: the workspace that holds it, or a new one named after it; a file: a tab), and is raised.
 

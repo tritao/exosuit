@@ -219,7 +219,7 @@ pixels and do not require the image-generation dependencies.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | exohost, the editor, workspace services, terminal hosts, devices, the control plane, tests |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | open work |
 | [docs/architecture/](docs/architecture/) | decision records |
-| [docs/design/](docs/design/) | the Workbench and exohostctl designs, terminal hosts, agent sessions, the sessions UI |
+| [docs/design/](docs/design/) | the Workbench and exosuitctl designs, terminal hosts, agent sessions, the sessions UI |
 | [docs/RPC-VECTORS.md](docs/RPC-VECTORS.md) | the workspace protocol's frozen wire vectors |
 | [exohost/README.md](exohost/README.md), [agent/README.md](agent/README.md) | exohost and the workspace service |
 | [docs/mobile/](docs/mobile/) | the phone app, its local end-to-end rig, the relay |

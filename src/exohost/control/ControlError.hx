@@ -1,7 +1,7 @@
 package exohost.control;
 
 /**
-	An error of Pragtical control protocol v1 (docs/design/exohostctl/TDD-exosuit-ctl.md §2.6): one of its codes
+	An error of Pragtical control protocol v1 (docs/design/exosuitctl/TDD-exosuit-ctl.md §2.6): one of its codes
 	(`invalid_request`, `unsupported_version`, `invalid_argument`, `not_found`, `ambiguous_target`,
 	`permission_denied`, `unsupported`, `busy`, `timeout`, `internal`), a message, and whether trying again may work.
 **/
@@ -35,7 +35,7 @@ class ControlError {
 			Reflect.field(value, "retryable") == true);
 	}
 
-	/** The exit code `exohostctl` gives this error, Pragtical's (§8.2): 3 for discovery or selection, 4 for a timeout, else 5. */
+	/** The exit code `exosuitctl` gives this error, Pragtical's (§8.2): 3 for discovery or selection, 4 for a timeout, else 5. */
 	public function exitCode():Int
 		return switch code {
 			case "not_found" | "ambiguous_target": 3;

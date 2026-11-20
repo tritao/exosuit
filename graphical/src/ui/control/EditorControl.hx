@@ -21,7 +21,7 @@ private typedef Waiting = {
 }
 
 /**
-	The window's side of the control plane (docs/design/exohostctl/TDD-exosuit-ctl.md §8): the methods exohost routes to this
+	The window's side of the control plane (docs/design/exosuitctl/TDD-exosuit-ctl.md §8): the methods exohost routes to this
 	window over its link, each one the path a user's action takes, so a program drives the product's own logic.
 
 	- Pragtical control protocol v1: `window.focus`, `editor.open {path, line?, column?}`, `editor.documents`,

@@ -1,4 +1,4 @@
-# TDD: `exohostctl`, a local control plane served by exohost
+# TDD: `exosuitctl`, a local control plane served by exohost
 
 Status: built (entropy pass, 2026-11-15 and 16). Every owner decision (Q1–Q19) is answered. exohost/README.md
 ("Control plane") summarises it, and docs/ARCHITECTURE.md places it in the system.
@@ -34,19 +34,19 @@ Status: built (entropy pass, 2026-11-15 and 16). Every owner decision (Q1–Q19)
 | Q4 | **(d).** `exosuit.quit {mode: prompt\|recover\|save}`. The tray defaults to `recover` (hot exit). A single-window close uses `prompt`. |
 | Q5 | **(a).** If no window holds a workspace containing the path, use the MRU window, where the file opens as a loose tab. |
 | Q6 | **(a).** The link replaces the editor's registry file. Services and hosts keep theirs. |
-| Q7 | **(a), renamed.** Multicall by program name. **`exohostctl`** is Pragtical's command set plus `quit`. **`exohost`** keeps its existing verbs and gains `open\|focus\|documents\|save\|project\|call`. The two invocation formats give each command its context. |
+| Q7 | **(a), renamed.** Multicall by program name. **`exosuitctl`** is Pragtical's command set plus `quit`. **`exohost`** keeps its existing verbs and gains `open\|focus\|documents\|save\|project\|call`. The two invocation formats give each command its context. |
 | Q8 | **(a).** Local only. Remote access comes later, behind a device grant. |
 | Q9 | **(a).** The automation command files are retired. New goal G8: Exosuit can be driven completely over this protocol, with no computer use (§8.4). |
 | Q10 | **(b).** Element-level input goes into the UI's own input queue as synthetic events. It is never OS input. |
 | Q11 | **(a).** `snapshot.json` is retired in favour of `ui.snapshot` and `ui.changed`. |
 | Q12 | **(a).** All methods are allowed on the per-editor Pragtical pipes. |
 | Q13 | **(a).** Automation methods are always on. Each call is logged with the caller's pid, and the tray shows "being driven". |
-| Q14 | **(a).** The CLI is named `exohostctl`, not `exosuit-ctl`. |
+| Q14 | **(a).** The CLI is named `exosuitctl`, not `exosuit-ctl`. (Decided as `exohostctl`; the owner renamed it to `exosuitctl` on 2026-11-20. `scripts/exohostctl` remains as a forwarder.) |
 | Q15 | **(a).** Terminals and agent sessions are driven through an editor for now. |
 | Workbench redesign (owner, decided) | exohost is always on; the exohost-off and folder-only modes are removed. A click opens a workspace in milliseconds from its catalog snapshot. Every row has its full action menu, even when idle. There is one service process per running workspace, plus a warm spare that exists only while an editor window is open (Workbench Q9). A failed start keeps typed text as an unsent draft and never auto-sends it (Workbench Q11). TDD alignment: §6.1. |
-| Q16 | **(c).** Both `path:line[:col]` and explicit flags (`exohostctl open --line N --column N`, `exosuit --goto N[:N]`). The suffix is parsed only when it is all digits and the whole string is not an existing file, and that rule is tested on drive-letter paths. |
+| Q16 | **(c).** Both `path:line[:col]` and explicit flags (`exosuitctl open --line N --column N`, `exosuit --goto N[:N]`). The suffix is parsed only when it is all digits and the whole string is not an existing file, and that rule is tested on drive-letter paths. |
 | Q17 | **(a).** `terminal.read` returns rendered text: the visible screen rows, the cursor, and scrollback lines since a sequence number. |
-| Q18 | **(a).** Events are opt-in on the main pipe: `exosuit.events.subscribe {names, instance?}`, plus `exohostctl watch [EVENT...]`, which streams JSON lines. The Pragtical pipes keep Pragtical's push of `document.opened` and `project.changed`. |
+| Q18 | **(a).** Events are opt-in on the main pipe: `exosuit.events.subscribe {names, instance?}`, plus `exosuitctl watch [EVENT...]`, which streams JSON lines. The Pragtical pipes keep Pragtical's push of `document.opened` and `project.changed`. |
 | Q19 | **(b).** Real input always wins. Injected input is held while real input arrived in the last ~1 s; a call that waits too long answers `busy`, retryable. |
 
 Pragtical references in §2 are to `pragtical` (branch `next`, 2c2d5bbb). **UNVERIFIED** marks an inference that was
@@ -59,7 +59,7 @@ not checked.
 ### Goals
 1. One local control plane. exohost serves it on the endpoint it already owns. No editor runs a control server of its
    own.
-2. `exohostctl` is exohost's own CLI under a second name, not a separate program. Commands: open, focus, list, status,
+2. `exosuitctl` is exohost's own CLI under a second name, not a separate program. Commands: open, focus, list, status,
    documents, save, project, call, quit.
 3. Launch forwarding. `exosuit <file>` opens the file in a running editor when one fits, and in a new window otherwise.
 4. Multi-instance routing. By default the target is the editor whose open workspace contains the path; if none does,
@@ -199,7 +199,7 @@ D0 exohost is the only control server                               [settled]
 ├─ D6 no containing window → MRU, loose tab                       [Q5=a]
 ├─ D7 launch forwarding: GraphicalMain, 1 s, opt-outs              [Q3=a]
 │   └─ D7.1 file:line syntax: suffix + flags                       [Q16=c]
-├─ D8 CLI: exohostctl (Pragtical set + quit) / exohost (verbs + control) [Q7=a, renamed]
+├─ D8 CLI: exosuitctl (Pragtical set + quit) / exohost (verbs + control) [Q7=a, renamed]
 ├─ D9 remote/phone: local only                                     [Q8=a]
 ├─ D10 automation files retired                                    [Q9=a]
 └─ D11 full automation coverage (G8)                               [owner goal]
@@ -215,7 +215,7 @@ D0 exohost is the only control server                               [settled]
 
 ```
  pragtical-ctl ──raw v1 frames──▶ \\.\pipe\exosuit-exohostctl-<user>-<instance_id>  (one per editor, Q2) ─┐
- exohostctl / exohost CLI ─┐                                                                    │
+ exosuitctl / exohost CLI ─┐                                                                    │
  launcher (GraphicalMain)├─HMPK {op:"control",...}──▶ \\.\pipe\exosuit-exohost-<user> ──────────┤
  MachineClient (editor) ─┘                                                                    ▼
                                                                                   exohost: ControlRouter
@@ -321,7 +321,7 @@ then, both ways, one JSON v1 envelope per HMPK frame:
 - **Containment** uses `PathKey.within`: segment by segment, case-insensitive on Windows. It is not the case-sensitive
   `LanguageController.projectFor`.
 - **MRU** = the largest `focusedAt` (each window reports focus in `exosuit.state`).
-- **Routing algorithm** in ControlRouter, used by exohostctl and launch forwarding:
+- **Routing algorithm** in ControlRouter, used by exosuitctl and launch forwarding:
   1. `--instance ID`: that editor, or `not_found` (exit 3).
   2. `--new-window`: ask the MRU editor to spawn a sibling (it already knows how, through `NewWindow.open`), wait for
      the new link, then send to it. With no editor running, `not_found` (exit 3), or the launcher opens locally.
@@ -346,7 +346,7 @@ then, both ways, one JSON v1 envelope per HMPK frame:
     (`openFolderWorkspace`).
 - **One workspace-service process per running workspace, plus one warm spare** (Workbench Q4, decided).
   - exohost holds one pre-started spare service process, but only while at least one editor window is open (Workbench
-    Q9, decided). With no editor open, a start requested by exohostctl or by the phone is a normal one-process start,
+    Q9, decided). With no editor open, a start requested by exosuitctl or by the phone is a normal one-process start,
     without the spare.
   - Editor windows remain the only control-plane instances. Service processes, the spare included, never link as
     instances and are never routing targets. There is no spare editor.
@@ -410,20 +410,20 @@ Events: `document.opened`, `project.changed` (Pragtical), and `exosuit.state` (l
 - **Options.** `--instance`, `--project`, `--timeout` (seconds, or with an `ms`/`s` suffix; default 5 s), `--output
   text|json`. Exosuit adds `--new-window`.
 - **Exit codes** are Pragtical's: 0 ok, 2 usage, 3 discovery or selection, 4 connection or timeout, 5 remote error, 6
-  protocol, 7 internal. Text errors go to stderr as `exohostctl: <code>: <message>`. JSON errors go to stdout as
+  protocol, 7 internal. Text errors go to stderr as `exosuitctl: <code>: <message>`. JSON errors go to stdout as
   `{"error":{...}}`.
 - **Two invocation formats (Q7=a).** `list` and `status` exist on `exohost` with other meanings (`ExohostMain`), so the
   program name supplies the context:
-  - `exohostctl <command>` is exactly Pragtical's command set plus `quit`. Its `list` lists instances; its `status` is
+  - `exosuitctl <command>` is exactly Pragtical's command set plus `quit`. Its `list` lists instances; its `status` is
     `instance.status`.
   - `exohost <verb>` keeps every existing verb (`list` lists processes, `status` is the daemon's status) and gains `open`,
-    `focus`, `documents`, `save`, `project` and `call`, which have the same semantics as in exohostctl.
+    `focus`, `documents`, `save`, `project` and `call`, which have the same semantics as in exosuitctl.
   - ExohostMain picks the command table from the basename of argv[0], or from a first argument `--ctl` (Pragtical's
     portable spelling, DOC `docs/control-cli.md:7-13`).
-  - There is no Windows exe, so `exohostctl` is a shim that runs exohost with `--ctl` (`scripts/exohostctl.cmd`,
-    `scripts/exohostctl`).
-- **Startup cost.** Every `exohostctl` call starts `hl` with exohost's bytecode. That cost has not been measured
-  (UNVERIFIED); it matters for a `GIT_ASKPASS` through exohostctl.
+  - There is no Windows exe, so `exosuitctl` is a shim that runs exohost with `--ctl` (`scripts/exosuitctl.cmd`,
+    `scripts/exosuitctl`).
+- **Startup cost.** Every `exosuitctl` call starts `hl` with exohost's bytecode. That cost has not been measured
+  (UNVERIFIED); it matters for a `GIT_ASKPASS` through exosuitctl.
 
 ### 8.3 Launch forwarding (Q3=a)
 - Early in `GraphicalMain` (`LaunchForwarding`), before the window is made: when there are open paths, and no
@@ -521,7 +521,7 @@ cannot be ported names the missing method.
 | Direction | Works | Caveats |
 |---|---|---|
 | pragtical-ctl → Exosuit | list, status, focus, open, documents, save, project add/change, call | Its routing is the oldest instance and `ambiguous_target`. Focus may only flash (§8.1). It needs `PRAGTICAL_USERDIR=%LOCALAPPDATA%\exosuit\exohost` (Q2=b). With an isolated exohost, set it to that `EXOSUIT_EXOHOST_HOME`. It hangs forever if a pipe has no free instance (Pragtical bug, `local_transport.c:1216`). Nativekit uses unlimited instances, so this should not happen (UNVERIFIED). |
-| exohostctl → Pragtical | optional | It would need Pragtical's descriptor reader and the raw v1 client. Out of scope unless the owner wants it. |
+| exosuitctl → Pragtical | optional | It would need Pragtical's descriptor reader and the raw v1 client. Out of scope unless the owner wants it. |
 | Pragtical's own editor ↔ Exosuit descriptors | only if descriptors are in Pragtical's folder | Pragtical's `pragtical <file>` would forward into an Exosuit editor whose roots contain the file. Its tab drag would probe Exosuit pipes and get `unsupported`. |
 | Fake-server tests | port the cases | `test-control-cli.py` is AF_UNIX only. Port its cases to a haxeon test that runs against a Windows pipe. |
 | Pragtical's own server on Windows | n/a | Its pipe recreation is Pragtical's bug and does not affect exohost. |
@@ -545,7 +545,7 @@ Msgpack subset rules Exosuit must follow at the compat edge:
 | Editor UI thread hung | requests time out after 10 s | retryable `timeout`; quit reports "not responding" |
 | Editor dies mid-request | the link breaks | exohost answers `internal` "editor exited" (retryable=false) |
 | Stale descriptor (exohost crashed) | pragtical-ctl's health probe fails | pragtical-ctl deletes it (its own code). exohost also deletes all its descriptors at start. |
-| Two editors with the same root | routing tie | the MRU editor wins (exohostctl); `ambiguous_target` (pragtical-ctl) |
+| Two editors with the same root | routing tie | the MRU editor wins (exosuitctl); `ambiguous_target` (pragtical-ctl) |
 | Forwarding target closes between routing and open | `internal` or `not_found` | The launcher opens locally within its 1 s budget |
 | Hub caps reached | accept is closed | exohost's hub allows 256 connections; count links in `exohost status`. |
 | Quit while a save dialog is up | `exosuit.quit` deferred | 300 s deferred timeout. The tray shows "waiting for <window>". |
@@ -576,12 +576,12 @@ isolated with `EXOSUIT_EXOHOST_HOME=<temp>` and `PRAGTICAL_PORTABLE=temp`. Nativ
 
 ## 14. Settled details
 - **Line and column (Q16=c).** `path:line[:col]` is recognised only when the suffix is all digits and the full string
-  is not an existing file. `C:\a.txt` is a path and `C:\a.txt:12` is line 12. Flags are `exohostctl open --line --column`
+  is not an existing file. `C:\a.txt` is a path and `C:\a.txt:12` is line 12. Flags are `exosuitctl open --line --column`
   and `exosuit --goto N[:N]`. Launch forwarding sends `line` and `column` in `editor.open`.
 - **Events (Q18=a).**
   - On the main pipe, `exosuit.events.subscribe {names[], instance?}` must come first. The connection then stays open,
     and exohost pushes only the subscribed events.
-  - `exohostctl watch [EVENT...] [--instance]` prints one JSON object per line until interrupted. Its exit codes follow
+  - `exosuitctl watch [EVENT...] [--instance]` prints one JSON object per line until interrupted. Its exit codes follow
     §8.2.
   - Event names: `document.opened`, `project.changed`, `exosuit.state`, `exosuit.ui.changed {seq, at, frame}`,
     `exosuit.terminal.output {id, sequence}`, `exosuit.machine.changed`, `exosuit.instance.attached` and
@@ -595,5 +595,5 @@ isolated with `EXOSUIT_EXOHOST_HOME=<temp>` and `PRAGTICAL_PORTABLE=temp`. Nativ
 - **`command.run` and prompting commands.** `command.run {name, args?}` performs the command. If the command opens a
   prompt or picker, the call answers at once with `{prompted: dialog_id}`. The client finishes the interaction with
   `dialog.answer` (T5), so no command needs a special automation path.
-- **Earlier settlements.** `project.change` needs no confirmation. exohostctl keeps MRU routing; exact parity with
+- **Earlier settlements.** `project.change` needs no confirmation. exosuitctl keeps MRU routing; exact parity with
   Pragtical's oldest-instance rule is not pursued.

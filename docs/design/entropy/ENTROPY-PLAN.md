@@ -54,7 +54,7 @@ owner also retires the browser client and chat mode. Tests fall from about 44,00
                        │  machine.json: workspaces, folders, names, order         │
                        │  EditorDirectory: one entry per linked editor window     │
                        │  ServiceTable: what it started (workspace → pid, pipe)   │
-                       │  ControlRouter: exohostctl / Pragtical v1 / automation      │
+                       │  ControlRouter: exosuitctl / Pragtical v1 / automation      │
                        │  MachineRemote: pairing and relay for devices            │
                        └───▲───────────────▲──────────────────▲──────────────────┘
         persistent link    │   spawn, stop │                  │ relay (Noise, stream frames)
@@ -99,7 +99,7 @@ In words:
   running; the next service adopts them.
 - **"VS Code mode" is a presentation.** `exosuit <folder>` asks exohost for the workspace that holds the folder, or
   creates a one-folder workspace, and opens a window focused on it with the Workbench collapsed. `exosuit <file>`
-  forwards to the most recently used window. Both are `launch` calls on the control plane (exohostctl TDD step 4), not
+  forwards to the most recently used window. Both are `launch` calls on the control plane (exosuitctl TDD step 4), not
   a mode.
 
 ## 3. What is junk, and what replaces it
@@ -240,7 +240,7 @@ Worker's vitest files.
   kept in step by hand. Move the suites onto the real `UiWorkbenchHost` run headless (as `context-snapshots`
   already does), a few at a time, and delete the double at the end. Until then they stay as they are.
 - 20 private doubles of `WorkspaceRpcEndpoint`: one shared in-memory endpoint in `tests/support`.
-- 11 `m19_*` gui scenarios: re-expressed over exohostctl automation (Step 9); only `m19_switch_latency` keeps real OS
+- 11 `m19_*` gui scenarios: re-expressed over exosuitctl automation (Step 9); only `m19_switch_latency` keeps real OS
   input.
 - All runners: tests run with an isolated exohost home instead of `EXOSUIT_EXOHOST=off` (Step 4).
 
@@ -249,7 +249,7 @@ Worker's vitest files.
 `real-language-ui-smoke`, `terminal-cursor-ui-smoke`, `devtools` (E7).
 
 New tests the plan adds are few and real: terminal survival across a service kill and an exohost polite quit; open an
-idle workspace through exohost; a session created by exohostctl appears in a second window; quit over the link.
+idle workspace through exohost; a session created by exosuitctl appears in a second window; quit over the link.
 
 ## 7. Docs triage
 
@@ -258,7 +258,7 @@ The per-file table was in `map/docs.md` (removed after the pass). Rules:
 - A doc that describes a mechanism this plan removes is deleted in the step that removes the mechanism.
 - Status notes, handoff files, dated reports and roadmap boxes for finished work are deleted now (Step 0); git keeps
   them.
-- One doc per living subject: `docs/design/workbench/WORKBENCH-DESIGN.md`, `docs/design/exohostctl/TDD-exosuit-ctl.md`,
+- One doc per living subject: `docs/design/workbench/WORKBENCH-DESIGN.md`, `docs/design/exosuitctl/TDD-exosuit-ctl.md`,
   this plan until it is done, `docs/haxeon-compiler-bugs.md`, `docs/mobile/android.md`, the perf-harness README, and
   one architecture page written at the end from §2 above.
 
@@ -292,7 +292,7 @@ Corrections to the two approved designs (they stay the designs; these lines are 
 ## 8. Steps
 
 Each step lands on its own, leaves the editor usable, and names a check the owner or a script can make in under two
-minutes. LOC is production code; tests and docs move with their step. The Workbench steps (WB 1–8) and the exohostctl
+minutes. LOC is production code; tests and docs move with their step. The Workbench steps (WB 1–8) and the exosuitctl
 steps (TDD 1–10) are folded in; "Changed" says where the order or content differs from the designs and why.
 
 **Step 0. Marks, and delete what has no user.** (−1,000 code, −9,000 tests, scripts and docs)
@@ -387,10 +387,10 @@ steps (TDD 1–10) are folded in; "Changed" says where the order or content diff
 - Verify: `test-machine-remote.py`; `android/scripts/machine-acceptance.ps1` on the emulator.
 
 **Step 9. Control plane and automation (TDD 4–10).** (−450, +1,500)
-- Launch forwarding (`exosuit <folder|file>`), `exohostctl` as a second name of exohost, Pragtical v1 pipes,
+- Launch forwarding (`exosuit <folder|file>`), `exosuitctl` as a second name of exohost, Pragtical v1 pipes,
   `project.add/change`, events, automation tiers, then command files, `snapshot.json`, `pick-folder.txt` and WM_CLOSE
   go. `gui_driver.py` reads `ui.snapshot` over the protocol. The 11 kept scenarios are ported.
-- Done: `exohostctl open <folder>` opens it; a scenario creates a session and types into it without touching the mouse.
+- Done: `exosuitctl open <folder>` opens it; a scenario creates a session and types into it without touching the mouse.
 - Changed: none in content; it runs after Step 7 so `state.get` reports links, not the attachment state machine.
 
 **Step 10. Agents: one provider base, resume that works.** (−1,150, +200; E1, E6, E8)

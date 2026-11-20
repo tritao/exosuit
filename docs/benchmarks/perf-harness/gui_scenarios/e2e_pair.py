@@ -636,7 +636,7 @@ def step_keyboard(gui, ctx):
 
 def step_restart_editor(gui, ctx):
     """The editor window is closed and the editor started again (the keeper does it, see Restart-Editor in e2e-local.ps1,
-    with `exohostctl quit --mode prompt` and no mouse). The phone, paired and showing the Claude terminal (run the `terminal` step first), must come
+    with `exosuitctl quit --mode prompt` and no mouse). The phone, paired and showing the Claude terminal (run the `terminal` step first), must come
     back online by itself, list Alpha, and its terminal must still take input. Prints the time from the editor being ready
     to the phone online and to the first key reaching the fake."""
     phone, config = ctx["phone"], ctx["config"]

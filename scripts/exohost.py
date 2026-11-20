@@ -5,11 +5,11 @@
     python scripts/exohost.py kill --orphans  stop processes whose editor is gone
     python scripts/exohost.py build           build exohost/haxeon.json
 
-    python scripts/exohost.py --ctl list      exohostctl: the open windows (scripts/exohostctl.cmd runs this)
+    python scripts/exohost.py --ctl list      exosuitctl: the open windows (scripts/exosuitctl.cmd runs this)
     python scripts/exohost.py --ctl open F    open a folder or file in the running editor
 
 Everything after the script name goes to exohost; `python scripts/exohost.py help` lists its commands and
-`python scripts/exohost.py --ctl --help` exohostctl's (exohost/README.md, "Control plane").
+`python scripts/exohost.py --ctl --help` exosuitctl's (exohost/README.md, "Control plane").
 """
 from __future__ import annotations
 

@@ -13,11 +13,11 @@ import exohost.ExohostMenuModel;
 import exohost.ExohostPaths;
 import exohost.ExohostReport;
 import exohost.ExohostTerminator;
-import exohost.control.ExohostCtl;
+import exohost.control.ExosuitCtl;
 
 /**
-	`exohost`: the per-user daemon behind the Exosuit tray icon, and its command line. The same program is `exohostctl`, the
-	control plane's command line (exohost.control.ExohostCtl), when run with `--ctl` or under that name (TDD Q7: one program,
+	`exohost`: the per-user daemon behind the Exosuit tray icon, and its command line. The same program is `exosuitctl`, the
+	control plane's command line (exohost.control.ExosuitCtl), when run with `--ctl` or under that name (TDD Q7: one program,
 	two names).
 **/
 class ExohostMain {
@@ -51,7 +51,7 @@ class ExohostMain {
 		"  start                     start the daemon if it is not running",
 		"  stop                      stop only the daemon",
 		"  daemon [--login]          run the daemon in this process (--login: stay resident)",
-		"  open|focus|documents|save|project|call ...  the window commands of exohostctl (exohostctl --help)",
+		"  open|focus|documents|save|project|call ...  the window commands of exosuitctl (exosuitctl --help)",
 		"environment: EXOSUIT_EXOHOST_HOME (isolated home and endpoint), EXOSUIT_EXOHOST_SCAN=0 (registered processes only)",
 		"bulk kills and quit stop only processes exosuit started (registered, or descended from one); see exohost/README.md"
 	].join("\n");
@@ -71,9 +71,10 @@ class ExohostMain {
 
 	static function run(args:Array<String>):Int {
 		if (args.length > 0 && args[0] == "--ctl")
-			return ExohostCtl.run(args.slice(1));
-		if (Path.withoutExtension(Path.withoutDirectory(Sys.programPath())) == "exohostctl")
-			return ExohostCtl.run(args);
+			return ExosuitCtl.run(args.slice(1));
+		var programName = Path.withoutExtension(Path.withoutDirectory(Sys.programPath()));
+		if (programName == "exosuitctl" || programName == "exohostctl") // exohostctl: the old name
+			return ExosuitCtl.run(args);
 		var command = args.length > 0 ? args[0] : "status";
 		// exohost's home must be private before anything is written to it; editors create it the same way.
 		try ExohostPaths.prepare() catch (_:Dynamic) {}
@@ -83,7 +84,7 @@ class ExohostMain {
 			case "daemon":
 				return ExohostDaemon.run(rest.indexOf("--login") >= 0);
 			case "open" | "focus" | "documents" | "save" | "project" | "call":
-				return ExohostCtl.run(args);
+				return ExosuitCtl.run(args);
 			case "status":
 				var reply = ExohostControl.request({op: "status"});
 				if (json) {

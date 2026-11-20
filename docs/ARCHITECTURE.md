@@ -2,7 +2,7 @@
 
 How Exosuit's processes fit together. The decisions behind it are in
 [ADR 0005](architecture/0005-machines-and-workspaces.md) and [ADR 0006](architecture/0006-workspaces-without-folders.md),
-the [Workbench design](design/workbench/WORKBENCH-DESIGN.md) and the [exohostctl design](design/exohostctl/TDD-exosuit-ctl.md).
+the [Workbench design](design/workbench/WORKBENCH-DESIGN.md) and the [exosuitctl design](design/exosuitctl/TDD-exosuit-ctl.md).
 
 ```
                      ┌───────────────────────────────────────────────────────────┐
@@ -10,7 +10,7 @@ the [Workbench design](design/workbench/WORKBENCH-DESIGN.md) and the [exohostctl
                      │  machine.json      the machine and its workspaces         │
                      │  EditorDirectory   one entry per linked editor window     │
                      │  ExohostServices      the services it started, + a spare     │
-                     │  ControlRouter     exohostctl / Pragtical v1 / automation    │
+                     │  ControlRouter     exosuitctl / Pragtical v1 / automation    │
                      │  MachineRemote     relay socket, paired devices, grants   │
                      └──▲──────────────────▲───────────────────────▲─────────────┘
        editor link      │  spawn, adopt,   │ service-attach        │ relay socket (Noise channels,
@@ -42,7 +42,7 @@ A device's streams reach a service through exohost: exohost forwards each one to
 | `src/` | The headless core shared by every app: editor model and controllers (`core`, `controller`, `editor`), the workspace protocol (`workspace/service`), its clients (`workspace/client`), transports (`workspace/transport`), exohost's client side (`exohost`) |
 | `graphical/` | The desktop editor: `app.GraphicalMain` and the UIKit shell (`ui.ExosuitApp` and its parts) |
 | `agent/` | The workspace service (`app.AgentMain`), the terminal host (`app.TerminalHostMain`), the agent providers |
-| `exohost/` | exohost and exohostctl (`app.ExohostMain`) |
+| `exohost/` | exohost and exosuitctl (`app.ExohostMain`) |
 | `android/`, `web/` | The phone app and the browser build; both run the same `ExosuitApp` |
 | `relay/worker/` | The relay: a Cloudflare Worker with a SQLite Durable Object per machine |
 | `native-packages/` | C libraries the apps bind: processes, terminal, sqlite, noise, oniguruma, plugin host |
@@ -203,7 +203,7 @@ exohost is the single control plane (`exohost/src/exohost/control`):
   `exosuit.ui.snapshot`, `exosuit.state.get`, commands, workspaces and windows, terminals and agent sessions, dialogs
   (`DrivenDialogs`), and element input (`SyntheticInput`) delivered into the window's own event queue, never as OS
   input. Real input always wins: injected input waits while the user typed or clicked in the last second.
-- **CLI.** `exohostctl` is exohost run as `--ctl` (`scripts/exohostctl.cmd`): `list`, `status`, `focus`, `open`, `documents`,
+- **CLI.** `exosuitctl` is exohost run as `--ctl` (`scripts/exosuitctl.cmd`): `list`, `status`, `focus`, `open`, `documents`,
   `save`, `project`, `call`, `quit`, `watch`. `exohost` itself keeps the process commands (`list`, `kill`, `terminals`,
   `quit`, `remote`, `machine`, `workspace`, `login`) and also takes the window commands.
 

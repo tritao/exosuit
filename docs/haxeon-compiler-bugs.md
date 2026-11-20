@@ -40,7 +40,7 @@ entry has the minimal source.
 
 - **Symptom:** `package a.b; class Child { var p:Parent; }` with `a.Parent` imported nowhere else gives
   `E1020 Unknown type "Parent"` (stock Haxe resolves parent packages). Hit by `ui.control.EditorControl`
-  (`ui.ExosuitApp`) and `exohost.control.ControlRouter`, `ExohostCtl`, `exohost.remote.MachineRemote`. The same shape:
+  (`ui.ExosuitApp`) and `exohost.control.ControlRouter`, `ExosuitCtl`, `exohost.remote.MachineRemote`. The same shape:
   `-Entry editor.GutterGeometry` stops in haxeon's generated binding `haxeon/ui/ResolvedLayoutItem.hx:156` with
   `E1005 Unknown variable "NativeKitUIConstants"`; the whole app build loads that module first and is not affected.
 - **Repro:** `U8/repro-parentpkg`.

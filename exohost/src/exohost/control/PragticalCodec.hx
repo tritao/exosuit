@@ -4,7 +4,7 @@ import haxe.io.Bytes;
 import haxe.io.BytesBuffer;
 
 /**
-	Pragtical control protocol v1 on the wire (docs/design/exohostctl/TDD-exosuit-ctl.md §2.6, §11): a frame is a 4-byte
+	Pragtical control protocol v1 on the wire (docs/design/exosuitctl/TDD-exosuit-ctl.md §2.6, §11): a frame is a 4-byte
 	big-endian length and one MessagePack value, at most 16 MiB. Only Pragtical's subset is read and written: nil,
 	booleans, integers within ±2^53, strings, arrays and maps with string keys, at most 32 deep; floats, bin and ext are
 	refused, and so are trailing bytes. Values are plain Haxe values (objects for maps) so they pass to and from JSON.

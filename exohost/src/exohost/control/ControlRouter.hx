@@ -19,7 +19,7 @@ private typedef Subscriber = {
 }
 
 /**
-	exohost's control plane (docs/design/exohostctl/TDD-exosuit-ctl.md §4–§6, §8): the `control` op on exohost's main pipe and
+	exohost's control plane (docs/design/exosuitctl/TDD-exosuit-ctl.md §4–§6, §8): the `control` op on exohost's main pipe and
 	the methods of Pragtical control protocol v1 plus Exosuit's (`exosuit.*`). exohost answers a few methods itself
 	(`control.hello`, `control.ping`, `instance.status`, `exosuit.instances`, `exosuit.workspaces.list`) and forwards the
 	rest, unchanged, to the editor window the request is routed to over that window's link (EditorDirectory). Events are
@@ -310,7 +310,7 @@ class ControlRouter {
 	static function failure(error:ControlError):Dynamic
 		return {ok: false, error: error.json()};
 
-	/** One line per call that changes or drives a window, with the calling process (docs/design/exohostctl §10). */
+	/** One line per call that changes or drives a window, with the calling process (docs/design/exosuitctl §10). */
 	function log(peer:Int, editor:LinkedEditor, method:String):Void {
 		var line = Std.int(Sys.time()) + " pid " + peer + " " + processName(peer) + " -> " + editor.window + " " + method;
 		logged.push(line);

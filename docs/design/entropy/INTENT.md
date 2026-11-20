@@ -1,7 +1,7 @@
 # What Exosuit is meant to be (the yardstick for the entropy pass)
 
 Distilled on 2026-11-15 from the owner's answers in `docs/design/workbench/QUESTIONS.md` (Workbench Q1–Q11),
-`docs/design/exohostctl/QUESTIONS.md` and the decisions table in `TDD-exosuit-ctl.md` (exohostctl Q1–Q19), and the owner's
+`docs/design/exosuitctl/QUESTIONS.md` and the decisions table in `TDD-exosuit-ctl.md` (exosuitctl Q1–Q19), and the owner's
 standing instructions. Every mechanism in the codebase is judged against these statements. Code that exists only to
 serve a model the owner rejected is junk, however well it is tested.
 
@@ -46,14 +46,14 @@ simpler, faster, cleaner and leaner.
    sends the text by itself (WB Q11).
 8. **exohost is the final arbiter and the single control plane.**
    - exohost lists everything Exosuit-related and can end all of it. A polite quit keeps terminals.
-   - exohost is the only server, Pragtical control protocol v1 compatible. `exohostctl` and `exohost` are one program with two
+   - exohost is the only server, Pragtical control protocol v1 compatible. `exosuitctl` and `exohost` are one program with two
      invocation names (Q1, Q7).
    - Each editor keeps one persistent link to exohost. Quit is a request the editor answers, not WM_CLOSE (Q4).
    - The link replaces the editor's registry file (Q6).
    - Automation command files and `snapshot.json` are retired in favour of protocol methods and events (Q9, Q11).
    - Events are opt-in (Q18).
-   - Every mechanism exohostctl replaces is removed, not kept beside it (exohostctl goal 7).
-9. **Exosuit can be driven entirely over the protocol, without computer use** (exohostctl G8). Synthetic input goes
+   - Every mechanism exosuitctl replaces is removed, not kept beside it (exosuitctl goal 7).
+9. **Exosuit can be driven entirely over the protocol, without computer use** (exosuitctl G8). Synthetic input goes
    into the UI's own queue, never OS input (Q10). Real input always wins (Q19).
 10. **Terminals survive and resume.** Terminal hosts outlive services. Agent sessions (Claude, Codex, Pi) resume their
     own conversation.

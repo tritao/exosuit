@@ -11,17 +11,17 @@ import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
 /**
-	`exohostctl`, exohost's command line for the control plane (docs/design/exohostctl/TDD-exosuit-ctl.md §8.2): Pragtical's
+	`exosuitctl`, exohost's command line for the control plane (docs/design/exosuitctl/TDD-exosuit-ctl.md §8.2): Pragtical's
 	command set (`list`, `status`, `focus`, `open`, `documents`, `save`, `project`, `call`) plus `quit` and `watch`, with
-	Pragtical's options and exit codes. `exohostctl` is exohost run with `--ctl` (scripts/exohostctl.cmd); `exohost` itself takes
+	Pragtical's options and exit codes. `exosuitctl` is exohost run with `--ctl` (scripts/exosuitctl.cmd); `exohost` itself takes
 	`open`, `focus`, `documents`, `save`, `project` and `call` with the same meaning.
 
 	Every command is a `control` request on exohost's main pipe; exohost routes it to a window (§6). exohost is always on, so a
 	call that finds it down starts it and tries again for 2 s.
 **/
-class ExohostCtl {
+class ExosuitCtl {
 	public static final USAGE:String = [
-		"usage: exohostctl [options] <command>",
+		"usage: exosuitctl [options] <command>",
 		"  list                         the Exosuit windows: id, pid, context and workspace folders",
 		"  status                       the window's status (the most recently used, or --instance)",
 		"  focus                        bring the window to the front",
@@ -154,13 +154,13 @@ class ExohostCtl {
 			}
 			return 0;
 		} catch (usage:Usage) {
-			Sys.stderr().writeString("exohostctl: " + usage.message + "\n" + USAGE + "\n");
+			Sys.stderr().writeString("exosuitctl: " + usage.message + "\n" + USAGE + "\n");
 			return 2;
 		} catch (failure:Failed) {
 			if (json)
 				print(Json.stringify({error: failure.error.json()}));
 			else
-				Sys.stderr().writeString("exohostctl: " + failure.error.code + ": " + failure.error.message + "\n");
+				Sys.stderr().writeString("exosuitctl: " + failure.error.code + ": " + failure.error.message + "\n");
 			return failure.exit;
 		}
 	}
@@ -302,7 +302,7 @@ class ExohostCtl {
 		hub.dispose();
 		runtime.dispose();
 		if (!subscribed) {
-			Sys.stderr().writeString("exohostctl: timeout: exohost did not answer\n");
+			Sys.stderr().writeString("exosuitctl: timeout: exohost did not answer\n");
 			return 4;
 		}
 		return 0;

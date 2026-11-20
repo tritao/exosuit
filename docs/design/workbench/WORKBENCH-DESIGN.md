@@ -2,7 +2,7 @@
 
 Status: built (entropy pass, 2026-11-15 and 16). The owner decided every question raised ([QUESTIONS.md](QUESTIONS.md),
 rounds 1 and 2). This is the design; how the parts fit together now is in [ARCHITECTURE.md](../../ARCHITECTURE.md).
-§4 checks it against the [exohostctl design](../exohostctl/TDD-exosuit-ctl.md).
+§4 checks it against the [exosuitctl design](../exosuitctl/TDD-exosuit-ctl.md).
 
 ## Decisions (owner, rounds 1 and 2)
 
@@ -17,7 +17,7 @@ rounds 1 and 2). This is the design; how the parts fit together now is in [ARCHI
 | Q7 | (a) New Agent Session creates at once with the default provider; a submenu offers the other providers and Change Folder… | The default provider is set by Q8 |
 | Q8 | (a) A "Default agent provider" setting, initially Claude ("claude for now") | `defaultAgentProvider` next to `agentSessionMode` in `src/config/Settings.hx`, default `claude`. New Agent Session's first entry uses it; the submenu lists the others |
 | Q9 | (a) The warm spare exists only while at least one editor window is open | exohost starts the spare while an editor window is linked and ends it when the last one goes. A start that finds no spare ready is a cold start (§2.3) |
-| Q10 | (a) A folder that no workspace holds becomes a new workspace named after the folder, with the folder attached, and opens | No folder-only windows. It matches the exohostctl design's `project.change` ("creating one if none does") |
+| Q10 | (a) A folder that no workspace holds becomes a new workspace named after the folder, with the folder attached, and opens | No folder-only windows. It matches the exosuitctl design's `project.change` ("creating one if none does") |
 | Q11 | (b) A session that fails to start keeps its tab and the typed text, shows the cause and a Retry, and never sends the text by itself | On a normal start, queued input is delivered when the session goes live. Only after a failure is the text held as an unsent draft for the user to send again (§1) |
 
 Owner's requirements, as given:
@@ -94,8 +94,8 @@ ActiveContext: the machine/workspace/group the window shows; Files, Search, Chan
 - **The tree reads every workspace the same way** (`WorkbenchRows`): from its link's lists once read, else from its
   catalog snapshot. One projection keyed by workspace and item (`WorkbenchRowKey`); orphans go to the root, with a
   cycle guard.
-- **Every action takes a workspace id**, as the exohostctl design's methods do: no method assumes that a window has
-  exactly one workspace. exohostctl's `workspaces: [{id, roots[], active}]` is the link map plus the focus.
+- **Every action takes a workspace id**, as the exosuitctl design's methods do: no method assumes that a window has
+  exactly one workspace. exosuitctl's `workspaces: [{id, roots[], active}]` is the link map plus the focus.
 
 ### 2.2 Push, not poll
 
@@ -164,9 +164,9 @@ The phone and the browser hold the same `WorkspaceLinks` over relay streams (`De
 the machine stream); exohost forwards each stream to the service's pipe. Their tree comes from exohost's machine directory,
 filtered to the workspaces the device was granted.
 
-## 4. Consistency with the exohostctl design (§6.1)
+## 4. Consistency with the exosuitctl design (§6.1)
 
-| exohostctl §6.1 says | This design | Agreement |
+| exosuitctl §6.1 says | This design | Agreement |
 |---|---|---|
 | exohost is always on; exohost-off mode is gone; tests isolate through `EXOSUIT_EXOHOST_HOME` | Q6 | Agrees |
 | Folder-only mode removed. `project.change {path}` opens the workspace holding the folder, creating one if none does. `project.add {path}` adds the folder to the active workspace | Q10; Attach Folder… on the row | Agrees. `project.add` is the control plane's twin of Attach Folder… |

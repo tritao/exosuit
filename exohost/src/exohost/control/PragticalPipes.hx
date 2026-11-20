@@ -36,7 +36,7 @@ private class Pipe {
 }
 
 /**
-	Pragtical compatibility (docs/design/exohostctl/TDD-exosuit-ctl.md §5.4, Q2=b): one pipe per linked editor window,
+	Pragtical compatibility (docs/design/exosuitctl/TDD-exosuit-ctl.md §5.4, Q2=b): one pipe per linked editor window,
 	`\\.\pipe\exosuit-exohostctl-<user>-<instance id>`, that speaks Pragtical control protocol v1 byte for byte, and a
 	descriptor per window in `<exohost home>\runtime\instances`, so `pragtical-ctl` with `PRAGTICAL_USERDIR` set to exohost's
 	home lists, focuses and opens files in Exosuit windows. exohost answers `control.hello` on a pipe itself and forwards

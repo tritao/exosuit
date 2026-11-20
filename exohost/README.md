@@ -13,17 +13,17 @@ python scripts/exohost.py quit --keep-terminals   the polite quit: everything bu
 python scripts/exohost.py help            all commands
 ```
 
-It is also the editors' control plane: `exohostctl` (`scripts/exohostctl.cmd`, or
+It is also the editors' control plane: `exosuitctl` (`scripts/exosuitctl.cmd`, or
 `python scripts/exohost.py --ctl`) is the same program under a second name.
 
 ```
-exohostctl list                    the open windows: id, pid, context, workspace folders
-exohostctl open <folder|file[:line[:col]]>   a folder opens as the workspace that holds it (or a new one); a file in a tab
-exohostctl documents | save | focus | status
-exohostctl project add|change <folder>
-exohostctl quit --mode prompt|recover|save
-exohostctl call <method> '<json params>'     any control method, e.g. exosuit.ui.snapshot
-exohostctl watch [event...]       print the events asked for, one JSON line each
+exosuitctl list                    the open windows: id, pid, context, workspace folders
+exosuitctl open <folder|file[:line[:col]]>   a folder opens as the workspace that holds it (or a new one); a file in a tab
+exosuitctl documents | save | focus | status
+exosuitctl project add|change <folder>
+exosuitctl quit --mode prompt|recover|save
+exosuitctl call <method> '<json params>'     any control method, e.g. exosuit.ui.snapshot
+exosuitctl watch [event...]       print the events asked for, one JSON line each
 ```
 
 ## How processes are known
@@ -244,7 +244,7 @@ The tray menu is built from a fresh scan each time it opens:
 
 ## Control plane
 
-docs/design/exohostctl/TDD-exosuit-ctl.md is the design. In short:
+docs/design/exosuitctl/TDD-exosuit-ctl.md is the design. In short:
 
 - **One channel.** Programs send `{op: "control", version: 1, method, params, target}` on exohost's pipe.
   exohost answers `control.hello`, `control.ping`, `instance.status` and `exosuit.instances` itself
