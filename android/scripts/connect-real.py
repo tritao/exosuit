@@ -135,7 +135,7 @@ def control(home: str | None, request: dict, timeout: float = 15) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["status", "devices", "enable", "disable", "invite", "approve", "grant", "pipe", "relay"])
+    parser.add_argument("command", choices=["status", "devices", "enable", "disable", "invite", "approve", "grant", "pipe", "relay", "create-workspace"])
     parser.add_argument("--home", default=None)
     parser.add_argument("--relay", default=None)
     parser.add_argument("--ttl", type=int, default=300)
@@ -162,6 +162,12 @@ def main() -> int:
             reply = control(home, {"op": "remote-enable", "origin": (arguments.relay or default_relay()).rstrip("/")})
     elif arguments.command == "disable":
         reply = control(home, {"op": "remote-disable"}, timeout=30)
+    elif arguments.command == "create-workspace":
+        if not (home or os.environ.get("EXOSUIT_EXOHOST_HOME")):
+            raise SystemExit(json.dumps({"ok": False, "error": "create-workspace only runs against an isolated exohost (--home)"}))
+        if len(arguments.workspace) != 2:
+            raise SystemExit(json.dumps({"ok": False, "error": "usage: create-workspace --workspace NAME --workspace FOLDER"}))
+        reply = control(home, {"op": "workspace-create", "name": arguments.workspace[0], "folders": [arguments.workspace[1]]})
     elif arguments.command == "grant":
         refuse_real_home(home)
         if not (home or os.environ.get("EXOSUIT_EXOHOST_HOME")):

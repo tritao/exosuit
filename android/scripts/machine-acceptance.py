@@ -239,6 +239,9 @@ def main():
         r.adb_("logcat", "-c")  # the wait below must not match the "online []" of the reconnect
         r.ctl("grant", "--device", device)  # no workspaces: takes everything back
         r.wait_log(r"exosuit-machine: \S.* online \[\]", 60); time.sleep(2); r.shot("8-revoked.png")
+        r.tap("^Machines$", role=18, after=2)
+        if r.elements(r"^%s$" % re.escape(a.workspace)):
+            raise SystemExit("the revoked workspace is still listed on the phone")
         passed("revoke: the workspace left the phone's list")
         print(f"OK: evidence in {a.out}; look at each screenshot")
     finally:

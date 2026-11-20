@@ -385,3 +385,35 @@ the desktop; tapping it opens `TerminalPane.openRemote` (the same pane and `RpcT
 - Before a relaunch that must reconnect, `machine-acceptance.ps1` puts the `adb reverse` rule to the relay back if it is gone (`Assert-RelayTunnel`; it prints a `RIG:` line when it had to). An emulator transport reset drops the rule and a cold-started app then stays offline; that looked like an app bug once (2026-11-13).
 - Network loss is simulated by wifi and data off, removing the `adb reverse` rule and `adb reconnect` (the relay is reached through the reverse tunnel, so toggling wifi alone changes nothing).
 - Desktop restart is exohost stopping and starting on the host's home. The relay keeps a device's socket when the machine behind it restarts and tells the device nothing; the old Noise session is dead. `DeviceMachine` now ends the connection when its directory read times out (at most 15 s refresh + 8 s timeout), and the client dials again.
+
+## macOS and Linux: build, emulator, machine acceptance
+
+Headless, arm64 on Apple silicon; no PowerShell needed. Run builds through `with-lock` when other builds share the machine.
+
+```
+android/scripts/setup.sh                                   # toolchain, AVD exosuit-s8 (arm64-v8a image)
+android/scripts/build.sh                                   # APK (arm64-v8a on Apple silicon; --abi x86_64,arm64-v8a)
+source android/scripts/env.sh
+emulator -avd exosuit-s8 -port 5584 -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect &
+adb -s emulator-5584 wait-for-device; adb -s emulator-5584 install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Test machine (an isolated exohost; source your own env first so nothing reaches the real exohost or the keychain; relay
+http://127.0.0.1:18787 plus the TLS front https://localhost:18443 with its development CA, see the relay rig's handoff):
+
+```
+python3 scripts/build.py --only agent,exohost
+python3 scripts/exohost.py start
+python3 android/scripts/connect-real.py enable --relay http://127.0.0.1:18787
+python3 android/scripts/connect-real.py create-workspace --workspace demo --workspace /path/to/folder
+```
+
+Acceptance (pair with the code check, grant, open, a terminal command that runs on the machine, reconnect, revoke):
+
+```
+python3 android/scripts/machine-acceptance.py --machine-env <env.sh that isolates the machine> --relay-ca <ca.pem> \
+    --workspace-dir /path/to/folder --out <dir>
+```
+
+The CA is copied into the app's own files (`files/dev-ca.pem`, debug builds only) and never into a keychain. Not ported from
+machine-acceptance.ps1 (Windows-only rig): Read only / Take control, extra keys, Paste, New Agent Session, resume steps.
