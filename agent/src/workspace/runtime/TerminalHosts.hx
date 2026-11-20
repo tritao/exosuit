@@ -387,11 +387,6 @@ class TerminalHosts {
 		}
 	}
 
-	/**
-		Starts a host running `profile`'s program; `name` is the terminal's, for exohost's list, and `prelude` what its
-		emulator shows before the program starts. Throws when the host cannot be started, and when a host of this terminal
-		still runs: that one is never replaced unasked.
-	**/
 	/** A host's socket: a short name from its folder, in `terminal-sockets` beside the runtime copies. */
 	function socketPath(hostDirectory:String):String {
 		var sockets = Path.join([Path.directory(runtimeBase), "terminal-sockets"]);
@@ -399,6 +394,11 @@ class TerminalHosts {
 		return Path.join([sockets, Sha256.encode(hostDirectory).substr(0, 16) + ".sock"]);
 	}
 
+	/**
+		Starts a host running `profile`'s program; `name` is the terminal's, for exohost's list, and `prelude` what its
+		emulator shows before the program starts. Throws when the host cannot be started, and when a host of this terminal
+		still runs: that one is never replaced unasked.
+	**/
 	public function spawn(terminal:String, profile:TerminalProfile, columns:Int, rows:Int, ?name:String, ?prelude:Bytes):HostedPtyBackend {
 		var directory = folder(terminal);
 		// prepareDirectory below reports a parent that could not be created.
