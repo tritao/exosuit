@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Talks to a running exohost's control pipe the way the editor's Remote Access panel does (Windows).
+"""Talks to a running exohost's control pipe the way the editor's Remote Access panel does (a named pipe on Windows, a Unix socket elsewhere).
 
 Used by connect-real.ps1. Each subcommand prints one JSON object on stdout.
 
@@ -33,7 +33,16 @@ def sanitized_user() -> str:
 
 
 def endpoint(home: str | None) -> str:
-    """Mirrors ExohostPaths.endpoint(): the pipe name carries a hash of an explicitly configured home."""
+    """Mirrors ExohostPaths.endpoint(): the pipe name carries a hash of an explicitly configured home.
+    Off Windows the endpoint is a Unix socket in the home; the running daemon records it in <home>/daemon.json."""
+    if os.name != "nt":
+        configured = home or os.environ.get("EXOSUIT_EXOHOST_HOME")
+        if not configured:
+            raise SystemExit(json.dumps({"ok": False, "error": "off Windows pass --home (or set EXOSUIT_EXOHOST_HOME): the isolated exohost's folder"}))
+        try:
+            return json.loads((Path(configured) / "daemon.json").read_text())["endpoint"]
+        except (OSError, ValueError, KeyError) as error:
+            raise SystemExit(json.dumps({"ok": False, "error": f"exohost is not running in {configured}: {error}"}))
     name = "exosuit-exohost-" + sanitized_user()
     configured = home or os.environ.get("EXOSUIT_EXOHOST_HOME")
     if configured:
@@ -51,17 +60,28 @@ class Pipe:
     """One connection to exohost's pipe, speaking its framed messages (the same framing as scripts/exohost_harness.py)."""
 
     def __init__(self, path: str, request: dict) -> None:
-        import ctypes
-        import msvcrt
-        self.ctypes = ctypes
-        try:
-            self.file = open(path, "r+b", buffering=0)
-        except OSError as error:
-            raise SystemExit(json.dumps({"ok": False, "error": f"exohost is not running on {path}: {error}"}))
-        self.handle = msvcrt.get_osfhandle(self.file.fileno())
         self.buffer = b""
         message = json.dumps(request).encode()
-        self.file.write(b"HMPK\x01\x00" + len(message).to_bytes(4, "big") + message)
+        frame = b"HMPK\x01\x00" + len(message).to_bytes(4, "big") + message
+        if os.name == "nt":
+            import ctypes
+            import msvcrt
+            self.ctypes = ctypes
+            self.socket = None
+            try:
+                self.file = open(path, "r+b", buffering=0)
+            except OSError as error:
+                raise SystemExit(json.dumps({"ok": False, "error": f"exohost is not running on {path}: {error}"}))
+            self.handle = msvcrt.get_osfhandle(self.file.fileno())
+            self.file.write(frame)
+        else:
+            import socket
+            self.socket = socket.socket(socket.AF_UNIX)
+            try:
+                self.socket.connect(path)
+            except OSError as error:
+                raise SystemExit(json.dumps({"ok": False, "error": f"exohost is not running on {path}: {error}"}))
+            self.socket.sendall(frame)
 
     def receive(self, timeout: float) -> dict:
         deadline = time.monotonic() + timeout
@@ -70,6 +90,19 @@ class Pipe:
                 length = int.from_bytes(self.buffer[6:10], "big")
                 if len(self.buffer) >= 10 + length:
                     return json.loads(self.buffer[10:10 + length])
+            if self.socket is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SystemExit(json.dumps({"ok": False, "error": "exohost did not answer in time"}))
+                self.socket.settimeout(remaining)
+                try:
+                    chunk = self.socket.recv(65536)
+                except OSError:
+                    raise SystemExit(json.dumps({"ok": False, "error": "exohost did not answer in time"}))
+                if not chunk:
+                    raise SystemExit(json.dumps({"ok": False, "error": "exohost closed the socket"}))
+                self.buffer += chunk
+                continue
             count = self.ctypes.c_ulong(0)
             if not self.ctypes.windll.kernel32.PeekNamedPipe(self.ctypes.c_void_p(self.handle), None, 0, None, self.ctypes.byref(count), None):
                 raise SystemExit(json.dumps({"ok": False, "error": "exohost closed the pipe"}))
@@ -81,7 +114,7 @@ class Pipe:
             time.sleep(0.02)
 
     def close(self) -> None:
-        self.file.close()
+        (self.socket or self.file).close()
 
 
 def control(home: str | None, request: dict, timeout: float = 15) -> dict:
