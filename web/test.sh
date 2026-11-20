@@ -41,7 +41,7 @@ trap cleanup EXIT
 python3 -m http.server "$http_port" --bind 127.0.0.1 --directory "$site_dir" >"$temp_dir/http.log" 2>&1 &
 http_pid=$!
 page_url="http://127.0.0.1:$http_port/index.html"
-setsid "$browser" --headless=new --no-sandbox --disable-dev-shm-usage --enable-unsafe-swiftshader --use-angle=swiftshader \
+python3 -c 'import os,sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' "$browser" --headless=new --no-sandbox --disable-dev-shm-usage --enable-unsafe-swiftshader --use-angle=swiftshader \
 	--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows \
 	--window-size=1400,900 --no-first-run --user-data-dir="$temp_dir/profile" \
 	--remote-debugging-port="$debug_port" --remote-allow-origins='*' "$page_url" >"$temp_dir/browser.log" 2>&1 &

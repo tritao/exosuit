@@ -10,12 +10,12 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-	echo "usage: tools/web/generate-wasm-hxi.sh OUTPUT_DIR SCRIPT:NAME[:OUTPUT_PREFIX] ..." >&2
+	echo "usage: tools/web/generate-wasm-hxi.sh OUTPUT_DIR ABSOLUTE_SCRIPT_PATH:NAME[:OUTPUT_PREFIX] ..." >&2
 	exit 2
 fi
 
-materia_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-haxeon_dir=${HAXEON_DIR:-"$materia_dir/exosuit/haxeon"}
+app_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+haxeon_dir=${HAXEON_DIR:-"$app_dir/haxeon"}
 mkdir -p "$1"
 output_dir=$(cd "$1" && pwd)
 shim_dir=$(mktemp -d)
@@ -47,7 +47,7 @@ shift
 for generator in "$@"; do
 	IFS=: read -r script name prefix <<<"$generator"
 	[[ -n "$script" && -n "$name" ]]
-	(cd "$materia_dir/$(dirname "$(dirname "$script")")" &&
-		HAXEON_DIR="$shim_dir" bash "$materia_dir/$script" "${prefix:-}$output_dir/$name") >/dev/null
+	(cd "$(dirname "$(dirname "$script")")" &&
+		HAXEON_DIR="$shim_dir" bash "$script" "${prefix:-}$output_dir/$name") >/dev/null
 	echo "generate-wasm-hxi: $name"
 done

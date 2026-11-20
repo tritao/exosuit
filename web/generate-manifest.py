@@ -14,9 +14,11 @@ for directory in ("src", "graphical/src"):
         if relative.startswith("app/") or relative in excluded:
             continue
         sources.append("../" + source.relative_to(root).as_posix())
+# LanguageServerCommand resolves the checkout's VM through Haxeon's HashLinkPath, which lives with the compiler's sources.
+sources += ["../haxeon/src/build/HashLinkPath.hx", "../haxeon/src/compiler/core/InternalError.hx"]
 manifest = {
     "version": 1, "package": {"name": "exosuit-web"}, "entry": "app.WebMain",
-    "sourceRoots": ["src", "../src", "../graphical/src"],
+    "sourceRoots": ["src", "../src", "../graphical/src", "../haxeon/src"],
     "scopeSourceRoots": False, "sources": sources,
     "dependencies": {
         "haxeon-platform": {"path": "../haxeon/packages/platform"},

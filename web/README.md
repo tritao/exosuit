@@ -25,6 +25,10 @@ comes from `haxeon` and `haxeon/vendor/nativekit/.tools/emsdk`, with `HAXEON_DIR
 `EMSDK_DIR` overrides. Guest compile errors terminate the build; stale output
 cannot qualify a failed compile.
 
+The build also needs materia's `tools/web` and `scenekit` (a checkout of github.com/tritao/materia; a sparse one with those
+paths is enough). It looks for them in the directory holding this app (the `materia/exosuit` layout); set `EXOSUIT_MATERIA_DIR`
+to a checkout elsewhere.
+
 `./web/test.sh` uses installed Chrome and SwiftShader with a disposable profile.
 It checks rendering, real keyboard editing, dirty tracking, save/readback, URL
 opening and a fresh page reload. Any console or page error fails the check.

@@ -19,7 +19,11 @@ endif()
 
 set(EXOSUIT_HAXEON_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../haxeon" CACHE PATH "Haxeon source directory")
 
-get_filename_component(MATERIA_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+# scenekit lives in materia; build.sh passes its checkout (EXOSUIT_MATERIA_DIR), else the directory holding this app.
+if(NOT DEFINED MATERIA_SOURCE_ROOT)
+    get_filename_component(MATERIA_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+endif()
+get_filename_component(EXOSUIT_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
 set(NK_BUILD_SHARED OFF CACHE BOOL "Emscripten links one static host" FORCE)
 set(NK_BUILD_GPU ON CACHE BOOL "The editor viewport renders through NativeKit GPU" FORCE)
@@ -35,9 +39,9 @@ set(NKSCENE_NATIVEKIT_DIR "${EXOSUIT_HAXEON_ROOT}/vendor/nativekit")
 set(NK_LIBRARY_TYPE STATIC)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/scenekit/scene" scene)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/scenekit/scene_render" scene_render)
-add_subdirectory("${MATERIA_SOURCE_ROOT}/exosuit/native-packages/noise" noisekit)
-add_subdirectory("${MATERIA_SOURCE_ROOT}/exosuit/native-packages/terminal" terminalkit)
-add_subdirectory("${MATERIA_SOURCE_ROOT}/exosuit/native-packages/oniguruma" textmate_regex)
+add_subdirectory("${EXOSUIT_SOURCE_ROOT}/native-packages/noise" noisekit)
+add_subdirectory("${EXOSUIT_SOURCE_ROOT}/native-packages/terminal" terminalkit)
+add_subdirectory("${EXOSUIT_SOURCE_ROOT}/native-packages/oniguruma" textmate_regex)
 
 # The host heap ends where the guest's managed heap begins; the guest owns the
 # rest of the fixed-size memory. Values are byte offsets, multiples of 64 KiB.
