@@ -147,12 +147,12 @@ class PhoneShell implements Shell implements PhoneHost {
 	}
 
 	public function build():View {
-		dropClosedSession();
+		dropClosedSession(true);
 		syncRoot();
 		var made = phoneCore.pollNew();
-		if (made != null) pushSession(made.id, made.title, entryOf(made.id), made.view);
+		if (made != null) pushSession(made.id, made.title, entryOf(made.id), made.view, true);
 		var waited = phoneCore.pollPending();
-		if (waited != null) pushSession(waited.entry.id, waited.entry.name, waited.entry, waited.view);
+		if (waited != null) pushSession(waited.entry.id, waited.entry.name, waited.entry, waited.view, true);
 		var failed = phoneCore.takeFailure();
 		if (failed != null) notice(failed);
 		// ExosuitApp already lays the shell out inside the safe area; insetting the bar again would pad it twice (and
@@ -338,24 +338,25 @@ class PhoneShell implements Shell implements PhoneHost {
 		return PhoneChrome.screen(panelId + "-screen", [PhoneUi.kv("heading", PhoneChrome.heading(title)), PhoneUi.kv("rule", PhoneUi.rule("rule")), PhoneUi.kv("body", body)]);
 	}
 
-	function pushSession(id:String, title:String, entry:Null<SessionEntry>, panel:View):Void {
+	/** `fromBuild`: called by build(), where the frame already includes the push and a tracked write (requestFrame's tick) throws. */
+	function pushSession(id:String, title:String, entry:Null<SessionEntry>, panel:View, fromBuild:Bool = false):Void {
 		var key = SESSION_PREFIX + id;
 		if (controller.top.id == key) return;
 		var screen = new TerminalScreen(this, title, entry, panel);
 		if (phoneCore.panelLive(panel)) tabScreens.set(key, panel); else tabScreens.remove(key);
 		controller.push({id: key, build: screen.build});
-		app.requestFrame();
+		if (fromBuild) app.scheduleFrame(); else app.requestFrame();
 	}
 
 	/** A session screen on top whose tab was closed or disposed (its terminal ended, the tab was closed elsewhere) is popped. */
-	function dropClosedSession():Void {
+	function dropClosedSession(fromBuild:Bool = false):Void {
 		while (controller.depth > 1) {
 			var key = controller.top.id;
 			var panel = tabScreens.get(key);
 			if (panel == null || phoneCore.panelLive(panel)) return;
 			tabScreens.remove(key);
 			controller.pop();
-			app.requestFrame();
+			if (fromBuild) app.scheduleFrame(); else app.requestFrame();
 		}
 	}
 
