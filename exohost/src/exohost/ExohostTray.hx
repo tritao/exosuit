@@ -97,8 +97,9 @@ class ExohostTray {
 	}
 
 	/**
-		Shows a menu built by `build` and returns at once: NativeKit runs the popup on its own thread, so the
-		daemon keeps relaying frames and answering the CLI while it is open. The choice arrives later as an event.
+		Shows a menu built by `build` and returns at once; the choice arrives later as an event. On Windows NativeKit
+		runs the popup on its own thread, so the daemon keeps relaying frames and answering the CLI while it is open;
+		on macOS menus run on the main thread, so the daemon's loop pauses until the menu closes.
 	**/
 	public function show(build:ExohostMenuModel.ExohostMenuSink->Void):Void {
 		actions.clear();

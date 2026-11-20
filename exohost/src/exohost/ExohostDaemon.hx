@@ -33,7 +33,8 @@ extern function releaseLock(lock:ExohostLockHandle):Void;
 	and a Pragtical control protocol pipe per window (PragticalPipes) reach every window over its link. With remote
 	access on it holds the machine's relay socket and its paired devices' sessions (MachineRemote).
 
-	The tray menu does not stop this loop: NativeKit runs the popup on its own thread (`ExohostTray.show`).
+	On Windows the tray menu does not stop this loop: NativeKit runs the popup on its own thread. On macOS the loop
+	pauses while the menu is open, since AppKit menus run on the main thread (`ExohostTray.show`).
 
 	Idle cost: it sleeps in the NativeKit event wait, which a tray click or a control connection wakes,
 	and rescans processes every REFRESH_SECONDS to keep the tooltip current. It exits after
