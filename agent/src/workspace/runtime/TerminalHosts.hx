@@ -216,6 +216,10 @@ class TerminalHostRuntime {
 			try {
 				for (folder in folders) FileSystem.createDirectory(folder == "" ? staging : Path.join([staging, folder]));
 				for (file in files) File.copy(file.from, Path.join([staging, file.to]));
+				// File.copy writes a new file without the source's mode, so on macOS and Linux the copied runtime
+				// could not be started ("Permission denied").
+				if (!windows && Sys.command("chmod", ["700", Path.join([staging, executableName])]) != 0)
+					throw "Could not make the terminal host runtime executable";
 				File.saveContent(Path.join([staging, "complete"]), lines.join("\n") + "\n");
 				FileSystem.rename(staging, target);
 			} catch (failure:Dynamic) {
@@ -388,6 +392,13 @@ class TerminalHosts {
 		emulator shows before the program starts. Throws when the host cannot be started, and when a host of this terminal
 		still runs: that one is never replaced unasked.
 	**/
+	/** A host's socket: a short name from its folder, in `terminal-sockets` beside the runtime copies. */
+	function socketPath(hostDirectory:String):String {
+		var sockets = Path.join([Path.directory(runtimeBase), "terminal-sockets"]);
+		if (!FileSystem.exists(sockets)) FileSystem.createDirectory(sockets);
+		return Path.join([sockets, Sha256.encode(hostDirectory).substr(0, 16) + ".sock"]);
+	}
+
 	public function spawn(terminal:String, profile:TerminalProfile, columns:Int, rows:Int, ?name:String, ?prelude:Bytes):HostedPtyBackend {
 		var directory = folder(terminal);
 		// prepareDirectory below reports a parent that could not be created.
@@ -407,8 +418,10 @@ class TerminalHosts {
 			ServiceLog.note("terminal host runtime copy " + Path.directory(runtime.executable));
 		}
 		var token = app.AgentNative.randomToken();
+		// A Unix socket path must fit sockaddr_un (104 bytes on macOS, 108 on Linux), which the host folder's path
+		// does not, so sockets live in a short folder beside the runtime copies, inside the user-only state root.
 		var pipe = Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-term-" + app.AgentNative.randomToken().substr(0, 32)
-			: Path.join([directory, "host.sock"]);
+			: socketPath(directory);
 		var specPath = Path.join([directory, "spec.bin"]);
 		AtomicFile.writeBytes(specPath, TerminalHostProtocol.encodeSpec({
 			token: token,
