@@ -16,9 +16,10 @@ Asserted (each prints PASS or fails the run; screenshots and element lists go to
   open        tapping the workspace row opens it (exosuit-open ... connected)
   reconnect   force-stop and start again: reconnects from the stored pairing, no new code
   revoke      the owner takes the workspace back and it leaves the phone's list
+terminal     (+ > Terminal) a command typed on the phone runs on the machine: its file output is checked
 Not ported (skipped, they need scripts/mobile-machine-host.py's rig, whose exohost client speaks a Windows named pipe and
 whose fake Claude TUI terminal is its own fixture): the Read only / Take control strip, extra keys, Ctrl, Paste,
-New Agent Session, a second workspace, and the resume-* steps. The terminal round trip is terminal-roundtrip.py's job.
+New Agent Session, a second workspace, and the resume-* steps. 
 """
 import argparse, json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -101,6 +102,12 @@ class Rig:
         self.adb_("shell", "input", "tap", str(x), str(y))
         time.sleep(after)
 
+    def tap_logical(self, x, y, after=1.5):
+        size = re.search(r"(\d+)x(\d+)", self.adb_("shell", "wm", "size").stdout)
+        scale = float(size.group(1)) / float(self.snapshot()["viewport"]["width"])
+        self.adb_("shell", "input", "tap", str(int(x * scale)), str(int(y * scale)))
+        time.sleep(after)
+
     def shot(self, name):
         path = self.out / name
         data = subprocess.run([self.adb, "-s", self.serial, "exec-out", "screencap", "-p"], capture_output=True, timeout=60).stdout
@@ -127,6 +134,7 @@ def main():
     p.add_argument("--relay-plain", default="http://127.0.0.1:18787", help="the invitation's relay origin, replaced by --relay-tls")
     p.add_argument("--serial", default="emulator-5584")
     p.add_argument("--workspace", default="demo", help="workspace (by name) to grant and open")
+    p.add_argument("--workspace-dir", required=True, help="the workspace's folder on the machine (the terminal's directory)")
     p.add_argument("--out", default=str(HERE.parent / "build" / "machine-acceptance"))
     p.add_argument("--order", choices=["confirm-first", "approve-first"], default="confirm-first")
     p.add_argument("--keep-automation", action="store_true")
@@ -140,8 +148,10 @@ def main():
     r.adb_("reverse", f"tcp:{port}", f"tcp:{port}")
     r.adb_("shell", "pm", "clear", PACKAGE)
     r.run_as("mkdir", "-p", "files")
-    ca = Path(a.relay_ca).read_text()
-    sh([r.adb, "-s", r.serial, "shell", "run-as", PACKAGE, "sh", "-c", "cat > files/dev-ca.pem"], input=ca)
+    r.adb_("push", str(Path(a.relay_ca).resolve()), "/data/local/tmp/dev-ca.pem")
+    r.run_as("cp", "/data/local/tmp/dev-ca.pem", "files/dev-ca.pem")
+    if "dev-ca.pem" not in r.run_as("ls", "files").stdout:
+        raise SystemExit("the development CA did not reach the app's files/")
     r.run_as("touch", "files/automation.on")
     for key in ("window_animation_scale", "transition_animation_scale", "animator_duration_scale"):
         r.adb_("shell", "settings", "put", "global", key, "0")
@@ -168,6 +178,7 @@ def main():
             raise SystemExit("the phone and the machine show different pairing codes")
         time.sleep(2); r.shot("1-pairing-code.png")
         passed("pair: codes match and the machine key matched the invitation")
+        r.tap("^Machines$", role=18, after=2)  # the phone shows the pairing code on the Machines tab
         if a.order == "approve-first":
             r.ctl("approve", "--device", device); time.sleep(3); r.tap("The code matches", role=1, after=0)
         else:
@@ -179,14 +190,11 @@ def main():
         time.sleep(2); r.shot("2-nothing-granted.png")
         passed("online: the machine is paired and online with nothing granted")
 
-        status = r.ctl("status")
-        ids = status.get("workspaces") or []
-        wid = None
-        for item in ids:
-            if a.workspace in (item.get("name"), item.get("id")):
-                wid = item["id"]
-        if not wid:
-            raise SystemExit(f"workspace {a.workspace!r} not found in machine status: {json.dumps(status)[:400]}")
+        listing = sh(["bash", "-c", f'source "{a.machine_env}" && cd "{HERE.parent.parent}" && python3 scripts/exohost.py machine']).stdout
+        found = re.search(r"^\s*%s\s+\((workspace-[0-9a-f]+)\)" % re.escape(a.workspace), listing, re.M)
+        if not found:
+            raise SystemExit(f"workspace {a.workspace!r} not found on the machine: {listing[:400]}")
+        wid = found.group(1)
         r.ctl("grant", "--device", device, "--workspace", wid)
         r.wait_log(r"exosuit-machine: \S.* online \[" + re.escape(a.workspace) + r":\w+:[0-9-]+\]", 60)
         time.sleep(2); r.shot("3-granted.png")
@@ -194,11 +202,29 @@ def main():
             raise SystemExit("the phone asked for more than one pairing code")
         passed("grant: the workspace appeared on the same channel; one pairing code only")
 
-        if not r.elements(r"^%s " % re.escape(a.workspace)):
-            r.tap("^Remote$|^Machines$", role=1, after=2)
-        r.tap(r"^%s " % re.escape(a.workspace), role=1, after=1)
+        r.tap("^Machines$", role=18, after=2)
+        r.tap(r"^%s$" % re.escape(a.workspace), after=1)
         r.wait_log(r"exosuit-open: " + re.escape(wid) + " connected", 60); time.sleep(6); r.shot("5-open.png")
         passed("open: the workspace opened and connected")
+
+        # Terminal round trip: "+" (top right, new session) > Terminal, then type a command; its file output proves it ran on the machine.
+        width = float(r.snapshot()["viewport"]["width"])
+        r.tap_logical(width - 38, 86, after=3)
+        r.tap("^Terminal$", role=1, after=3)
+        r.wait_element("^Esc$", 60)  # the touch keys row: the terminal view is drawn
+        time.sleep(4); r.shot("6-terminal.png")
+        marker = Path(a.workspace_dir) / "android-ok.txt"
+        marker.unlink(missing_ok=True)
+        r.adb_("shell", "input text 'echo%sandroid-ok%s$((6*7))%s|%stee%sandroid-ok.txt'")
+        time.sleep(1); r.adb_("shell", "input", "keyevent", "66")
+        end = time.time() + 30
+        while time.time() < end and not marker.exists():
+            time.sleep(1)
+        time.sleep(1); r.shot("6b-terminal-ran.png")
+        if not marker.exists() or marker.read_text().strip() != "android-ok 42":
+            raise SystemExit("the terminal command did not run on the machine (android-ok.txt missing or wrong)")
+        passed("terminal: 'echo android-ok $((6*7))' typed on the phone ran on the machine: android-ok 42")
+        r.adb_("shell", "input", "keyevent", "4"); r.adb_("shell", "input", "keyevent", "4"); time.sleep(2)
 
         r.adb_("shell", "am", "force-stop", PACKAGE); r.adb_("logcat", "-c")
         rules = r.adb_("reverse", "--list").stdout
