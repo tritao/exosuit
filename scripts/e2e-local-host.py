@@ -82,10 +82,10 @@ def pid_alive(pid: int) -> bool:
 
 def names_rig(pid: int, directory: Path) -> bool:
     """POSIX: whether `pid` is still one of this rig's processes (a recorded pid may have been recycled since): its command line names
-    the run folder, wrangler.js or e2e-tls-proxy.mjs."""
+    the run folder (every process the rig starts carries it in its arguments)."""
     result = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=30)
     command = result.stdout.strip()
-    return bool(command) and any(marker in command for marker in (str(directory), "wrangler.js", "e2e-tls-proxy.mjs"))
+    return bool(command) and str(directory) in command
 
 
 def kill_tree(pid: int) -> None:
