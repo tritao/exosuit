@@ -9,9 +9,11 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import platform
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -24,7 +26,13 @@ os.environ.update(isolated_exohost())
 EXOHOST = ROOT / "exohost" / "build" / "host" / "main.hl"
 AGENT = ROOT / "agent" / "build" / "host" / "main.hl"
 WRANGLER = ROOT / "relay" / "worker" / "node_modules" / "wrangler" / "bin" / "wrangler.js"
-WORKERD = ROOT / "relay" / "worker" / "node_modules" / "@cloudflare" / ("workerd-windows-64" if os.name == "nt" else "workerd-linux-64")
+if os.name == "nt":
+    _workerd_package = "workerd-windows-64"
+elif sys.platform == "darwin":
+    _workerd_package = "workerd-darwin-arm64" if platform.machine() == "arm64" else "workerd-darwin-64"
+else:
+    _workerd_package = "workerd-linux-arm64" if platform.machine() in ("aarch64", "arm64") else "workerd-linux-64"
+WORKERD = ROOT / "relay" / "worker" / "node_modules" / "@cloudflare" / _workerd_package
 
 
 def free_port() -> int:

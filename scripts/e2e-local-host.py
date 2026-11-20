@@ -9,8 +9,7 @@ certificate (both valid for ten years), the Worker's Durable Object state (DIR/w
 are kept between starts: a phone paired once keeps working against the next start. Delete DIR to start over. Everything lives under DIR; nothing
 here reads or writes the user's real state, and no private key leaves DIR (never commit DIR). It starts:
 
-- a development CA and a server certificate for localhost, 127.0.0.1 and 10.0.2.2 (openssl from Git for Windows, or
-  the one on PATH). DIR/tls/ca.pem is the public CA (the phone and any dev client trust it); the keys stay in DIR/tls;
+- a development CA and a server certificate for localhost, 127.0.0.1 and 10.0.2.2 (openssl on PATH, or the one from Git for Windows). DIR/tls/ca.pem is the public CA (the phone and any dev client trust it); the keys stay in DIR/tls;
 - the relay Worker (relay/worker) under `wrangler dev --local` (workerd, no Cloudflare login) on plain
   http://127.0.0.1:RELAY_PORT. The desktop (exohost, workspace service) reaches it there: the desktop's HTTPS client is
   WinHTTP with the Windows trust store, which has no development CA hook, and it already permits loopback http when
@@ -24,6 +23,7 @@ the other. DIR/ready.json lists the ports, origins and pids. Build the Worker's 
 import argparse
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import socket
@@ -33,11 +33,20 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 WRANGLER = ROOT / "relay" / "worker" / "node_modules" / "wrangler" / "bin" / "wrangler.js"
-WORKERD = ROOT / "relay" / "worker" / "node_modules" / "@cloudflare" / ("workerd-windows-64" if os.name == "nt" else "workerd-linux-64")
+def workerd_package() -> str:
+    if os.name == "nt":
+        return "workerd-windows-64"
+    if sys.platform == "darwin":
+        return "workerd-darwin-arm64" if platform.machine() == "arm64" else "workerd-darwin-64"
+    return "workerd-linux-arm64" if platform.machine() in ("aarch64", "arm64") else "workerd-linux-64"
+
+
+WORKERD = ROOT / "relay" / "worker" / "node_modules" / "@cloudflare" / workerd_package()
 LIFETIME_SECONDS = 40 * 60
 CERTIFICATE_DAYS = "3650"
 NO_WINDOW = (subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
-# The browser origin the Worker allows for pairing pages; native clients (the phone, the desktop) send none.
+# The browser origins the Worker allows for pairing pages (comma separated; --pairing-origin adds more for the local rig only);
+# native clients (the phone, the desktop) send none.
 PAIRING_ORIGIN = "http://localhost:5173"
 SERVER_NAMES = "DNS:localhost,IP:127.0.0.1,IP:10.0.2.2"
 
@@ -82,9 +91,16 @@ def kill_tree(pid: int) -> None:
 
 
 def kill_under(directory: Path) -> list[int]:
-    """Belt and braces: every hl/node/workerd/python process whose command line names `directory` (the run folder), except this one."""
+    """Belt and braces: the pids this rig recorded in DIR/pids.json (each its own process group on POSIX) that are still alive, except this one.
+    Off Windows nothing is matched by command line; only processes this script started are touched."""
     if os.name != "nt":
-        return []
+        recorded = read_json(directory / "pids.json") or {}
+        killed = []
+        for pid in recorded.values():
+            if isinstance(pid, int) and pid != os.getpid() and pid_alive(pid):
+                kill_tree(pid)
+                killed.append(pid)
+        return killed
     marker = str(directory).replace("'", "''")
     # Never this process, its ancestors (a python launcher shim and the guard have the folder in their command line too), or another
     # e2e-local-host.py run (a `stop` names the folder as well).
@@ -193,7 +209,8 @@ def start(arguments) -> int:
     def spawn(name: str, command: list[str], cwd: Path) -> subprocess.Popen:
         handle = (out / f"{name}.log").open("w", encoding="utf-8", errors="replace")
         handles.append(handle)
-        process = subprocess.Popen(command, cwd=str(cwd), stdout=handle, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+        process = subprocess.Popen(command, cwd=str(cwd), stdout=handle, stderr=subprocess.STDOUT, creationflags=NO_WINDOW,
+                                   start_new_session=(os.name != "nt"))
         processes.append(process)
         pids[name] = process.pid
         write_json(out / "pids.json", pids)
@@ -213,7 +230,7 @@ def start(arguments) -> int:
     try:
         tls_files = make_certificates(out / "tls", log)
         relay = spawn("relay", ["node", str(WRANGLER), "dev", "--local", "--ip", "127.0.0.1", "--port", str(relay_port),
-                                "--persist-to", str(out / "wrangler-state"), "--var", f"ALLOWED_ORIGINS:{PAIRING_ORIGIN}"],
+                                "--persist-to", str(out / "wrangler-state"), "--var", "ALLOWED_ORIGINS:" + ",".join([PAIRING_ORIGIN, *arguments.pairing_origin])],
                       ROOT / "relay" / "worker")
         wait_until(lambda: listening(relay, relay_port, "relay"), 120, "the local relay did not start")
         log("relay-ready", relayPort=relay_port)
@@ -276,6 +293,8 @@ def main() -> int:
     start_parser.add_argument("--out", required=True)
     start_parser.add_argument("--relay-port", type=int, default=0)
     start_parser.add_argument("--tls-port", type=int, default=0)
+    start_parser.add_argument("--pairing-origin", action="append", default=[],
+                              help="an extra browser origin the local Worker allows, e.g. http://127.0.0.1:18080 (repeatable)")
     start_parser.add_argument("--lifetime", type=int, default=LIFETIME_SECONDS)
     stop_parser = commands.add_parser("stop")
     stop_parser.add_argument("--out", required=True)
