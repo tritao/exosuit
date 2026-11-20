@@ -150,6 +150,8 @@ def main():
     try:
         invite = r.ctl("invite")
         url = invite["invitation"]["invitationUrl"].replace(a.relay_plain.replace("http", "ws"), a.relay_tls.replace("https", "wss"), 1)
+        if not url.startswith(a.relay_tls.replace("https", "wss")):
+            raise SystemExit(f"the invitation does not use {a.relay_tls} after the rewrite (relay origin spelled differently?): {url[:80]}")
         device = invite["deviceId"] if "deviceId" in invite else invite["invitation"]["deviceId"]
         r.start_app("--es", "pairing_url", f"'{url}'")
         phone = re.sub(r"\D", "", r.wait_log(r"exosuit-pairing: code [0-9 ]+", 90))
@@ -186,7 +188,7 @@ def main():
         if not wid:
             raise SystemExit(f"workspace {a.workspace!r} not found in machine status: {json.dumps(status)[:400]}")
         r.ctl("grant", "--device", device, "--workspace", wid)
-        r.wait_log(r"exosuit-machine: \S.* online \[\S+:\w+:[0-9-]+\]", 60)
+        r.wait_log(r"exosuit-machine: \S.* online \[" + re.escape(a.workspace) + r":\w+:[0-9-]+\]", 60)
         time.sleep(2); r.shot("3-granted.png")
         if len(re.findall("exosuit-pairing: code", r.logcat())) != 1:
             raise SystemExit("the phone asked for more than one pairing code")
@@ -195,7 +197,7 @@ def main():
         if not r.elements(r"^%s " % re.escape(a.workspace)):
             r.tap("^Remote$|^Machines$", role=1, after=2)
         r.tap(r"^%s " % re.escape(a.workspace), role=1, after=1)
-        r.wait_log(r"exosuit-open: \S+ connected", 60); time.sleep(6); r.shot("5-open.png")
+        r.wait_log(r"exosuit-open: " + re.escape(wid) + " connected", 60); time.sleep(6); r.shot("5-open.png")
         passed("open: the workspace opened and connected")
 
         r.adb_("shell", "am", "force-stop", PACKAGE); r.adb_("logcat", "-c")
@@ -203,7 +205,7 @@ def main():
         if f"tcp:{port}" not in rules:
             r.adb_("reverse", f"tcp:{port}", f"tcp:{port}")
         r.start_app()
-        r.wait_log(r"exosuit-machine: \S.* online \[\S+:\w+:[0-9-]+\]", 90); time.sleep(3); r.shot("7-reconnected.png")
+        r.wait_log(r"exosuit-machine: \S.* online \[" + re.escape(a.workspace) + r":\w+:[0-9-]+\]", 90); time.sleep(3); r.shot("7-reconnected.png")
         if "exosuit-pairing: code" in r.logcat():
             raise SystemExit("the restarted app asked to pair again")
         passed("reconnect: back online from the stored pairing, no new code")
