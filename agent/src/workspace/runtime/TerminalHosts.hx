@@ -392,7 +392,12 @@ class TerminalHosts {
 		var sockets = Path.join([Path.directory(runtimeBase), "terminal-sockets"]);
 		// NativeKit listens only in a folder this user owns with mode 700; a plain createDirectory takes the umask (755).
 		if (!FileSystem.exists(Path.directory(sockets))) FileSystem.createDirectory(Path.directory(sockets));
-		if (!app.AgentNative.prepareDirectory(sockets)) throw "Terminal socket folder must be private and owned by this user";
+		if (!app.AgentNative.prepareDirectory(sockets)) {
+			// An install from before this check made the folder with the umask (755). It holds only this user's sockets, so
+			// tighten it once; prepareDirectory still refuses a folder another user owns, which chmod cannot change.
+			if (Sys.systemName() != "Windows") Sys.command("chmod", ["700", sockets]);
+			if (!app.AgentNative.prepareDirectory(sockets)) throw "Terminal socket folder must be private and owned by this user";
+		}
 		return Path.join([sockets, Sha256.encode(hostDirectory).substr(0, 16) + ".sock"]);
 	}
 
