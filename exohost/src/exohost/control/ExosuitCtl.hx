@@ -33,8 +33,7 @@ class ExosuitCtl {
 		"  quit [--mode prompt|recover|save]  close the window (prompt asks about unsaved work)",
 		"  watch [EVENT...]             print events as JSON lines until interrupted (all of them when none is named)",
 		"  devices                      remote access: paired and pending devices, as JSON",
-		"  approve [DEVICE [WORKSPACE...]]  approve the pending device (the only one when DEVICE is left out), granting the workspaces",
-		"                               (isolated test hosts only: EXOSUIT_EXOHOST_HOME must be set; the owner approves in the editor)",
+		"  approve --code NNNNNN [DEVICE] [WORKSPACE...]  approve the one pending device that shows this code, granting the workspaces",
 		"options: --instance ID, --new-window, --line N, --column N, --timeout N[s|ms] (default 5 s), --output text|json",
 		"exit codes: 0 ok, 2 usage, 3 no such window, 4 connection or timeout, 5 the window refused, 6 protocol, 7 internal"
 	].join("\n");
@@ -47,7 +46,7 @@ class ExosuitCtl {
 
 	public static function run(arguments:Array<String>):Int {
 		var words:Array<String> = [];
-		var line:Null<Int> = null, column:Null<Int> = null, newWindow = false, mode = "prompt";
+		var line:Null<Int> = null, column:Null<Int> = null, newWindow = false, mode = "prompt", code:Null<String> = null;
 		var index = 0;
 		try {
 			while (index < arguments.length) {
@@ -75,6 +74,8 @@ class ExosuitCtl {
 						column = number(value());
 					case "--mode":
 						mode = value();
+					case "--code":
+						code = value();
 					case "--new-window":
 						newWindow = true;
 					case "--project":
@@ -155,12 +156,15 @@ class ExosuitCtl {
 				case "devices":
 					print(Json.stringify(remote({op: "remote-devices"})));
 				case "approve":
-					var home = Sys.getEnv("EXOSUIT_EXOHOST_HOME");
-					if (home == null || home == "")
-						throw new Usage("approve only runs against an isolated exohost (set EXOSUIT_EXOHOST_HOME)");
+					// Approves only the pending device whose code is the one the person compared with the device's screen.
+					if (code == null)
+						throw new Usage("approve needs --code NNNNNN: the code the device shows");
 					var pending:Array<Dynamic> = remote({op: "remote-devices"}).pending ?? [];
-					var device = words.shift() ?? (pending.length == 1 ? pending[0].deviceId : throw new Usage("approve needs a DEVICE (" + pending.length + " pending)"));
-					print(Json.stringify(remote({op: "remote-approve", deviceId: device, workspaces: [for (id in words) {workspace: id, preset: "all"}]}, 60)));
+					var named = words.length > 0 && !StringTools.startsWith(words[0], "workspace-") ? words.shift() : null;
+					var matching = [for (item in pending) if (item.authenticationCode == code && (named == null || item.deviceId == named)) item];
+					if (matching.length != 1)
+						throw new Failed(new ControlError("not_found", matching.length == 0 ? "no pending device has code " + code : "more than one pending device has code " + code), 3);
+					print(Json.stringify(remote({op: "remote-approve", deviceId: matching[0].deviceId, workspaces: [for (id in words) {workspace: id, preset: "all"}]}, 60)));
 				default:
 					throw new Usage("unknown command " + command);
 			}

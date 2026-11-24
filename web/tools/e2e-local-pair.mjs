@@ -37,9 +37,9 @@ function machine(...parts) {
 }
 
 /** Approves the pending device with grants of every listed workspace: exosuitctl when it has the subcommand, else connect-real.py. */
-function approve(deviceId, workspaceIds) {
+function approve(deviceId, workspaceIds, code) {
   if (process.env.E2E_APPROVE_WITH === "exosuitctl") {
-    const command = `source "${machineEnv}" && cd "${appDir}" && scripts/exosuitctl approve ${deviceId} ${workspaceIds.join(" ")}`;
+    const command = `source "${machineEnv}" && cd "${appDir}" && scripts/exosuitctl approve --code "${code}" ${deviceId} ${workspaceIds.join(" ")}`;
     return JSON.parse(execFileSync("bash", ["-c", command], {encoding: "utf8"}).trim().split("\n").pop());
   }
   const reply = machine("approve", "--home", '"$EXOSUIT_EXOHOST_HOME"', "--device", deviceId);
@@ -71,7 +71,8 @@ async function main() {
     }
     if (!browser) throw new Error("Chrome did not open its DevTools port");
     const page = await browser.newPage();
-    page.on("console", message => log("page:", message.text().slice(0, 300)));
+    await browser.defaultBrowserContext().overridePermissions(`http://127.0.0.1:${SITE_PORT}`, ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
+    page.on("console", message => { const text = message.text(); if (!text.includes("exosuit-state:") && !text.includes("GL Driver")) log("page:", text.slice(0, 300)); });
     page.on("pageerror", error => log("pageerror:", error.message));
     const shot = name => page.screenshot({path: path.join(outDir, name + ".png")});
     const state = async () => page.evaluate(() => { window.exosuit.snapshot(); return window.exosuit.document; });
@@ -121,7 +122,10 @@ async function main() {
     await click("remoteAccessActivity");
     await sleep(500);
     await click("pairingUrl");
-    await page.keyboard.type(invitation.invitationUrl, {delay: 0});
+    // Typed keys lose characters (the page handles one per frame), so the URL goes through the clipboard and the Paste button.
+    await page.evaluate(text => navigator.clipboard.writeText(text), invitation.invitationUrl);
+    const field = (await targets()).pairingUrl;
+    await page.mouse.click(field.x + field.width + 8 + 32, field.y + field.height / 2);
     await sleep(500);
     await shot("02-url-typed");
     await click("pairingConnect");
@@ -141,7 +145,7 @@ async function main() {
     await click("pairingConfirm");
     const workspaces = process.env.E2E_WORKSPACE_IDS || execFileSync("bash", ["-c", `source "${machineEnv}" && cd "${appDir}" && python3 scripts/exohost.py machine --json`], {encoding: "utf8"});
     const ids = process.env.E2E_WORKSPACE_IDS ? process.env.E2E_WORKSPACE_IDS.split(",") : [...workspaces.matchAll(/workspace-[0-9a-f]{32}/g)].map(match => match[0]);
-    const approval = approve(invitation.deviceId, ids);
+    const approval = approve(invitation.deviceId, ids, code);
     log("approval:", JSON.stringify(approval));
     if (!approval.ok) throw new Error("the machine refused the approval");
     await waitState("machine online with a workspace", s => s.remoteAccess && s.remoteAccess.machines.some(m => m.online && m.workspaces.length > 0), 90);
