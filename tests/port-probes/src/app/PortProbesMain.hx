@@ -18,7 +18,7 @@ import probes.TreeExpansionProbe;
 class PortProbesMain {
 	static function main():Int {
 		var fonts = FontCollection.create();
-		fonts.addSystemFallbacks();
+		fonts.addDefaultFonts();
 		TextFieldTickProbe.run(fonts);
 		DeferredFocusProbe.run(fonts);
 		TreeExpansionProbe.run(fonts);

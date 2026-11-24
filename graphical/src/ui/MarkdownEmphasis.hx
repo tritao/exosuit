@@ -45,7 +45,7 @@ class MarkdownEmphasis {
    try exists = sys.FileSystem.exists(path) catch (_:Dynamic) {}
    if (!exists) continue;
    var fonts:Null<FontCollection> = null;
-   try { fonts = FontCollection.create(); fonts.add(path); fonts.addSystemFallbacks(); faces.set(key, fonts); return fonts; }
+   try { fonts = FontCollection.create(); fonts.add(path); fonts.addDefaultFonts(); faces.set(key, fonts); return fonts; }
    catch (_:Dynamic) { if (fonts != null) fonts.dispose(); }
   }
   unavailable.set(key, true); return null;

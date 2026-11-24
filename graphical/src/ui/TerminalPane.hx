@@ -221,7 +221,7 @@ class TerminalPane implements AgentTerminalPanel {
 					fonts.add(mono, FontFamily.Monospace);
 					break;
 				}
-			fonts.addSystemFallbacks();
+			fonts.addDefaultFonts();
 		}
 		updateFontSize();
 		if (remoteBackend != null) syncControlLayout();

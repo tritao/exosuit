@@ -70,7 +70,7 @@ class QuickPickerTestMain {
 		ui.dispose();
 	}
 	static function main():Int {
-		var fonts = FontCollection.create(); fonts.addSystemFallbacks();
+		var fonts = FontCollection.create(); fonts.addDefaultFonts();
 		var ui = new UiContext(null, fonts);
 		var model = new CommandView();
 		var entries:Array<CommandViewEntry> = [];

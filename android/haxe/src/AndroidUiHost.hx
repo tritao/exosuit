@@ -39,7 +39,7 @@ class AndroidUiHost {
 			fonts.add(regular, FontFamily.Default);
 			if (mono != "") fonts.add(mono, FontFamily.Monospace);
 			// The bundled faces lack symbols the UI draws (chevrons, arrows); the desktop gets them from the system fonts too.
-			fonts.addSystemFallbacks();
+			fonts.addDefaultFonts();
 		} catch (error:Dynamic) {
 			fonts.dispose();
 			throw error;
