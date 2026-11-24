@@ -8,6 +8,7 @@ import workspace.service.WorkspaceService;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 class PiProviderTestMain {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
@@ -46,13 +47,13 @@ class PiProviderTestMain {
   function items():Array<AgentActivityItem> return cast currentView().items;
   function create():Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"Pi",group:"work",thread:null,provider:"pi"},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"Pi",group:"work",thread:null,provider:"pi"},5000,
     function(r) {record=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);require(code=="","Create failed: "+code);
   }
   function action(action:String,text:String="",?request:String,?model:String,?effort:String):Void {
    var done=false;code="";value=null;
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:action,text:text,request:request,model:model,effort:effort},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:action,text:text,request:request,model:model,effort:effort},5000,
     function(r) {value=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);
   }
@@ -82,7 +83,7 @@ class PiProviderTestMain {
   wait(function() {action("read");return currentView().commandsLoading != true;});
   require(currentView().commandsError==null && (cast currentView().commands:Array<AgentCommand>).length==4,"Explicit refresh did not update commands");
   var listed=false;
-  client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="pi","Mixed catalog lost Pi identity");listed=true;},function(e) throw e.message);
+  RpcCalls.call(client, WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="pi","Mixed catalog lost Pi identity");listed=true;},function(e) throw e.message);
   wait(function() return listed);
   action("prompt","hello");require(code=="","Prompt rejected");until("completed");
   require(items().length==3 && items()[2].text=="Hello 界\u2028Pi" && items()[1].kind=="reasoning","Streaming/reasoning was duplicated or corrupted");
@@ -161,28 +162,28 @@ class PiProviderTestMain {
   // A read-only attachment cannot mutate Pi through the Codex routing boundary.
   var roPair=MemoryTransport.pair(),ro=new RpcConnection(roPair.client,clock),roServer=new RpcConnection(roPair.server,clock),denied=false;
   provider.bind(roServer,[WorkspaceAgentProtocol.READ]);
-  ro.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"connect",text:"",request:null},5000,function(_) throw "Read-only control succeeded",function(e) {require(e.code=="unauthorized","Wrong permission error");denied=true;});
+  RpcCalls.call(ro, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"connect",text:"",request:null},5000,function(_) throw "Read-only control succeeded",function(e) {require(e.code=="unauthorized","Wrong permission error");denied=true;});
   roServer.poll();ro.poll();require(denied,"Missing read-only rejection");
   var conflict=false;
-  client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"Pi",group:"work",thread:null,provider:"codex"},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"Pi",group:"work",thread:null,provider:"codex"},5000,
    function(_) throw "Cross-provider identity collision accepted",function(e) {require(e.code=="conflict","Wrong provider collision error");conflict=true;});
   wait(function() return conflict);
   // A CLI that starts without confirming the injected hook must never receive a prompt.
   sys.io.File.saveContent(root+"/no-hook","");
   var unverified=false;
-  client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"unverified",name:"Pi",group:"work",thread:null,provider:"pi"},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"unverified",name:"Pi",group:"work",thread:null,provider:"pi"},5000,
    function(_) unverified=true,function(e) throw e.message);
   wait(function() return unverified);
   wait(function() {
    var done=false;
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"unverified",action:"read",text:"",request:null},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"unverified",action:"read",text:"",request:null},5000,
     function(v) {value=v;done=true;},function(e) throw e.message);
    wait(function() return done);
    return currentView().connectionState=="disconnected" && currentView().error != null;
   });
   require(currentView().error.indexOf("permission extension")>=0,"Missing hook did not fail closed");
   var refused=false;
-  client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"unverified",action:"prompt",text:"must-not-send",request:null},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"unverified",action:"prompt",text:"must-not-send",request:null},5000,
    function(_) throw "Prompt delivered without permission hook",function(e) {require(e.code=="disconnected","Wrong missing-hook error");refused=true;});
   wait(function() return refused);
   // Replay evictions invalidate cursors, and persistence snapshots remain bounded.

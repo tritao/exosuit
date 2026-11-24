@@ -7,6 +7,7 @@ import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalPersistence;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 /** The terminal service keeps a terminal in the workspace root (no group) across a restart and moves it in and out. */
 class TerminalRootTest {
@@ -27,7 +28,7 @@ class TerminalRootTest {
   var moved:Array<String>=[], code="";
   function move(group:String):Void {
    var current=store.record;
-   client.call(WorkspaceTerminalProtocol.RENAME,{workspace:"w",instance:"owner",id:"term",name:current.name,group:group,
+   RpcCalls.call(client, WorkspaceTerminalProtocol.RENAME,{workspace:"w",instance:"owner",id:"term",name:current.name,group:group,
     expectedRevision:current.revision},1000,function(record) {moved.push(record.group);},function(error) {code=error.code;});
    server.poll();client.poll();
   }

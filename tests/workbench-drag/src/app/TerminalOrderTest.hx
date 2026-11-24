@@ -7,6 +7,7 @@ import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalPersistence;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 /** The terminal service keeps a terminal's position among its siblings: it is set with a rename or move, bounded, and survives a restart. */
 class TerminalOrderTest {
@@ -27,7 +28,7 @@ class TerminalOrderTest {
   var code="", answered:Null<TerminalRecord>=null;
   function rename(group:String,?order:Int):Void {
    var current=store.record;code="";answered=null;
-   client.call(WorkspaceTerminalProtocol.RENAME,{workspace:"w",instance:"owner",id:"term",name:current.name,group:group,
+   RpcCalls.call(client, WorkspaceTerminalProtocol.RENAME,{workspace:"w",instance:"owner",id:"term",name:current.name,group:group,
     expectedRevision:current.revision,order:order},1000,function(record) {answered=record;},function(error) {code=error.code;});
    server.poll();client.poll();
   }

@@ -6,6 +6,7 @@ import haxeon.rpc.RpcConnection;
 import terminalkit.Emulator;
 import workspace.service.TerminalSnapshotPages;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 /** Screen snapshots of real-shaped output: taken, served in pages and restored into a fresh emulator. */
 class TerminalSnapshotTests {
@@ -122,20 +123,20 @@ class TerminalSnapshotTests {
 		manager.bind(server, [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL]);
 		var step = function() { client.poll(); server.poll(); manager.poll(); client.poll(); };
 		var opened = false;
-		client.call(WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "wide", create: true,
+		RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "wide", create: true,
 			columns: 277, rows: 65}, 2000, function(_) opened = true, function(e) throw e.code);
 		var deadline = clock() + 5000;
 		while (!opened) { require(clock() < deadline, "Wide terminal did not open"); step(); }
 		// The whole snapshot in one reply, as older clients ask: more than one message can carry.
 		var legacy = "";
-		client.call(WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "w", instance: "instance", id: "wide"}, 2000,
+		RpcCalls.call(client, WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "w", instance: "instance", id: "wide"}, 2000,
 			function(_) legacy = "answered", function(e) legacy = e.code);
 		while (legacy == "") { require(clock() < deadline, "Legacy snapshot timed out"); step(); }
 		require(legacy == "snapshot_unavailable", "A snapshot larger than one message was answered whole: " + legacy);
 		var parts:Array<Bytes> = [];
 		var token = 0, offset = 0, total = -1, failure = "";
 		var next:Void->Void = null;
-		next = function() client.call(WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "w", instance: "instance", id: "wide",
+		next = function() RpcCalls.call(client, WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "w", instance: "instance", id: "wide",
 			token: token, offset: offset}, 2000, function(page) {
 				if (parts.length == 0) { total = int(page.total); token = int(page.token); }
 				parts.push(page.data);

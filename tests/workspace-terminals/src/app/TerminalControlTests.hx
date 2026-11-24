@@ -4,6 +4,7 @@ import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 /** Who holds a terminal's control lease when attachments are replaced, leaked or dropped. */
 class TerminalControlTests {
@@ -32,7 +33,7 @@ class TerminalControlTests {
     };
     var open = function(client:RpcConnection, create:Bool, key:Null<String>):TerminalInfo {
       var result:Null<TerminalInfo> = null;
-      client.call(WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "lease", create: create,
+      RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "lease", create: create,
         columns: 80, rows: 24, clientKey: key}, 2000, function(info) result = info, function(e) throw e.code);
       var deadline = clock() + 5000;
       while (result == null) {
@@ -43,7 +44,7 @@ class TerminalControlTests {
     };
     var claim = function(client:RpcConnection, takeover:Bool, key:Null<String>):TerminalInfo {
       var result:Null<TerminalInfo> = null;
-      client.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "lease", claim: true,
+      RpcCalls.call(client, WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "lease", claim: true,
         takeover: takeover, clientKey: key}, 2000, function(info) result = info, function(e) throw e.code);
       var deadline = clock() + 5000;
       while (result == null) {
@@ -55,7 +56,7 @@ class TerminalControlTests {
     var write = function(client:RpcConnection):String {
       var refusal = "";
       var done = false;
-      client.call(WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "lease", sequence: 1,
+      RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "lease", sequence: 1,
         data: haxe.io.Bytes.ofString("\n")}, 2000, function(_) done = true, function(e) { refusal = e.code; done = true; });
       var deadline = clock() + 5000;
       while (!done) {
@@ -105,7 +106,7 @@ class TerminalControlTests {
     for (p in peers) { p.client.close(); p.server.close(); }
     var closer = connect("local");
     var terminated = false;
-    closer.call(WorkspaceTerminalProtocol.TERMINATE, {workspace: "w", instance: "instance", id: "lease"}, 2000,
+    RpcCalls.call(closer, WorkspaceTerminalProtocol.TERMINATE, {workspace: "w", instance: "instance", id: "lease"}, 2000,
       function(_) terminated = true, function(e) throw e.code);
     var deadline = clock() + 5000;
     while (!terminated || manager.activeCount() != 0) {

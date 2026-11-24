@@ -10,6 +10,7 @@ import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceTerminalManager;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
+import workspace.transport.RpcCalls;
 
 class TerminalHistoryTests {
   static function historyEndpoint(root:String):TestEndpoint {
@@ -111,7 +112,7 @@ class TerminalHistoryTests {
     until(function() return allText(session.emulator).indexOf("KEPT_ENV:previous")>=0,"The shell taken back lost its state");
     // Duplicate restart requests cannot replace the running process.
     var error = "";
-    endpoint.connection.call(WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:"history-second",id:"history-shell"},1000,
+    RpcCalls.call(endpoint.connection, WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:"history-second",id:"history-shell"},1000,
       function(_) { throw "Running shell restarted"; },function(e) error=e.code);
     step(); step(); require(error=="terminal_running","Restart replaced a running shell");
     session.write(TestShell.line("exit"));
@@ -122,7 +123,7 @@ class TerminalHistoryTests {
     var reader = new RpcConnection(pair.client,clock), readServer = new RpcConnection(pair.server,clock);
     manager.bind(readServer,[WorkspaceTerminalProtocol.READ]);
     error = "";
-    reader.call(WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:"history-second",id:"history-shell"},1000,
+    RpcCalls.call(reader, WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:"history-second",id:"history-shell"},1000,
       function(_) { throw "Read-only peer restarted shell"; },function(e) error=e.code);
     reader.poll(); readServer.poll(); reader.poll();
     require(error=="unauthorized","Restart ignored control grant"); reader.close(); readServer.close();

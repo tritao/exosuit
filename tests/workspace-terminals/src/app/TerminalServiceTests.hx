@@ -6,6 +6,7 @@ import haxeon.rpc.RpcConnection;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
 import terminalkit.Emulator;
+import workspace.transport.RpcCalls;
 
 class TerminalServiceTests {
   static function require(value:Bool, message:String):Void {
@@ -20,7 +21,7 @@ class TerminalServiceTests {
     );
     manager.bind(server, [WorkspaceTerminalProtocol.READ]);
     var error = "";
-    client.call(WorkspaceTerminalProtocol.OPEN, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {
       workspace: "w",
       instance: "instance",
       id: "bounded",
@@ -35,7 +36,7 @@ class TerminalServiceTests {
     client.poll();
     require(error == "unauthorized", "Terminal creation capability not enforced");
     var denied = 0;
-    client.call(WorkspaceTerminalProtocol.INPUT, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, {
       workspace: "w",
       instance: "instance",
       id: "bounded",
@@ -48,7 +49,7 @@ class TerminalServiceTests {
       denied++;
     }
     );
-    client.call(WorkspaceTerminalProtocol.RESIZE, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.RESIZE, {
       workspace: "w",
       instance: "instance",
       id: "bounded",
@@ -61,7 +62,7 @@ class TerminalServiceTests {
       denied++;
     }
     );
-    client.call(WorkspaceTerminalProtocol.TERMINATE,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "w", instance: "instance", id: "bounded"}, 1000, function(_) {
       throw "Read-only peer killed terminal";
     }, function(e) {
@@ -94,7 +95,7 @@ class TerminalServiceTests {
     var done = false;
     // A committed open with a lost reply must not create a second shell when retried.
     pair.server.loseNext();
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 10, function(_) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 10, function(_) {
       throw "Injected lost reply survived";
     }, function(_) done = true);
     var deadline = clock() + 2000;
@@ -105,7 +106,7 @@ class TerminalServiceTests {
     }
     require(manager.activeCount() == 1, "Runtime was not created before reply loss");
     done = false;
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
       require(info.notifications == true, "Daemon omitted notification support");
       require(info.name == "Terminal 1", "Open response omitted the service-owned terminal name");
       done = true;
@@ -122,7 +123,7 @@ class TerminalServiceTests {
     // Drain RPC only here so both resizes have the same byte offset.
     for (width in [20, 80]) {
       done = false;
-      client.call(WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded",
+      RpcCalls.call(client, WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded",
         columns:width, rows:24}, 1000, function(_) done = true, function(e) throw e.code);
       client.poll(); server.poll(); client.poll();
       require(done, "Ordered resize was not acknowledged");
@@ -130,21 +131,21 @@ class TerminalServiceTests {
     var beforeChanges = changes;
     manager.poll(); client.poll();
     require(changes == beforeChanges + 1, "Geometry changes were not coalesced into one notification");
-    client.call(WorkspaceTerminalProtocol.UNWATCH, {workspace:"w", instance:"instance", id:"bounded"},
+    RpcCalls.call(client, WorkspaceTerminalProtocol.UNWATCH, {workspace:"w", instance:"instance", id:"bounded"},
       1000, function(_) {}, function(e) throw e.code);
     client.poll(); server.poll(); client.poll();
     beforeChanges = changes;
     for (width in [79, 80]) {
-      client.call(WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded", columns:width, rows:24},
+      RpcCalls.call(client, WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded", columns:width, rows:24},
         1000, function(_) {}, function(e) throw e.code);
       client.poll(); server.poll(); manager.poll(); client.poll();
     }
     require(changes == beforeChanges, "Unwatched connection still receives notifications");
     // Reattaching opts back in; old clients omit watch and keep polling.
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) {}, function(e) throw e.code);
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) {}, function(e) throw e.code);
     client.poll(); server.poll(); client.poll();
     var replay:Null<TerminalReplay> = null;
-    client.call(WorkspaceTerminalProtocol.REPLAY, {workspace:"w", instance:"instance", id:"bounded", cursor:0},
+    RpcCalls.call(client, WorkspaceTerminalProtocol.REPLAY, {workspace:"w", instance:"instance", id:"bounded", cursor:0},
       1000, function(value) replay = value, function(e) throw e.code);
     client.poll(); server.poll(); client.poll();
     require(replay != null && replay.next == replay.end, "Service replay cursor did not cover the current journal");
@@ -156,7 +157,7 @@ class TerminalServiceTests {
       "Service lost geometry-only replay order");
 
     error = "";
-    client.call(WorkspaceTerminalProtocol.OPEN, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {
       workspace: "w",
       instance: "old",
       id: "bounded",
@@ -177,7 +178,7 @@ class TerminalServiceTests {
       sequence: 1,
       data: TestShell.flood()
     };
-    client.call(WorkspaceTerminalProtocol.INPUT, input, 1000, function(_) done = true, function(e) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, input, 1000, function(_) done = true, function(e) {
       throw e.code;
     }
     );
@@ -186,7 +187,7 @@ class TerminalServiceTests {
       step();
     }
     error = "";
-    client.call(WorkspaceTerminalProtocol.INPUT, input, 1000, function(_) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, input, 1000, function(_) {
       throw "Duplicate input executed";
     }, function(e) error = e.code);
     step();
@@ -195,7 +196,7 @@ class TerminalServiceTests {
     // A new view (another pane, a restarted terminal) numbers its input from 1 once control is given again.
     deadline = clock() + 2000;
     var given = false;
-    client.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(client, WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
       claim: true, takeover: false}, 1000, function(_) given = true, function(e) throw e.code);
     while (!given) {
       require(clock() < deadline, "Control was not given again");
@@ -203,7 +204,7 @@ class TerminalServiceTests {
     }
     var restarted = false;
     var again:TerminalInput = {workspace: "w", instance: "instance", id: "bounded", sequence: 1, data: haxe.io.Bytes.ofString(" ")};
-    client.call(WorkspaceTerminalProtocol.INPUT, again, 1000, function(_) restarted = true,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, again, 1000, function(_) restarted = true,
       function(e) throw "Input numbered from 1 after control was given again was refused: " + e.code);
     while (!restarted) {
       require(clock() < deadline, "Input after control was given again timed out");
@@ -213,7 +214,7 @@ class TerminalServiceTests {
     deadline = clock() + 10000;
     while (!advanced) {
       done = false;
-      client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+      RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
         advanced = info.end > 100000;
         done = true;
       }, function(e) {
@@ -227,7 +228,7 @@ class TerminalServiceTests {
       }
     }
     error = "";
-    client.call(WorkspaceTerminalProtocol.REPLAY,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.REPLAY,
       {workspace: "w", instance: "instance", id: "bounded", cursor: 0}, 1000, function(_) {
       throw "Trimmed replay was silently accepted";
     }, function(e) error = e.code);
@@ -235,7 +236,7 @@ class TerminalServiceTests {
     step();
     require(error == "replay_gap", "Trimmed output did not report a gap");
     var screen:Null<TerminalScreenSnapshot> = null;
-    client.call(WorkspaceTerminalProtocol.SNAPSHOT,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.SNAPSHOT,
       {workspace: "w", instance: "instance", id: "bounded"}, 3000,
       function(value) screen = value, function(e) throw e.code);
     deadline = clock() + 3000;
@@ -261,18 +262,18 @@ class TerminalServiceTests {
     // A screen where every cell has its own colours: the snapshot is bigger than one frame and arrives in pages.
     var drawn = false, resized = false;
     // A desktop-sized terminal (a phone observing it gets that grid): 160 x 50 cells of mosaic is far more than 48 KiB.
-    client.call(WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded", columns:160, rows:50}, 1000,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded", columns:160, rows:50}, 1000,
       function(_) resized = true, function(e) throw e.code);
     deadline = clock() + 5000;
     while (!resized) { require(clock() < deadline, "Resize timed out"); step(); }
-    client.call(WorkspaceTerminalProtocol.INPUT, {workspace:"w", instance:"instance", id:"bounded", sequence:2, data:TestShell.mosaic(50, 160)},
+    RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, {workspace:"w", instance:"instance", id:"bounded", sequence:2, data:TestShell.mosaic(50, 160)},
       1000, function(_) drawn = true, function(e) throw e.code);
     // Reads a whole snapshot page by page as a client does; every page must fit a frame.
     var readSnapshot = function():{pages:Int, data:Bytes} {
       var offset = 0, total = 0, pages = 0, token = 0, joined:Null<Bytes> = null;
       while (true) {
         var page:Null<TerminalScreenSnapshot> = null;
-        client.call(WorkspaceTerminalProtocol.SNAPSHOT, {workspace:"w", instance:"instance", id:"bounded", token:token, offset:offset},
+        RpcCalls.call(client, WorkspaceTerminalProtocol.SNAPSHOT, {workspace:"w", instance:"instance", id:"bounded", token:token, offset:offset},
           1000, function(value) page = value, function(e) throw e.code);
         var until = clock() + 2000;
         while (page == null) { require(clock() < until, "Snapshot page timed out"); step(); }
@@ -320,7 +321,7 @@ class TerminalServiceTests {
       viewer.poll();
     };
     var viewerInfo:Null<TerminalInfo> = null;
-    viewer.call(WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(viewer, WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "bounded",
       create: false, columns: 80, rows: 24}, 1000, function(info) viewerInfo = info, function(e) throw e.code);
     deadline = clock() + 2000;
     while (viewerInfo == null) {
@@ -330,19 +331,19 @@ class TerminalServiceTests {
     require(viewerInfo.controlled == true && viewerInfo.controller == false,
       "Second viewer did not observe exclusive terminal ownership");
     error = "";
-    viewer.call(WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(viewer, WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "bounded",
       sequence: 1, data: Bytes.ofString("should-not-run\n")}, 1000, function(_) throw "Viewer input bypassed controller lease",
       function(e) error = e.code);
     viewerStep(); viewerStep();
     require(error == "terminal_controlled", "Input from the non-controller was not refused");
     error = "";
-    viewer.call(WorkspaceTerminalProtocol.RESIZE, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(viewer, WorkspaceTerminalProtocol.RESIZE, {workspace: "w", instance: "instance", id: "bounded",
       columns: 100, rows: 30}, 1000, function(_) throw "Viewer resized a shared PTY",
       function(e) error = e.code);
     viewerStep(); viewerStep();
     require(error == "terminal_controlled", "Resize from the non-controller was not refused");
     viewerInfo = null;
-    viewer.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(viewer, WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
       claim: true, takeover: true}, 1000, function(info) viewerInfo = info, function(e) throw e.code);
     deadline = clock() + 2000;
     while (viewerInfo == null) {
@@ -351,7 +352,7 @@ class TerminalServiceTests {
     }
     require(viewerInfo.controller == true, "Explicit controller transfer was not granted");
     error = "";
-    client.call(WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "bounded",
       sequence: 2, data: Bytes.ofString("old-owner-must-not-run\n")}, 1000, function(_) throw "Former controller retained input access",
       function(e) error = e.code);
     viewerStep(); viewerStep();
@@ -360,7 +361,7 @@ class TerminalServiceTests {
     manager.poll();
     viewerServer.poll();
     var recovered:Null<TerminalInfo> = null;
-    client.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
+    RpcCalls.call(client, WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
       claim: true, takeover: false}, 1000, function(info) recovered = info, function(e) throw e.code);
     deadline = clock() + 2000;
     while (recovered == null) {
@@ -370,7 +371,7 @@ class TerminalServiceTests {
     require(recovered.controller == true, "Disconnected controller did not release its lease");
     viewerServer.close();
     done = false;
-    client.call(WorkspaceTerminalProtocol.TERMINATE,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "w", instance: "instance", id: "bounded"}, 1000, function(_) done = true, function(e) {
       throw e.code;
     }

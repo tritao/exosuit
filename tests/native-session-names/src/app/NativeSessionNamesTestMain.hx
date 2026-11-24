@@ -6,6 +6,7 @@ import workspace.provider.*;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.runtime.WorkspaceDirectories;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 @:access(workspace.provider.CodexProvider)
 @:access(workspace.provider.AgentNameSync)
@@ -38,7 +39,7 @@ class NativeSessionNamesTestMain {
    function pump():Void {server.poll();service.poll();client.poll();Sys.sleep(0.002);}
    function wait(done:Void->Bool):Void {var until=clock()+10000;while(!done()) {require(clock()<until,"metadata operation timed out for "+kind);pump();}}
    var catalog:Null<AgentCatalog>=null;
-   client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,function(value) catalog=value,function(error) throw error.message);
+   RpcCalls.call(client, WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,function(value) catalog=value,function(error) throw error.message);
    wait(function() return catalog!=null);
    require(catalog!=null && catalog.nativeRenameProviders!=null && catalog.nativeRenameProviders.indexOf(kind)>=0,"provider omitted native naming capability");
    var value:Null<AgentView>=null,code="";
@@ -46,7 +47,7 @@ class NativeSessionNamesTestMain {
    function metadata():AgentNameMetadata return cast view().record.nameMetadata;
    function action(action:String,text:String="",?expected:String,?nativeName:String):Void {
     var done=false;value=null;code="";
-    client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:kind,action:action,text:text,request:expected,expectedNativeName:nativeName},5000,
+    RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:kind,action:action,text:text,request:expected,expectedNativeName:nativeName},5000,
      function(result) {value=result;done=true;},function(error) {code=error.code;done=true;});
     wait(function() return done);
    }
@@ -82,7 +83,7 @@ class NativeSessionNamesTestMain {
    }
    var roPair=MemoryTransport.pair(),ro=new RpcConnection(roPair.client,clock),roServer=new RpcConnection(roPair.server,clock);
    service.bind(roServer,[WorkspaceAgentProtocol.READ]);var denied=false;
-   ro.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:kind,action:"rename-native",text:"Denied",request:"Pinned local label",expectedNativeName:"Another native name"},1000,
+   RpcCalls.call(ro, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:kind,action:"rename-native",text:"Denied",request:"Pinned local label",expectedNativeName:"Another native name"},1000,
     function(_) throw "read-only native rename was accepted",function(error) denied=error.code=="unauthorized");
    roServer.poll();ro.poll();require(denied,"native rename permission was not enforced");
    ro.close();roServer.close();client.close();server.close();service.dispose();

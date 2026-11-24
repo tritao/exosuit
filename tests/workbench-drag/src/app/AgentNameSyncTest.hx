@@ -3,6 +3,7 @@ package app;
 import workspace.provider.AgentNameSync;
 import workspace.provider.AgentMetadata;
 import workspace.service.WorkspaceAgentProtocol;
+import haxeon.rpc.RpcError;
 
 class AgentNameSyncTest {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
@@ -17,13 +18,13 @@ class AgentNameSyncTest {
    durable=cast Reflect.copy(record);
   }
   function read(callback:workspace.provider.AgentNameSync.NativeNameReadDone):Void {
-   if(failRead) callback(null,{code:"disconnected",message:"offline",ambiguous:false});else callback(nativeName,null);
+   if(failRead) callback(null,new RpcError("disconnected", "offline", false));else callback(nativeName,null);
   }
   function write(name:String,expected:Null<String>,callback:Null<haxeon.rpc.RpcError>->Void):Void {
    require(record.nameMetadata!=null && metadata().pending!=null,"native write preceded durable intent");
    require(durable.nameMetadata!=null && durable.nameMetadata.pending!=null,"intent was not durable before native write");
    writes++;nativeName=name;
-   callback(loseResponse ? {code:"timeout",message:"response lost",ambiguous:true} : null);
+   callback(loseResponse ? new RpcError("timeout", "response lost", true) : null);
   }
   function success():Void done=true;
   function failure(error:haxeon.rpc.RpcError):Void {code=error.code;ambiguous=error.ambiguous;}

@@ -17,6 +17,8 @@ import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
 import workspace.service.WorkspaceScmProtocol;
+import workspace.transport.RpcCalls;
+import haxeon.rpc.RpcMethodKey;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
 class RpcCompatibilityTests {
@@ -88,12 +90,12 @@ class RpcCompatibilityTests {
   var structuredView=WorkspaceAgentProtocol.ACTION.decodeResponse(WorkspaceAgentProtocol.ACTION.encodeResponse(agentView));
   require(structuredView.items!=null&&structuredView.items[0].text==itemText&&structuredView.itemsOmitted==true,"Structured view round trip lost data");
   require(RpcProtocol.encode(Response(1,WorkspaceAgentProtocol.ACTION.encodeResponse(agentView)),262144).length<=262144,"Agent activity view exceeded message bound");
-		var error:RpcError = {code: "unknown_method", message: "unknown_method", ambiguous: false};
+		var error:RpcErrorData = {code: "unknown_method", message: "unknown_method", ambiguous: false};
 		var query = WorkspaceProtocol.QUERY.encodeRequest({workspace: "w"});
 		vector(Hello(1, 1, "test/1", [WorkspaceProtocol.READ]), "8101940101a6746573742f3191ae776f726b73706163652e72656164");
 		vector(Welcome(1, 1, "agent/1", [WorkspaceProtocol.READ]), "8102940101a76167656e742f3191ae776f726b73706163652e72656164");
 		vector(Refused(error), "8103918301ae756e6b6e6f776e5f6d6574686f6402ae756e6b6e6f776e5f6d6574686f6403c2");
-		vector(Request(1, 100, 1000, query), "8104940164cd03e8c4048101a177");
+		vector(Request(1, RpcMethodKey.Id(100), 1000, query), "8104940181019164cd03e8c4048101a177");
 		vector(Response(1, Bytes.alloc(0)), "81059201c400");
 		vector(Failed(1, error), "810692018301ae756e6b6e6f776e5f6d6574686f6402ae756e6b6e6f776e5f6d6574686f6403c2");
 		vector(Cancel(1), "81079101");
@@ -113,8 +115,8 @@ class RpcCompatibilityTests {
 		// A paged-snapshot query writes its optional fields (token, offset, history, historyLimit) as nil; an older service
 		// skips the ones it does not know, and a request from an older client (the bare
 		// terminal target) still decodes, with no token, as a request for the whole snapshot.
-		require(RpcProtocol.encode(Request(1, 119, 1000, snapshotRequest), 4096)
-			.compare(bytes("8104940177cd03e8c4128701a17702a16903a17404c005c006c007c0")) == 0,
+		require(RpcProtocol.encode(Request(1, RpcMethodKey.Id(119), 1000, snapshotRequest), 4096)
+			.compare(bytes("8104940181019177cd03e8c4128701a17702a16903a17404c005c006c007c0")) == 0,
 			"Terminal screen snapshot RPC vector changed");
 		var olderQuery = WorkspaceTerminalProtocol.SNAPSHOT.decodeRequest(bytes("8301a17702a16903a174"));
 		require(olderQuery.id == "t" && olderQuery.token == null && olderQuery.offset == null, "An older snapshot request no longer decodes");
@@ -515,16 +517,16 @@ class RpcCompatibilityTests {
 			require(!error.ambiguous, "Validation error became ambiguous");
 			errors.push(error.code);
 		};
-		client.call(unknown, {workspace: "w"}, 1000, function(_) {
+		RpcCalls.call(client, unknown, {workspace: "w"}, 1000, function(_) {
 			throw "Unknown method succeeded";
 		}, failure);
-		client.call(malformed, {workspace: "w"}, 1000, function(_) {
+		RpcCalls.call(client, malformed, {workspace: "w"}, 1000, function(_) {
 			throw "Malformed method succeeded";
 		}, failure);
-		client.call(WorkspaceProtocol.QUERY, {workspace: "absent"}, 1000, function(_) {
+		RpcCalls.call(client, WorkspaceProtocol.QUERY, {workspace: "absent"}, 1000, function(_) {
 			throw "Unknown workspace succeeded";
 		}, failure);
-		client.call(WorkspaceProtocol.GROUP, {
+		RpcCalls.call(client, WorkspaceProtocol.GROUP, {
 			workspace: "w",
 			epoch: "e",
 			operation: "op",
@@ -541,7 +543,7 @@ class RpcCompatibilityTests {
 			&& errors[3] == "unauthorized",
 			"Method error contract changed");
 		var success = false;
-		client.call(WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) {
+		RpcCalls.call(client, WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) {
 			success = value.cursor == 0 && value.groups[0].revision == 1;
 		}, failure);
 		server.poll();
@@ -552,22 +554,23 @@ class RpcCompatibilityTests {
 	}
 
 	static function versionRefusal():Void {
+		// RpcPeerOptions no longer takes versions: an older or newer peer is a Hello written by hand.
 		for (codec in [false, true]) {
 			var pair = MemoryTransport.pair(4096, 16);
 			var offered = [WorkspaceProtocol.READ];
-			var a = RpcHandshake.client(pair.client, function() return 0.0,
-				new RpcPeerOptions("new/1", offered, [], 100, 1024, 4, 4096, codec ? 1 : 2, codec ? 2 : 1), offered);
-			var b = RpcHandshake.server(pair.server, function() return 0.0, new RpcPeerOptions("old/1", offered, [], 100, 1024, 4, 4096));
-			for (_ in 0...8) {
-				a.poll();
+			var b = RpcHandshake.server(pair.server, function() return 0.0, new RpcPeerOptions("new/1", offered, [], 100, 1024, 4, 4096));
+			require(pair.client.send(RpcProtocol.encode(Hello(codec ? RpcProtocol.VERSION : RpcProtocol.VERSION - 1,
+				codec ? RpcProtocol.CODEC_VERSION + 1 : RpcProtocol.CODEC_VERSION, "other/1", offered), 1024)), "Hello not sent");
+			for (_ in 0...8)
 				b.poll();
+			var refusal = pair.client.receive();
+			require(refusal != null && b.connection == null, "Version refusal changed");
+			switch RpcProtocol.decode(refusal, 1024) {
+				case Refused(error):
+					require(error.code == (codec ? "unsupported_codec" : "unsupported_protocol"), "Version refusal changed");
+				default:
+					throw "Version refusal changed";
 			}
-			require(a.isFinished()
-				&& a.connection == null
-				&& a.failure != null
-				&& a.failure.code == (codec ? "unsupported_codec" : "unsupported_protocol"),
-				"Version refusal changed");
-			a.close();
 			b.close();
 		}
 	}
@@ -593,7 +596,7 @@ class RpcCompatibilityTests {
 		for (hex in ["8501a17703a26f7004a167050106a34e6577", "8501a17702a16503a26f7004a16706a34e6577"]) {
 			var incomplete = new RpcMethod<RenameGroup, RenameResult>(WorkspaceProtocol.GROUP.id, function(_) return bytes(hex), WorkspaceProtocol.GROUP.decodeRequest,
 				WorkspaceProtocol.GROUP.encodeResponse, WorkspaceProtocol.GROUP.decodeResponse);
-			client.call(incomplete, {
+			RpcCalls.call(client, incomplete, {
 				workspace: "w",
 				epoch: "e",
 				operation: "op",

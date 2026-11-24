@@ -29,6 +29,7 @@ import workspace.transport.RelayMachineEndpoint;
 import workspace.transport.RelayRegistrationProver;
 import workspace.transport.RelayTicketAttempt;
 import workspace.transport.RelayTicketClient;
+import workspace.transport.RpcCalls;
 
 /** One RPC connection a device opened (on stream 0 or on a workspace stream), polled by the test loop. */
 private class Link {
@@ -129,7 +130,7 @@ class MachineRemoteTestMain {
 
 	static function call<Q, R>(connection:RpcConnection, method:RpcMethod<Q, R>, request:Q, seconds:Int = 10):Dynamic {
 		var done = false, value:Null<R> = null, code:Null<String> = null;
-		connection.call(method, request, seconds * 1000, function(response) {
+		RpcCalls.call(connection, method, request, seconds * 1000, function(response) {
 			value = response;
 			done = true;
 		}, function(error) {

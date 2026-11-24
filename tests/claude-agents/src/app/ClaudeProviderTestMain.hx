@@ -8,6 +8,7 @@ import workspace.service.WorkspaceService;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 @:access(workspace.provider.ClaudeProvider)
 @:access(workspace.provider.AgentImageStaging)
@@ -48,13 +49,13 @@ class ClaudeProviderTestMain {
   function items():Array<AgentActivityItem> return cast currentView().items;
   function create():Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:sid,name:"Claude",group:"work",thread:null,provider:"claude"},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:sid,name:"Claude",group:"work",thread:null,provider:"claude"},5000,
     function(r) {record=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);require(code=="","Create failed: "+code);
   }
   function action(action:String,text:String="",?request:String,?model:String,?imageIds:Array<String>):Void {
    var done=false;code="";value=null;
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:sid,action:action,text:text,request:request,model:model,imageIds:imageIds},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:sid,action:action,text:text,request:request,model:model,imageIds:imageIds},5000,
     function(r) {value=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);
   }
@@ -64,7 +65,7 @@ class ClaudeProviderTestMain {
   create();var id=currentRecord().thread;create();require(currentRecord().thread==id,"Duplicate create changed session id");
   until("idle");
   var listed=false;
-  client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="claude","Mixed catalog lost Claude identity");
+  RpcCalls.call(client, WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="claude","Mixed catalog lost Claude identity");
    var supported=r.providers;require(supported != null && supported.contains("claude"),"Catalog omitted Claude support");listed=true;},function(e) throw e.message);
   wait(function() return listed);
   action("prompt","hello");require(code=="","Prompt rejected");until("completed");
@@ -73,7 +74,7 @@ class ClaudeProviderTestMain {
    var uploadId:Null<String>=null,offset=0,done=false;
    function call(operation:String,chunk:Null<haxe.io.Bytes>):AgentImageUploadResult {
     var result:Null<AgentImageUploadResult>=null;done=false;
-    client.call(WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"a",operation:operation,upload:uploadId,size:bytes.length,offset:offset,bytes:chunk},5000,
+    RpcCalls.call(client, WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"a",operation:operation,upload:uploadId,size:bytes.length,offset:offset,bytes:chunk},5000,
      function(v) {result=v;done=true;},function(e) throw e.message);
     wait(function() return done);return cast result;
    }
@@ -136,7 +137,7 @@ class ClaudeProviderTestMain {
   require([for(item in items()) if(item.turn==uncertainTurn && item.images!=null && item.images.length==1 && item.images[0].id==uncertainImage) true].length==1,
    "Restart lost uncertain image association");
   var archived:Null<AgentContentChunk>=null,archivedDone=false;
-  client.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"w",instance:"owner",session:"a",turn:uncertainTurn,item:uncertainTurn,token:uncertainImage,offset:0},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"w",instance:"owner",session:"a",turn:uncertainTurn,item:uncertainTurn,token:uncertainImage,offset:0},5000,
    function(chunk) {archived=chunk;archivedDone=true;},function(e) throw e.message);
   wait(function() return archivedDone);
   require(archived!=null && archived.bytes.compare(sys.io.File.getBytes("graphical/assets/icons/exosuit-16.png"))==0,"Restart lost uncertain image bytes");
@@ -161,7 +162,7 @@ class ClaudeProviderTestMain {
   provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, workspace.provider.AgentProviderFactory.built([claude]), store,"claude-image-fixture");
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var rows:Array<String>=[],rowsDone=false;
-  client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {rows=[for(row in r.records) row.id+":"+row.state];rowsDone=true;},function(e) throw e.message);
+  RpcCalls.call(client, WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {rows=[for(row in r.records) row.id+":"+row.state];rowsDone=true;},function(e) throw e.message);
   wait(function() return rowsDone);rows.sort(Reflect.compare);
   require(rows.join(",")=="a:disconnected,b:disconnected,c:reconnect-failed,d:disconnected,e:reconnect-failed","A restart lost or mislabelled session rows: "+rows.join(","));
   action("read");
@@ -171,7 +172,7 @@ class ClaudeProviderTestMain {
   var whole:Array<AgentActivityItem>=[],older:Null<String>=null;
   while(true) {
    var done=false,page:Null<AgentView>=null;
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"read",text:"",request:null,after:older},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"read",text:"",request:null,after:older},5000,
     function(r) {page=r;done=true;},function(e) throw e.message);
    wait(function() return done);
    var got:AgentView=cast page;whole=(cast got.items:Array<AgentActivityItem>).concat(whole);older=got.itemsNext;
@@ -183,7 +184,7 @@ class ClaudeProviderTestMain {
   var longReply=[for(item in whole) if(item.kind=="agentMessage" && item.id=="message-long") item];
   require(longReply.length==1 && longReply[0].truncated && longReply[0].text.length==4096 && longReply[0].contentToken!=null,"A long reply was not restored with its content");
   var content:Null<AgentContentChunk>=null,contentDone=false;
-  client.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:longReply[0].turn,item:"message-long",token:cast longReply[0].contentToken,offset:0},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:longReply[0].turn,item:"message-long",token:cast longReply[0].contentToken,offset:0},5000,
    function(chunk) {content=chunk;contentDone=true;},function(e) throw e.message);
   wait(function() return contentDone);
   require(content!=null && (cast content:AgentContentChunk).total>6000,"A long reply's whole text is not served after a restart");
@@ -222,7 +223,7 @@ class ClaudeProviderTestMain {
   // A read-only attachment cannot mutate Claude through the Codex routing boundary.
   var roPair=MemoryTransport.pair(),ro=new RpcConnection(roPair.client,clock),roServer=new RpcConnection(roPair.server,clock),denied=false;
   provider.bind(roServer,[WorkspaceAgentProtocol.READ]);
-  ro.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"connect",text:"",request:null},5000,function(_) throw "Read-only control succeeded",function(e) {require(e.code=="unauthorized","Wrong permission error");denied=true;});
+  RpcCalls.call(ro, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:"connect",text:"",request:null},5000,function(_) throw "Read-only control succeeded",function(e) {require(e.code=="unauthorized","Wrong permission error");denied=true;});
   roServer.poll();ro.poll();require(denied,"Missing read-only rejection");
   // Replay evictions invalidate cursors, and persistence snapshots remain bounded.
   var c=new workspace.provider.AgentConversation("Claude");

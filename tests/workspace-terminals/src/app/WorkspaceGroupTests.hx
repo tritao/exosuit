@@ -9,6 +9,7 @@ import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.runtime.WorkspaceDirectories;
 import sys.FileSystem;
+import workspace.transport.RpcCalls;
 
 class WorkspaceGroupTests {
 	static function require(value:Bool, message:String):Void {
@@ -74,7 +75,7 @@ class WorkspaceGroupTests {
 		// The groups the read-only client sees.
 		function readGroups():Array<WorkspaceGroup> {
 			var got:Null<WorkspaceSnapshot> = null;
-			readClient.call(WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) got = value, function(e) throw e.message);
+			RpcCalls.call(readClient, WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) got = value, function(e) throw e.message);
 			pump();
 			var answered = got;
 			if (answered == null) throw "QUERY was not answered";
@@ -96,13 +97,13 @@ class WorkspaceGroupTests {
 				order: counter
 			};
 			var result:Null<RenameResult> = null, code = "";
-			client.call(WorkspaceProtocol.GROUP, request, 1000, function(r) result = r, function(e) code = e.code);
+			RpcCalls.call(client, WorkspaceProtocol.GROUP, request, 1000, function(r) result = r, function(e) code = e.code);
 			pump();
 			require(error == null ? result != null && code == "" : code == error, "Group mutation " + id + " failed: " + code);
 			if (result != null) {
 				var expectedSequence = result.sequence;
 				var repeated:Null<RenameResult> = null;
-				client.call(WorkspaceProtocol.GROUP, request, 1000, function(r) repeated = r, function(e) throw e.message);
+				RpcCalls.call(client, WorkspaceProtocol.GROUP, request, 1000, function(r) repeated = r, function(e) throw e.message);
 				pump();
 				require(repeated != null && repeated.sequence == expectedSequence, "Repeated group mutation changed sequence");
 			}
@@ -113,7 +114,7 @@ class WorkspaceGroupTests {
 		change("other", "Same", "work", root, 0, "create");
 		require(readGroups().length == 4, "Second client missed group creation");
 		var denied = "";
-		readClient.call(WorkspaceProtocol.GROUP, {
+		RpcCalls.call(readClient, WorkspaceProtocol.GROUP, {
 			workspace: "w",
 			epoch: "groups",
 			operation: "denied",
@@ -134,7 +135,7 @@ class WorkspaceGroupTests {
 		change("other", "Same", "work", root, 2, "update");
 		change("nested", "Same", "parent", null, 0, "update", "invalid_request");
 		var info:Null<TerminalInfo> = null;
-		client.call(WorkspaceTerminalProtocol.OPEN, {
+		RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {
 			workspace: "w",
 			instance: "owner",
 			id: "inherited",
@@ -145,7 +146,7 @@ class WorkspaceGroupTests {
 		}, 1000, function(i) info = i, function(e) throw e.message);
 		pump();
 		require(info != null && info.cwd == child, "Nested group directory was not inherited");
-		client.call(WorkspaceTerminalProtocol.INPUT, {
+		RpcCalls.call(client, WorkspaceTerminalProtocol.INPUT, {
 			workspace: "w",
 			instance: "owner",
 			id: "inherited",
@@ -158,7 +159,7 @@ class WorkspaceGroupTests {
 		while (output.indexOf("GROUP_CWD:" + child) < 0 && clock() < deadline) {
 			Sys.sleep(0.005);
 			pump();
-			client.call(WorkspaceTerminalProtocol.REPLAY, {
+			RpcCalls.call(client, WorkspaceTerminalProtocol.REPLAY, {
 				workspace: "w",
 				instance: "owner",
 				id: "inherited",
@@ -173,14 +174,14 @@ class WorkspaceGroupTests {
 		var observed = Lambda.find(readGroups(), function(g) return g.id == "nested");
 		require(observed != null && observed.parent == "other" && observed.name == "Renamed", "Second client missed group move/rename");
 		var listing:Null<TerminalCatalog> = null;
-		client.call(WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "owner", after: null}, 1000, function(v) listing = v,
+		RpcCalls.call(client, WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "owner", after: null}, 1000, function(v) listing = v,
 			function(e) throw e.message);
 		pump();
 		require(listing != null && listing.terminals[0].cwd == child, "Moving group changed running cwd");
 		// An explicit directory must be an existing folder, by its full path or relative to the root.
 		for (refused in [root + "/missing-folder", "missing-folder"]) {
 			var invalid = "";
-			client.call(WorkspaceTerminalProtocol.OPEN, {
+			RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {
 				workspace: "w",
 				instance: "owner",
 				id: "refused",
@@ -195,7 +196,7 @@ class WorkspaceGroupTests {
 			require(invalid == "invalid_directory", "Invalid override was accepted: " + refused);
 		}
 		var overrideInfo:Null<TerminalInfo> = null;
-		client.call(WorkspaceTerminalProtocol.OPEN, {
+		RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {
 			workspace: "w",
 			instance: "owner",
 			id: "override",
@@ -211,7 +212,7 @@ class WorkspaceGroupTests {
 			var base = Lambda.find(service.snapshot().groups,function(group) return group.id == occupied);
 			if (base == null) throw "missing occupied group";
 			var deniedRemoval = "";
-			client.call(WorkspaceProtocol.GROUP,{workspace:"w",epoch:"groups",operation:"reject-delete-" + occupied,
+			RpcCalls.call(client, WorkspaceProtocol.GROUP,{workspace:"w",epoch:"groups",operation:"reject-delete-" + occupied,
 				group:base.id,expectedRevision:base.revision,name:base.name,action:"delete",parent:base.parent,cwd:base.cwd,order:base.order},1000,
 				function(_) throw "removed an occupied group",function(error) deniedRemoval=error.code);
 			pump();
@@ -224,17 +225,17 @@ class WorkspaceGroupTests {
 			expectedRevision:deletionBase.revision,name:deletionBase.name,action:"delete",parent:deletionBase.parent,cwd:deletionBase.cwd,order:deletionBase.order};
 		var deletionResult:Null<RenameResult> = null, deletionError = "";
 		allowRemoval = false;
-		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
+		RpcCalls.call(client, WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
 		pump();
 		require(deletionError == "group_not_empty" && deletionResult == null, "nonempty host group was removed");
 		allowRemoval = true;
 		deletionError = "";
-		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
+		RpcCalls.call(client, WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
 		pump();
 		require(deletionResult != null && deletionResult.deleted == true && deletionError == "", "empty group removal failed");
 		require(!Lambda.exists(service.snapshot().groups,function(group) return group.id == "delete-me") &&
 			!Lambda.exists(readGroups(),function(group) return group.id == "delete-me"), "group removal was not replicated");
-		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
+		RpcCalls.call(client, WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
 		pump();
 		require(deletionError == "" && deletionResult != null && deletionResult.deleted == true, "group deletion retry was not idempotent");
 		change("delete-me", "Reused identity", null, null, 0, "create", "group_exists");

@@ -13,6 +13,7 @@ import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoisePrologue;
 import workspace.transport.NoiseServerHandshake;
 import workspace.transport.WorkspaceRpcServer;
+import workspace.transport.RpcCalls;
 
 private typedef HandshakePair = {
     var server:Null<NoiseMessageTransport>;
@@ -98,7 +99,7 @@ class NoiseTransportTests {
             "RPC capability negotiation cannot widen device grants");
         var rpcConnection = rpcHandshake.connection;
         var denied = "";
-        rpcConnection.call(WorkspaceProtocol.GROUP, {
+        RpcCalls.call(rpcConnection, WorkspaceProtocol.GROUP, {
             workspace: "workspace", epoch: "epoch", operation: "remote-write",
             group: "work", expectedRevision: 1, name: "Denied", action: "update"
         }, 1000, function(_) throw "Remote write exceeded the device grant",

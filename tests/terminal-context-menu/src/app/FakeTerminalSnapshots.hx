@@ -3,6 +3,7 @@ package app;
 import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.service.TerminalSnapshotPages;
 import workspace.service.WorkspaceTerminalProtocol;
 
@@ -32,7 +33,7 @@ class FakeTerminalSnapshots {
 				return;
 			}
 			var next = pages.next(server, q.id, token, q.offset == null ? 0 : q.offset, now);
-			if (next == null) ctx.fail({code: "snapshot_expired", message: "The snapshot was dropped before it was read", ambiguous: false});
+			if (next == null) ctx.fail(new RpcError("snapshot_expired", "The snapshot was dropped before it was read", false));
 			else ctx.respond(next);
 		});
 		return pages;

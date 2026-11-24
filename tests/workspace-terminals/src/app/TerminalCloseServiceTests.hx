@@ -7,6 +7,7 @@ import workspace.runtime.WorkspaceTerminalManager;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 class TerminalCloseServiceTests {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
@@ -25,13 +26,13 @@ class TerminalCloseServiceTests {
   }
   function open(id:String):TerminalRecord {
    var done=false;
-   client.call(WorkspaceTerminalProtocol.OPEN,{workspace:"w",instance:"owner",id:id,create:true,columns:80,rows:24},1000,
+   RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN,{workspace:"w",instance:"owner",id:id,create:true,columns:80,rows:24},1000,
     function(_) done=true,function(error) throw error.message);wait(function() return done);return record(id);
   }
   var target=open("close-target"),other=open("close-other"),code="",done=false;
   function remove(value:TerminalRecord,terminate:Bool):Void {
    code="";done=false;
-   client.call(WorkspaceTerminalProtocol.FORGET,{workspace:"w",instance:"owner",id:value.id,resourceInstance:value.instance,expectedRevision:value.revision,terminate:terminate},1000,
+   RpcCalls.call(client, WorkspaceTerminalProtocol.FORGET,{workspace:"w",instance:"owner",id:value.id,resourceInstance:value.instance,expectedRevision:value.revision,terminate:terminate},1000,
     function(_) done=true,function(error) {code=error.code;done=true;});wait(function() return done);
   }
   require(manager.activeCount()==2,"terminal fixtures did not start");
@@ -41,7 +42,7 @@ class TerminalCloseServiceTests {
   var roPair=MemoryTransport.pair(),ro=new RpcConnection(roPair.client,clock),roServer=new RpcConnection(roPair.server,clock);
   manager.bind(roServer,[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CATALOG]);
   var denied=false;
-  ro.call(WorkspaceTerminalProtocol.FORGET,{workspace:"w",instance:"owner",id:target.id,resourceInstance:target.instance,expectedRevision:target.revision,terminate:true},1000,
+  RpcCalls.call(ro, WorkspaceTerminalProtocol.FORGET,{workspace:"w",instance:"owner",id:target.id,resourceInstance:target.instance,expectedRevision:target.revision,terminate:true},1000,
    function(_) throw "read-only close succeeded",function(error) denied=error.code=="unauthorized");
   roServer.poll();ro.poll();require(denied && manager.activeCount()==2,"read-only close stopped a terminal");
   remove(target,true);
@@ -55,7 +56,7 @@ class TerminalCloseServiceTests {
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   manager.bind(server,[WorkspaceTerminalProtocol.CONTROL,WorkspaceTerminalProtocol.CATALOG]);
   var archived=record(other.id);done=false;code="";
-  client.call(WorkspaceTerminalProtocol.FORGET,{workspace:"w",instance:"next-owner",id:archived.id,resourceInstance:archived.instance,expectedRevision:archived.revision,terminate:true},1000,
+  RpcCalls.call(client, WorkspaceTerminalProtocol.FORGET,{workspace:"w",instance:"next-owner",id:archived.id,resourceInstance:archived.instance,expectedRevision:archived.revision,terminate:true},1000,
    function(_) done=true,function(error) {done=true;code=error.code;});wait(function() return done);
   require(code=="" && manager.snapshot().terminals.length==0 && store.loadTerminals().length==0,"archived terminal remained after close");
   client.close();server.close();manager.dispose();store.close();

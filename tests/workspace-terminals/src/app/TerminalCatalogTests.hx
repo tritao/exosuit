@@ -6,6 +6,7 @@ import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceService;
+import workspace.transport.RpcCalls;
 
 private class FaultyTerminalStore implements workspace.service.WorkspaceTerminalPersistence {
   public final records:Array<TerminalRecord> = [];
@@ -43,7 +44,7 @@ class TerminalCatalogTests {
         ]
       );
       var failed = false;
-      client.call(WorkspaceTerminalProtocol.OPEN, {
+      RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {
         workspace: "w",
         instance: "fault",
         id: "fault-shell",
@@ -62,7 +63,7 @@ class TerminalCatalogTests {
       client.poll();
       require(failed && manager.activeCount() == 0, "Metadata failure leaked active runtime");
       var error = "";
-      client.call(WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "fault", after: null}, 1000, function(_) {
+      RpcCalls.call(client, WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "fault", after: null}, 1000, function(_) {
         throw "Failed metadata remained trusted";
       }, function(e) error = e.code);
       client.poll();
@@ -126,7 +127,7 @@ class TerminalCatalogTests {
       columns: 80,
       rows: 24
     };
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) done = true, function(e) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) done = true, function(e) {
       throw e.code;
     }
     );
@@ -144,7 +145,7 @@ class TerminalCatalogTests {
       group: "other",
       expectedRevision: record.revision
     };
-    client.call(WorkspaceTerminalProtocol.RENAME, rename, 1000, function(r) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.RENAME, rename, 1000, function(r) {
       record = r;
       done = true;
     }, function(e) {
@@ -155,7 +156,7 @@ class TerminalCatalogTests {
     step();
     require(done && record.name == "Build shell" && record.group == "other", "Session rename/group did not commit");
     done = false;
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
       require(info.name == record.name, "Reattachment returned a stale terminal name");
       done = true;
     }, function(e) throw e.code);
@@ -163,13 +164,13 @@ class TerminalCatalogTests {
     step();
     require(done, "Renamed terminal did not reattach");
     var error = "";
-    client.call(WorkspaceTerminalProtocol.RENAME, rename, 1000, function(_) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.RENAME, rename, 1000, function(_) {
       throw "Stale rename accepted";
     }, function(e) error = e.code);
     step();
     step();
     require(error == "stale_revision", "Rename CAS ignored");
-    client.call(WorkspaceTerminalProtocol.FORGET, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.FORGET, {
       workspace: "w",
       instance: "first",
       id: record.id,
@@ -189,7 +190,7 @@ class TerminalCatalogTests {
     server = new RpcConnection(pair.server, clock);
     manager.bind(server, [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG]);
     done = false;
-    client.call(WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "first", after: null}, 1000, function(list) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.LIST, {workspace: "w", instance: "first", after: null}, 1000, function(list) {
       require(
         list.terminals.length == 1 && list.terminals[0].available && list.terminals[0].name == "Build shell",
         "Detached runtime vanished"
@@ -202,13 +203,13 @@ class TerminalCatalogTests {
     step();
     step();
     require(done, "Read-only discovery missing");
-    client.call(WorkspaceTerminalProtocol.RENAME, rename, 1000, function(_) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.RENAME, rename, 1000, function(_) {
       throw "Read-only rename accepted";
     }, function(e) error = e.code);
     step();
     step();
     require(error == "unauthorized", "Metadata mutation grant ignored");
-    client.call(WorkspaceTerminalProtocol.FORGET, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.FORGET, {
       workspace: "w",
       instance: "first",
       id: record.id,
@@ -253,7 +254,7 @@ class TerminalCatalogTests {
     );
     open.instance = "second";
     done = false;
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
       require(info.state == "running", "The kept shell did not open as running");
       done = true;
     }, function(e) throw e.code);
@@ -261,7 +262,7 @@ class TerminalCatalogTests {
     step();
     require(done, "The kept shell did not reattach");
     done = false;
-    client.call(WorkspaceTerminalProtocol.FORGET, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.FORGET, {
       workspace: "w",
       instance: "second",
       id: record.id,
@@ -280,7 +281,7 @@ class TerminalCatalogTests {
     );
     // Repeat removal after a lost acknowledgement is safe.
     done = false;
-    client.call(WorkspaceTerminalProtocol.FORGET, {
+    RpcCalls.call(client, WorkspaceTerminalProtocol.FORGET, {
       workspace: "w",
       instance: "second",
       id: record.id,
@@ -319,7 +320,7 @@ class TerminalCatalogTests {
     var after:Null<String> = null, seen = 0, pages = 0;
     do {
       done = false;
-      client.call(WorkspaceTerminalProtocol.LIST,
+      RpcCalls.call(client, WorkspaceTerminalProtocol.LIST,
         {workspace: "w", instance: "third", after: after}, 1000, function(page) {
         require(page.terminals.length <= WorkspaceTerminalProtocol.CATALOG_PAGE_LIMIT, "Catalog page exceeded budget");
         seen += page.terminals.length;

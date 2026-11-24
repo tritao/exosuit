@@ -8,6 +8,7 @@ import workspace.service.WorkspaceService;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 class RealPiInputMain {
  static function require(ok:Bool,message:String):Void {if(!ok) throw message;}
@@ -26,14 +27,14 @@ class RealPiInputMain {
   }
   function action(kind:String,text:String="",?id:String):Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:kind,text:text,request:id},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:kind,text:text,request:id},5000,
     function(v) {value=v;done=true;},function(e) {code=e.code;done=true;});wait(function() return done);
   }
   function until(state:String):Void {wait(function() {action("read");return view().record.state==state;});}
   function idleInputs():Void {wait(function() {action("read");return view().inputBusy != true;});}
   function drained():Void {wait(function() {action("read");return view().record.state=="completed" && (cast view().pendingInputs:Array<AgentInputMessage>).length==0;});}
   var created=false;
-  client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"pi",name:"Pi",group:"work",thread:null,provider:"pi",defaultModel:"fixture/test-model"},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"pi",name:"Pi",group:"work",thread:null,provider:"pi",defaultModel:"fixture/test-model"},5000,
    function(_) created=true,function(e) throw e.message);wait(function() return created);until("idle");
   action("prompt","approval");until("needs-attention");var approval=view().requests[0].id;
   var token=view().inputToken;action("queue","real-follow-up",token);require(code=="","Follow-up admission failed");

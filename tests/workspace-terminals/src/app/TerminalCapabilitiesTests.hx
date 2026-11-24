@@ -3,6 +3,7 @@ package app;
 import testing.TestEndpoint;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.client.RpcWorkspaceWorkbenchClient;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
@@ -50,7 +51,7 @@ class TerminalCapabilitiesTests {
       else context.respond(snapshot);
     });
     server.register(WorkspaceTerminalProtocol.OPEN,function(request,context) {
-      if (request.id=="failed") { context.fail({code:"terminal_spawn_failed",message:"Terminal creation failed: The pi CLI was not found on the workspace host PATH",ambiguous:false});return; }
+      if (request.id=="failed") { context.fail(new RpcError("terminal_spawn_failed", "Terminal creation failed: The pi CLI was not found on the workspace host PATH", false));return; }
       opened=true;
       context.respond({id:request.id,cwd:"/fixture",state:"running",exitCode:0,columns:80,rows:24,start:0,end:0});
     });

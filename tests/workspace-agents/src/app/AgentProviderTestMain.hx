@@ -8,8 +8,10 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceService;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import process.ProcessManager;
 import platform.Platform;
+import workspace.transport.RpcCalls;
 
 class AgentProviderTestMain {
 	/** A client's connection to a service that grants agent reading and control. */
@@ -88,7 +90,7 @@ class AgentProviderTestMain {
 		server.register(WorkspaceAgentProtocol.CREATE, function(q, ctx) {
 			creates++;
 			if (!succeed) {
-				ctx.fail({code:"fixture_error",message:"Fixture launch failure",ambiguous:false});
+				ctx.fail(new RpcError("fixture_error", "Fixture launch failure", false));
 				return;
 			}
 			ctx.respond({id:q.id,name:q.name,group:q.group,cwd:"C:/work",thread:"claude-session",state:"idle",turn:null,
@@ -165,7 +167,7 @@ class AgentProviderTestMain {
 		pages[2].respond({instance:"test-generation",root:"C:/work",records:[saved[0]],status:"Stale"});connection.poll();
 		var catalog=client.agents();require(catalog!=null && catalog.records.length==2,"Old catalog erased a newly created session");
 		if(prompt==null) throw "Unrelated prompt was not received";
-		prompt.fail({code:"provider_error",message:"Existing session failure",ambiguous:false});connection.poll();
+		prompt.fail(new RpcError("provider_error", "Existing session failure", false));connection.poll();
 		require(!client.agentBusy() && client.agentError()=="Existing session failure","Unrelated mutation error was lost");
 		client.createAgent("work",null,open);pump();
 		require(creates==3 && opened==3 && client.agentError()=="Existing session failure","Creation erased another session's action error");
@@ -183,8 +185,8 @@ class AgentProviderTestMain {
 		server.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
 			calls++;
 			if(id=="") id=q.id;else require(id==q.id,"Startup retry allocated a different resource");
-			if(mode=="starting") ctx.fail({code:"provider_starting",message:"Starting fixture",ambiguous:false});
-			else if(mode=="ambiguous") ctx.fail({code:"provider_error",message:"Delivery uncertain",ambiguous:true});
+			if(mode=="starting") ctx.fail(new RpcError("provider_starting", "Starting fixture", false));
+			else if(mode=="ambiguous") ctx.fail(new RpcError("provider_error", "Delivery uncertain", true));
 			else {held=ctx;query=q;}
 		});
 		var endpoint=agentEndpoint(connection);
@@ -449,7 +451,7 @@ class AgentProviderTestMain {
 			code = "";
 			record = null;
 			var finished = false;
-			client.call(WorkspaceAgentProtocol.CREATE, {
+			RpcCalls.call(client, WorkspaceAgentProtocol.CREATE, {
 				workspace: "w",
 				instance: "owner",
 				id: id,
@@ -500,7 +502,7 @@ class AgentProviderTestMain {
 			code = "";
 			view = null;
 			var finished = false;
-			client.call(WorkspaceAgentProtocol.ACTION, {
+			RpcCalls.call(client, WorkspaceAgentProtocol.ACTION, {
 				workspace: "w",
 				instance: "owner",
 				id: "a",
@@ -540,7 +542,7 @@ class AgentProviderTestMain {
 		require(snapshot().requests[0].detail.indexOf("Command: echo test") >= 0 && snapshot().requests[0].detail.indexOf("threadId") < 0, "Approval presentation leaked transport metadata or lost the command");
 		var approval = snapshot().requests[0].id;
 		var denied = false;
-		observer.call(WorkspaceAgentProtocol.ACTION, {
+		RpcCalls.call(observer, WorkspaceAgentProtocol.ACTION, {
 			workspace: "w",
 			instance: "owner",
 			id: "a",
@@ -635,13 +637,13 @@ class AgentProviderTestMain {
 		for (_ in 0...40) recoveryPump();
 		require(!StringTools.startsWith(provider.status, "Codex connected"), "Codex started for saved sessions before any was read: " + provider.status);
 		var opened = false;
-		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+		RpcCalls.call(recoveryClient, WorkspaceAgentProtocol.ACTION, {
 			workspace: "w", instance: "next-owner", id: "a", action: "read", text: "", request: null
 		}, 5000, function(_) opened = true, function(error) throw error.message);
 		recoveryWait(function() return opened);
 		recoveryWait(function() return StringTools.startsWith(provider.status, "Codex connected; some sessions need attention"));
 		var recoveredView:Null<AgentView> = null, recoveredFinished = false;
-		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+		RpcCalls.call(recoveryClient, WorkspaceAgentProtocol.ACTION, {
 			workspace: "w", instance: "next-owner", id: "a", action: "read", text: "", request: null
 		}, 5000, function(value) { recoveredView = value; recoveredFinished = true; }, function(error) throw error.message);
 		recoveryWait(function() return recoveredFinished);
@@ -650,7 +652,7 @@ class AgentProviderTestMain {
 			&& recoveredView.items != null && Lambda.exists(recoveredView.items, function(item) return item.text.indexOf("Persisted history") >= 0),
 			"Persisted Codex sessions did not automatically resume and restore history");
 		var blockedView:Null<AgentView> = null, blockedFinished = false;
-		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+		RpcCalls.call(recoveryClient, WorkspaceAgentProtocol.ACTION, {
 			workspace: "w", instance: "next-owner", id: "foreign-resource", action: "read", text: "", request: null
 		}, 5000, function(value) { blockedView = value; blockedFinished = true; }, function(error) throw error.message);
 		recoveryWait(function() return blockedFinished);
@@ -659,7 +661,7 @@ class AgentProviderTestMain {
 			&& blockedView.connectionState == "disconnected" && blockedView.recoveryReason == "workspace-mismatch",
 			"A thread with a workspace mismatch was not surfaced as a retryable recovery failure");
 		var missingView:Null<AgentView> = null, missingFinished = false;
-		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+		RpcCalls.call(recoveryClient, WorkspaceAgentProtocol.ACTION, {
 			workspace: "w", instance: "next-owner", id: "missing-resource", action: "read", text: "", request: null
 		}, 5000, function(value) { missingView = value; missingFinished = true; }, function(error) throw error.message);
 		recoveryWait(function() return missingFinished);
@@ -667,7 +669,7 @@ class AgentProviderTestMain {
 			&& missingView.connectionState == "disconnected" && missingView.recoveryReason == "thread-unavailable",
 			"An unavailable Codex thread did not retain its record and recovery reason");
 		var ownedView:Null<AgentView> = null, ownedFinished = false;
-		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+		RpcCalls.call(recoveryClient, WorkspaceAgentProtocol.ACTION, {
 			workspace: "w", instance: "next-owner", id: "owned-resource", action: "read", text: "", request: null
 		}, 5000, function(value) { ownedView = value; ownedFinished = true; }, function(error) throw error.message);
 		recoveryWait(function() return ownedFinished);
@@ -686,7 +688,7 @@ class AgentProviderTestMain {
 			badServer = new RpcConnection(badPair.server, clock);
 		provider.bind(badServer, [WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL]);
 		var newerVersionCode = "", newerVersionDone = false;
-		badClient.call(WorkspaceAgentProtocol.CREATE, {
+		RpcCalls.call(badClient, WorkspaceAgentProtocol.CREATE, {
 			workspace: "w",
 			instance: "bad-version",
 			id: "bad",
@@ -714,7 +716,7 @@ class AgentProviderTestMain {
 		require(provider.status.indexOf("0.999.0") >= 0 && provider.status.indexOf("codex-cli/0.162.0") >= 0,
 			"Detected Codex versions were not reported after successful initialization");
 		var newerRecord:Null<AgentRecord> = null, newerCreateDone = false;
-		badClient.call(WorkspaceAgentProtocol.CREATE, {
+		RpcCalls.call(badClient, WorkspaceAgentProtocol.CREATE, {
 			workspace: "w",
 			instance: "bad-version",
 			id: "newer-version-resource",

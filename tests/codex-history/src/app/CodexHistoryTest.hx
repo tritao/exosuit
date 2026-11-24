@@ -8,6 +8,7 @@ import workspace.provider.CodexProvider;
 import workspace.provider.WorkspaceAgentService;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.transport.RpcCalls;
 
 /** Actual native adapter and proxy bridge, deterministic peer and isolated state. */
 class CodexHistoryTest {
@@ -37,7 +38,7 @@ class CodexHistoryTest {
   var record:Null<AgentRecord>=null,code="";
   function create():Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"History",group:"work",thread:"history-thread"},20000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"a",name:"History",group:"work",thread:"history-thread"},20000,
     function(r) {record=r;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);
   }
@@ -47,7 +48,7 @@ class CodexHistoryTest {
   var value:Null<AgentView>=null;
   function action(kind:String,?after:String):AgentView {
    var done=false;code="";value=null;
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:kind,text:"",request:null,after:after},20000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"a",action:kind,text:"",request:null,after:after},20000,
     function(v) {value=v;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);require(code=="" && value!=null,"Codex history action failed: "+kind+" "+code);
    return cast value;
@@ -74,7 +75,7 @@ class CodexHistoryTest {
   require(message!=null && message.truncated && message.contentToken!=null,"Older message lost its full-source handle");
   var retainedMessage:AgentActivityItem=cast message;
   var full:Null<AgentContentChunk>=null,contentDone=false;
-  client.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:"history",item:"history-8",token:retainedMessage.contentToken,offset:0},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:"history",item:"history-8",token:retainedMessage.contentToken,offset:0},5000,
    function(chunk) {full=chunk;contentDone=true;},function(e) throw e.message);
   wait(function() return contentDone);
   var fullReply:AgentContentChunk=cast full;
@@ -87,7 +88,7 @@ class CodexHistoryTest {
   var assembled=new haxe.io.BytesBuffer(),position=0,total=-1;
   while(total<0 || position<total) {
    full=null;contentDone=false;
-   client.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:"history",item:"history-9",token:retainedLarge.contentToken,offset:position},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:"history",item:"history-9",token:retainedLarge.contentToken,offset:position},5000,
     function(chunk) {full=chunk;contentDone=true;},function(e) throw e.message);
    wait(function() return contentDone);
    var chunk:AgentContentChunk=cast full;

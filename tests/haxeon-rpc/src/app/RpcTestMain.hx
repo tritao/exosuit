@@ -7,6 +7,7 @@ import haxeon.rpc.MemoryTransport;
 import haxeon.wire.JsonWire;
 import haxeon.wire.MessagePackFrame;
 import haxeon.wire.MessagePackFrameReader;
+import haxeon.rpc.RpcMethodKey;
 
 class RpcTestMain {
 	static function require(value:Bool, message:String):Void {
@@ -42,14 +43,14 @@ class RpcTestMain {
 		}
 		var diagnostic:RpcEnvelope = JsonWire.decode(JsonWire.encode(hello));
 		require(RpcProtocol.encode(diagnostic, 1024).compare(encoded) == 0, "JSON and MessagePack schemas disagree");
-		var request:RpcEnvelope = Request(1, 100, 10000, Bytes.ofString("workspace query"));
+		var request:RpcEnvelope = Request(1, RpcMethodKey.Id(100), 10000, Bytes.ofString("workspace query"));
 		switch RpcProtocol.decode(RpcProtocol.encode(request, 1024), 1024) {
 			case Request(id, method, timeout, payload):
-				require(id == 1 && method == 100 && timeout == 10000 && payload.toString() == "workspace query", "request round trip");
+				require(id == 1 && Type.enumEq(method, RpcMethodKey.Id(100)) && timeout == 10000 && payload.toString() == "workspace query", "request round trip");
 			default:
 				throw "unexpected request";
 		}
-		rejects(function() RpcProtocol.encode(Request(0, 100, 1000, Bytes.alloc(0)), 1024), "zero request id accepted");
+		rejects(function() RpcProtocol.encode(Request(0, RpcMethodKey.Id(100), 1000, Bytes.alloc(0)), 1024), "zero request id accepted");
 		rejects(function() RpcProtocol.encode(Hello(1, 1, "test", ["a", "a"]), 1024), "duplicate capabilities accepted");
 		rejects(function() RpcProtocol.decode(encoded, 1), "oversized envelope accepted");
 		var malformed = Bytes.alloc(1);

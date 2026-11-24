@@ -4,6 +4,7 @@ import testing.TestEndpoint;
 import haxe.Int64;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import haxeon.ui.core.UiContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiEventKind;
@@ -47,7 +48,7 @@ class ReorderTest {
     record.group=q.group;if(q.order!=null) record.order=q.order;record.revision=Int64.add(record.revision,Int64.ofInt(1));
     writes.push("t:"+q.id+"@"+q.group+"#"+q.order);ctx.respond(record);return;
    }
-   ctx.fail({code:"unknown_terminal",message:"unknown",ambiguous:false});
+   ctx.fail(new RpcError("unknown_terminal", "unknown", false));
   });
   server.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
    for (record in agents) if (record.id==q.id && q.action=="move") {
@@ -64,7 +65,7 @@ class ReorderTest {
     writes.push("g:"+q.group+"@"+q.parent+"#"+q.order);
     ctx.respond({epoch:"epoch",operation:q.operation,sequence:group.revision,group:group});return;
    }
-   ctx.fail({code:"unknown_group",message:"unknown",ambiguous:false});
+   ctx.fail(new RpcError("unknown_group", "unknown", false));
   });
   var endpoint=new TestEndpoint(connection);endpoint.root="/workspace";endpoint.generation="owner";endpoint.events=false;
   var client=new RpcWorkspaceWorkbenchClient(endpoint,clock);

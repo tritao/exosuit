@@ -5,6 +5,7 @@ import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.client.RpcWorkspaceWorkbenchClient;
 import workspace.client.RpcTerminalBackend;
@@ -27,7 +28,7 @@ class TerminalRestartTests {
   });
   server.register(WorkspaceTerminalProtocol.RESTART,function(q,ctx) {
    requests++;
-   if(mode=="error") {ctx.fail({code:"terminal_restart_failed",message:"Shell startup failed; saved history retained",ambiguous:true});return;}
+   if(mode=="error") {ctx.fail(new RpcError("terminal_restart_failed", "Shell startup failed; saved history retained", true));return;}
    state="running";record.state=state;record.revision+=1;ctx.respond(info());
   });
   server.register(WorkspaceTerminalProtocol.REPLAY,function(q,ctx) ctx.respond({terminal:info(),events:[],next:Int64.ofInt(0),end:Int64.ofInt(0)}));

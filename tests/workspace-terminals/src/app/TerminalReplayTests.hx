@@ -5,6 +5,7 @@ import haxe.Int64;
 import haxe.io.Bytes;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.client.RpcTerminalBackend;
 import workspace.service.TerminalReplayLog;
 import workspace.service.WorkspaceTerminalProtocol;
@@ -70,7 +71,7 @@ private class ReplayFixture {
     if (!legacy) server.register(WorkspaceTerminalProtocol.REPLAY, function(r, c) {
       replayRequests++;
       if (r.cursor == 0) replaysFromStart++;
-      if (r.cursor < log.startCursor) { c.fail({code:"replay_gap", message:"trimmed", ambiguous:false}); return; }
+      if (r.cursor < log.startCursor) { c.fail(new RpcError("replay_gap", "trimmed", false)); return; }
       var batch = log.read(r.cursor);
       var events = batch.events;
       if (corrupt) events = [for (event in events) {sequence:event.sequence + 1, offset:event.offset,
@@ -94,7 +95,7 @@ private class ReplayFixture {
       }
       snapshotPages++;
       var page = pages.next(serving, "fixture", r.token, r.offset == null ? 0 : r.offset, Sys.time());
-      if (page == null) c.fail({code:"snapshot_expired", message:"expired", ambiguous:false});
+      if (page == null) c.fail(new RpcError("snapshot_expired", "expired", false));
       else c.respond(page);
     });
   }

@@ -1,9 +1,11 @@
 package app;
 
 import haxe.io.Bytes;
+import haxeon.async.Future;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcContext;
+import haxeon.rpc.RpcError;
 import haxeon.rpc.RpcMethod;
 import haxeon.wire.MessagePack;
 
@@ -14,6 +16,19 @@ class RpcDispatchTests {
 	static function require(value:Bool, message:String):Void {
 		if (!value)
 			throw message;
+	}
+
+	/** Observes a call as the callback pair did: a cancelled call fails with "cancelled", which may have executed. */
+	static function observe<T>(future:Future<T>, success:T->Void, failure:RpcError->Void):Future<T> {
+		future.onComplete(function(outcome) {
+			switch outcome {
+				case Success(value): success(value);
+				case Failure(error): failure(Std.isOfType(error, RpcError) ? cast error : new RpcError("failed", error.message, true));
+				case Cancelled: failure(new RpcError("cancelled", "cancelled", true));
+				case Stopped:
+			}
+		});
+		return future;
 	}
 
 	public static function run():Void {
@@ -40,18 +55,18 @@ class RpcDispatchTests {
 			errors.push(error.code);
 			ambiguous.push(error.ambiguous);
 		};
-		client.call(method, {name: "one"}, 100, success, failure);
+		observe(client.call(method, {name: "one"}, 100), success, failure);
 		require(server.poll() == 1 && names[0] == "one" && results.length == 0, "handler did not defer");
 		require(contexts[0].respond({text: "answer"}) && !contexts[0].respond({text: "twice"}), "completion not at most once");
 		client.poll();
 		require(results.length == 1 && results[0] == "answer", "typed response lost");
-		var cancelled = client.call(method, {name: "cancel"}, 100, success, failure);
+		var cancelled = observe(client.call(method, {name: "cancel"}, 100), success, failure);
 		server.poll();
-		require(client.cancel(cancelled), "cancel rejected");
+		require(cancelled.cancel(), "cancel rejected");
 		server.poll();
 		require(contexts[1].isCancelled() && !contexts[1].respond({text: "late"}), "cancelled work replied");
 		require(errors[0] == "cancelled" && ambiguous[0], "cancel failure semantics");
-		client.call(method, {name: "expire"}, 10, success, failure);
+		observe(client.call(method, {name: "expire"}, 10), success, failure);
 		server.poll();
 		now = 10;
 		require(contexts[2].isCancelled() && !contexts[2].respond({text: "expired"}), "deadline ignored before polling");
@@ -59,9 +74,9 @@ class RpcDispatchTests {
 		server.poll();
 		client.poll();
 		require(errors[1] == "timeout" && client.pendingCalls() == 0 && server.activeRequests() == 0, "deadline retirement failed");
-		client.call(method, {name: "a"}, 100, success, failure);
-		client.call(method, {name: "b"}, 100, success, failure);
-		require(client.call(method, {name: "busy"}, 100, success, failure) == 0
+		observe(client.call(method, {name: "a"}, 100), success, failure);
+		observe(client.call(method, {name: "b"}, 100), success, failure);
+		require(observe(client.call(method, {name: "busy"}, 100), success, failure).isComplete()
 			&& errors[2] == "busy"
 			&& !ambiguous[2], "pending cap ignored");
 		require(server.poll(1, 1024) == 1 && server.activeRequests() == 1, "poll message budget ignored");
@@ -71,12 +86,12 @@ class RpcDispatchTests {
 		server.poll();
 		require(errors.length == 5 && ambiguous[3] && ambiguous[4] && client.pendingCalls() == 0, "disconnect lost pending calls");
 		require(!contexts[3].respond({text: "old generation"}), "disconnected context replied");
-		require(client.call(method, {name: "closed"}, 100, success, failure) == 0 && !ambiguous[5], "pre-dispatch disconnect ambiguous");
+		require(observe(client.call(method, {name: "closed"}, 100), success, failure).isComplete() && !ambiguous[5], "pre-dispatch disconnect ambiguous");
 
 		pair = MemoryTransport.pair(4096, 1);
 		client = new RpcConnection(pair.client, function() return now, 1024, 2, 4096);
 		server = new RpcConnection(pair.server, function() return now, 1024, 2, 4096);
-		client.call(method, {name: "unknown"}, 100, success, failure);
+		observe(client.call(method, {name: "unknown"}, 100), success, failure);
 		server.poll();
 		client.poll();
 		require(errors[6] == "unknown_method" && !ambiguous[6], "unknown method not rejected");
@@ -84,7 +99,7 @@ class RpcDispatchTests {
 			context.respond({text: request.name});
 		});
 		pair.server.loseNext();
-		client.call(method, {name: "lost"}, 10, success, failure);
+		observe(client.call(method, {name: "lost"}, 10), success, failure);
 		server.poll();
 		now = 20;
 		client.poll();
@@ -119,8 +134,8 @@ class RpcDispatchTests {
 		server.register(method, function(request, context) {
 			saved.push(context);
 		});
-		client.call(method, {name: "first"}, 100, success, failure);
-		client.call(method, {name: "second"}, 100, success, failure);
+		observe(client.call(method, {name: "first"}, 100), success, failure);
+		observe(client.call(method, {name: "second"}, 100), success, failure);
 		server.poll();
 		client.poll();
 		require(saved.length == 1 && server.activeRequests() == 1 && errors[8] == "busy" && !ambiguous[8], "active handler limit ignored");
@@ -128,7 +143,7 @@ class RpcDispatchTests {
 		malformedRequest.set(0, 0xc1);
 		saved[0].respond({text: "done"});
 		client.poll();
-		pair.client.send(haxeon.rpc.RpcProtocol.encode(haxeon.rpc.RpcEnvelope.Request(3, 100, 100, malformedRequest), 1024));
+		pair.client.send(haxeon.rpc.RpcProtocol.encode(haxeon.rpc.RpcEnvelope.Request(3, haxeon.rpc.RpcMethodKey.Id(100), 100, malformedRequest), 1024));
 		server.poll();
 		var invalidReply = pair.client.receive();
 		require(invalidReply != null, "invalid payload lacked response");
@@ -143,7 +158,7 @@ class RpcDispatchTests {
 			function(request, context) {
 				throw "private server exception";
 			});
-		pair.client.send(haxeon.rpc.RpcProtocol.encode(haxeon.rpc.RpcEnvelope.Request(4, 102, 100, method.encodeRequest({name: "throw"})), 1024));
+		pair.client.send(haxeon.rpc.RpcProtocol.encode(haxeon.rpc.RpcEnvelope.Request(4, haxeon.rpc.RpcMethodKey.Id(102), 100, method.encodeRequest({name: "throw"})), 1024));
 		server.poll();
 		var failedReply = pair.client.receive();
 		if (failedReply == null)
@@ -171,7 +186,7 @@ class RpcDispatchTests {
 		require(pair.client.isOpen(), "register closed peer");
 		require(expectedServer.isOpen(), "register closed expected server");
 		require(server.isOpen(), "budget server closed before input");
-		require(pair.client.send(haxeon.rpc.RpcProtocol.encode(haxeon.rpc.RpcEnvelope.Request(1, 100, 100, method.encodeRequest({name: "budget"})), 1024)),
+		require(pair.client.send(haxeon.rpc.RpcProtocol.encode(haxeon.rpc.RpcEnvelope.Request(1, haxeon.rpc.RpcMethodKey.Id(100), 100, method.encodeRequest({name: "budget"})), 1024)),
 			"budget request rejected");
 		var pollCount = server.poll(1, 1024);
 		require(pollCount == 1 && pair.client.bufferedMessages() == 1 && server.bufferedBytes() > 0,
@@ -216,23 +231,23 @@ class RpcDispatchTests {
 			context.respond({text: "already queued"});
 		});
 		var lateResults = 0, cancelledResults = 0;
-		var raced = client.call(method, {name: "race"}, 100, function(answer) {
+		var raced = observe(client.call(method, {name: "race"}, 100), function(answer) {
 			lateResults++;
 		}, function(error) {
 			cancelledResults++;
 		});
 		server.poll();
-		client.cancel(raced);
+		raced.cancel();
 		client.poll();
 		server.poll();
 		require(lateResults == 0 && cancelledResults == 1, "late success resurrected cancelled call");
 		// All waiters receive disconnect even if one application callback throws.
 		var retired = 0;
-		client.call(method, {name: "throws"}, 100, success, function(error) {
+		observe(client.call(method, {name: "throws"}, 100), success, function(error) {
 			retired++;
 			throw "application callback failed";
 		});
-		client.call(method, {name: "other"}, 100, success, function(error) {
+		observe(client.call(method, {name: "other"}, 100), success, function(error) {
 			retired++;
 		});
 		var callbackRaised = false;

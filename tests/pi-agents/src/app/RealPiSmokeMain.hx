@@ -8,6 +8,7 @@ import workspace.service.WorkspaceService;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 /** Real Pi CLI against a loopback-only deterministic model server. No user accounts or paid API calls. */
 class RealPiSmokeMain {
@@ -29,13 +30,13 @@ class RealPiSmokeMain {
   }
   function action(kind:String,text:String="",?request:String):Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:kind,text:text,request:request},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:kind,text:text,request:request},5000,
     function(v) {value=v;done=true;},function(e) {code=e.code;done=true;});
    wait(function() return done);require(code=="","Real Pi action failed: "+kind+" "+code);
   }
   function until(state:String):Void {wait(function() {action("read");return view().record.state==state;});}
   var created=false;
-  client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"pi",name:"Pi",group:"work",thread:null,provider:"pi",defaultModel:"fixture/test-model"},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"pi",name:"Pi",group:"work",thread:null,provider:"pi",defaultModel:"fixture/test-model"},5000,
    function(_) created=true,function(e) throw e.message);
   wait(function() return created);until("idle");
   require((cast view().models:Array<AgentModel>).length==1,"Real Pi model discovery failed");

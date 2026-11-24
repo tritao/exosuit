@@ -9,6 +9,7 @@ import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
+import workspace.transport.RpcCalls;
 
 class TerminalThemeTests {
   static function require(value:Bool,message:String):Void { if (!value) throw message; }
@@ -83,11 +84,11 @@ class TerminalThemeTests {
     var other=MemoryTransport.pair(), reader=new RpcConnection(other.client,clock), readServer=new RpcConnection(other.server,clock);
     manager.bind(readServer,[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL]);
     var denied="";
-    reader.call(WorkspaceTerminalProtocol.RESIZE,{workspace:"workspace",instance:"theme-test",id:"theme-shell",columns:80,rows:24,
+    RpcCalls.call(reader, WorkspaceTerminalProtocol.RESIZE,{workspace:"workspace",instance:"theme-test",id:"theme-shell",columns:80,rows:24,
       theme:{foreground:0,background:0xffffff}},1000,function(_) { throw "Viewer changed terminal theme"; },function(e) denied=e.code);
     reader.poll();readServer.poll();reader.poll();require(denied=="terminal_controlled","Theme update ignored controller ownership");
     var invalid="";
-    client.call(WorkspaceTerminalProtocol.RESIZE,{workspace:"workspace",instance:"theme-test",id:"theme-shell",columns:80,rows:24,
+    RpcCalls.call(client, WorkspaceTerminalProtocol.RESIZE,{workspace:"workspace",instance:"theme-test",id:"theme-shell",columns:80,rows:24,
       theme:{foreground:-1,background:0xffffff}},1000,function(_) { throw "Invalid RGB accepted"; },function(e) invalid=e.code);
     step();step();require(invalid=="invalid_request","Invalid theme was not rejected");
     session.close();client.close();server.close();reader.close();readServer.close();manager.dispose();

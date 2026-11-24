@@ -5,6 +5,7 @@ import sqlitekit.Database;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceProtocol;
+import workspace.transport.RpcCalls;
 
 private typedef Link = {var client:RpcConnection; var server:RpcConnection;}
 
@@ -65,7 +66,7 @@ class PersistenceTestMain {
 
 	static function rename(link:Link, operation:String, revision:Int, name:String, ?expectedError:String):Void {
 		var done = false;
-		link.client.call(WorkspaceProtocol.GROUP, {
+		RpcCalls.call(link.client, WorkspaceProtocol.GROUP, {
 			workspace: "workspace",
 			epoch: "first",
 			operation: operation,
@@ -104,7 +105,7 @@ class PersistenceTestMain {
 		var first = open();
 		function group(link:Link, operation:String, action:String, revision:Int, cwd:Null<String>):Void {
 			var done = false;
-			link.client.call(WorkspaceProtocol.GROUP, {workspace: "workspace", epoch: "first", operation: operation, group: "docs",
+			RpcCalls.call(link.client, WorkspaceProtocol.GROUP, {workspace: "workspace", epoch: "first", operation: operation, group: "docs",
 				expectedRevision: revision, name: "Docs", action: action, parent: "work", cwd: cwd, order: 0}, 100,
 				function(_) done = true, function(error) throw operation + " failed: " + error.code);
 			pump(link);
@@ -154,7 +155,7 @@ class PersistenceTestMain {
 		rename(link, "failed", 36, "Must not commit", "storage_failed");
 		require(catalog.snapshot().cursor == 35, "Failed transaction changed state");
 		var fenced = false;
-		link.client.call(WorkspaceProtocol.QUERY, {workspace: "workspace"}, 100, function(_) throw "Failed storage served a snapshot", function(error) {
+		RpcCalls.call(link.client, WorkspaceProtocol.QUERY, {workspace: "workspace"}, 100, function(_) throw "Failed storage served a snapshot", function(error) {
 			fenced = error.code == "storage_unavailable";
 		});
 		pump(link);

@@ -13,6 +13,8 @@ import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
+import workspace.transport.RpcCalls;
+import haxeon.rpc.RpcMethodKey;
 
 /** The client's side of a connection, counting the requests it sends by method and the history limits it asks for. */
 private class CountingTransport implements MessageTransport {
@@ -26,7 +28,7 @@ private class CountingTransport implements MessageTransport {
   public function send(message:Bytes):Bool {
     var sent = inner.send(message);
     if (sent) switch (RpcProtocol.decode(message, 1 << 28)) {
-      case Request(_, method, _, payload):
+      case Request(_, Id(method), _, payload):
         counts.set(method, count(method) + 1);
         if (method == WorkspaceTerminalProtocol.SNAPSHOT.id) {
           var query = WorkspaceTerminalProtocol.SNAPSHOT.decodeRequest(payload);
@@ -83,7 +85,7 @@ private class Rig {
   }
   public function open(link:Link, id:String, create:Bool, watch:Bool, paced:Bool, columns:Int = 80, rows:Int = 24):TerminalInfo {
     var info:Null<TerminalInfo> = null, failure = "";
-    link.client.call(WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: id, create: create,
+    RpcCalls.call(link.client, WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: id, create: create,
       columns: columns, rows: rows, watch: watch ? true : null, paced: paced ? true : null}, 5000,
       function(value) info = value, function(e) failure = e.code);
     until(function() return info != null || failure != "", "OPEN of " + id + " was not answered");
@@ -93,7 +95,7 @@ private class Rig {
   }
   public function input(link:Link, id:String, sequence:Int, data:Bytes):Void {
     var done = false, failure = "";
-    link.client.call(WorkspaceTerminalProtocol.INPUT, {workspace: "workspace", instance: instance, id: id, sequence: sequence, data: data},
+    RpcCalls.call(link.client, WorkspaceTerminalProtocol.INPUT, {workspace: "workspace", instance: instance, id: id, sequence: sequence, data: data},
       5000, function(_) done = true, function(e) failure = e.code);
     until(function() return done || failure != "", "INPUT to " + id + " was not answered");
     if (failure != "") throw "INPUT to " + id + " failed: " + failure;
@@ -103,7 +105,7 @@ private class Rig {
     var token = 0, offset = 0, total = -1, historyBytes = 0, columns = 0, rows = 0, data = Bytes.alloc(0);
     while (total < 0 || offset < total) {
       var waiting = true, failure = "";
-      link.client.call(WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "workspace", instance: instance, id: id, token: token,
+      RpcCalls.call(link.client, WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "workspace", instance: instance, id: id, token: token,
         offset: offset, history: offset == 0 && history ? true : null, historyLimit: offset == 0 ? limit : null}, 5000,
         function(page) {
           if (total < 0) {
@@ -237,7 +239,7 @@ class TerminalFlowTests {
     // Acknowledge whatever the shell printed while starting, so the count starts with the flood.
     var pull = function():Void {
       var answered = false;
-      pacedLink.client.call(WorkspaceTerminalProtocol.REPLAY, {workspace: "workspace", instance: rig.instance, id: "flood",
+      RpcCalls.call(pacedLink.client, WorkspaceTerminalProtocol.REPLAY, {workspace: "workspace", instance: rig.instance, id: "flood",
         cursor: Int64.ofInt(0)}, 5000, function(_) answered = true, function(_) answered = true);
       rig.until(function() return answered, "REPLAY of the paced view was not answered");
     };

@@ -8,6 +8,7 @@ import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcConnector;
 import haxeon.rpc.RpcHandshake;
 import haxeon.rpc.RpcPeerOptions;
+import haxeon.rpc.RpcError;
 import workspace.client.WorkspaceCatalogMirror;
 import workspace.client.WorkspaceCatalogWatch;
 import workspace.client.CatalogSnapshots;
@@ -126,13 +127,13 @@ private class FakeService {
 		connection.register(WorkspaceCatalogProtocol.CATALOG, function(query:CatalogQuery, context) {
 			// A service answers to its own id and to the alias "workspace", and names its real id in the reply.
 			if (query.ref.workspace != id && query.ref.workspace != "workspace") {
-				context.fail({code: "unknown_workspace", message: "unknown_workspace", ambiguous: false});
+				context.fail(new RpcError("unknown_workspace", "unknown_workspace", false));
 				return;
 			}
 			if (failNext > 0) {
 				failNext--;
 				requests++;
-				context.fail({code: "boom", message: "boom", ambiguous: false});
+				context.fail(new RpcError("boom", "boom", false));
 				return;
 			}
 			if (query.watch && !refuseWatch && watchers.indexOf(connection) < 0) watchers.push(connection);
@@ -280,7 +281,7 @@ private class Dial implements RpcConnector {
 	public function connect(complete:RpcConnectResult->Void):RpcConnectAttempt {
 		var service = network.services.get(endpoint);
 		if (service == null || !service.up) {
-			complete(Failed({code: "connect_failed", message: "connect_failed", ambiguous: false}, true));
+			complete(Failed(new RpcError("connect_failed", "connect_failed", false), true));
 			return new NoAttempt();
 		}
 		var pair = MemoryTransport.pair(262144, 64);

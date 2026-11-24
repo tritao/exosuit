@@ -11,6 +11,7 @@ import workspace.service.WorkspaceProtocol;
 import workspace.storage.WorkspaceSqliteStore;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
+import workspace.transport.RpcCalls;
 
 /** Pane size → grid → PTY for a live terminal; a local view fit for an ended one. */
 class TerminalResizeTests {
@@ -44,7 +45,7 @@ class TerminalResizeTests {
     // The service's own record, as another viewer would read it with the screen.
     var recorded = function():{columns:Int,rows:Int} {
       var result:Null<{columns:Int,rows:Int}> = null;
-      reader.call(WorkspaceTerminalProtocol.SNAPSHOT,{workspace:"workspace",instance:"resize-test",id:"resize-shell",token:0,offset:0},1000,
+      RpcCalls.call(reader, WorkspaceTerminalProtocol.SNAPSHOT,{workspace:"workspace",instance:"resize-test",id:"resize-shell",token:0,offset:0},1000,
         function(value) { result = {columns:value.terminal.columns,rows:value.terminal.rows}; },
         function(e) { throw "Service geometry unavailable: " + e.code; });
       until(function() return result != null,"Service geometry did not arrive");

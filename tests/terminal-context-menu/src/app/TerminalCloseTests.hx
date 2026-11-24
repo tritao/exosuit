@@ -4,6 +4,7 @@ import testing.TestEndpoint;
 import haxe.Int64;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.client.RpcWorkspaceWorkbenchClient;
 import haxeon.ui.widgets.overlays.MenuItem;
@@ -55,7 +56,7 @@ class TerminalCloseTests {
   var selected=closeAction();selected.onSelect();pump();
   require(calls==1 && client.terminalCatalogBusy() && !target.disposed && !editor.disposed && !hidden.disposed,"close disposed views before service confirmation");
   var failed=pending;if(failed==null) throw "close request missing";
-  failed.fail({code:"storage_failed",message:"Unable to remove saved terminal",ambiguous:true});pump();
+  failed.fail(new RpcError("storage_failed", "Unable to remove saved terminal", true));pump();
   require(!target.disposed && !editor.disposed && !hidden.disposed && records.length==1,"failed close discarded terminal views");
   var error=client.terminalCatalogError();require(error!=null && error.indexOf("kept open")>=0,"failed close lost recovery feedback");
   closeAction().onSelect();pump();require(calls==2,"close retry did not reach service");

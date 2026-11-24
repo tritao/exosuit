@@ -8,6 +8,7 @@ import workspace.service.WorkspaceService;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 @:access(workspace.provider.AgentImageStaging)
 class PiInputTestMain {
@@ -41,18 +42,18 @@ class PiInputTestMain {
   }
   function action(kind:String,text:String="",?request:String,?imageIds:Array<String>):Void {
    var done=false;code="";
-   client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:kind,text:text,request:request,imageIds:imageIds},5000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:kind,text:text,request:request,imageIds:imageIds},5000,
     function(v) {value=v;done=true;},function(e) {code=e.code;done=true;});wait(function() return done);
   }
   function until(state:String):Void {wait(function() {action("read");return view().record.state==state;});}
   var created=false;
-  client.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"pi",name:"Pi",group:"work",thread:null,provider:"pi"},5000,
+  RpcCalls.call(client, WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"pi",name:"Pi",group:"work",thread:null,provider:"pi"},5000,
    function(_) created=true,function(e) throw e.message);wait(function() return created);until("idle");
   function upload(bytes:haxe.io.Bytes):String {
    var id:Null<String>=null,offset=0,done=false;
    function request(operation:String,chunk:Null<haxe.io.Bytes>):AgentImageUploadResult {
     var result:Null<AgentImageUploadResult>=null;done=false;
-    client.call(WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"pi",operation:operation,upload:id,size:bytes.length,offset:offset,bytes:chunk},5000,
+    RpcCalls.call(client, WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"pi",operation:operation,upload:id,size:bytes.length,offset:offset,bytes:chunk},5000,
      function(value) {result=value;done=true;},function(e) throw e.message);
     wait(function() return done);return cast result;
    }
@@ -158,7 +159,7 @@ class PiInputTestMain {
   // Read-only attachments cannot enqueue or steer.
   var roPair=MemoryTransport.pair(),ro=new RpcConnection(roPair.client,clock),roServer=new RpcConnection(roPair.server,clock),denied=false;
   provider.bind(roServer,[WorkspaceAgentProtocol.READ]);
-  ro.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:"queue",text:"unauthorized",request:view().inputToken},5000,
+  RpcCalls.call(ro, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"pi",action:"queue",text:"unauthorized",request:view().inputToken},5000,
    function(_) throw "Read-only queue succeeded",function(e) {require(e.code=="unauthorized","Wrong authorization failure");denied=true;});roServer.poll();ro.poll();require(denied,"Missing read-only rejection");
   provider.dispose();client.close();server.close();ro.close();roServer.close();processes.shutdown();
   Sys.println("PASS: Pi steering, FIFO follow-ups, cancellation, idempotency, stop/restart pause, lost ACK recovery, settlement races and authorization");

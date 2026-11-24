@@ -12,6 +12,7 @@ import workspace.runtime.WorkspaceTerminalManager;
 import terminalsession.TerminalSession;
 import terminalkit.Emulator;
 import workspace.runtime.AgentTerminalResume as Resume;
+import workspace.transport.RpcCalls;
 
 class TerminalAgentTests {
  static function agentEndpoint(root:String):TestEndpoint {
@@ -171,7 +172,7 @@ class TerminalAgentTests {
   };
   connect("first");
   var invalidDone=false, invalidCode="";
-  endpoint.connection.call(WorkspaceTerminalProtocol.OPEN,{workspace:"workspace",instance:"first",id:"invalid-agent",create:true,
+  RpcCalls.call(endpoint.connection, WorkspaceTerminalProtocol.OPEN,{workspace:"workspace",instance:"first",id:"invalid-agent",create:true,
    columns:80,rows:24,agentProvider:"codex; echo injected"},1000,function(_) invalidDone=true,function(error) { invalidCode=error.code;invalidDone=true; });
   for (_ in 0...10) { endpoint.connection.poll();server.poll(); }
   require(invalidDone && invalidCode=="invalid_request" && manager.snapshot().terminals.length==0 && manager.activeCount()==0,

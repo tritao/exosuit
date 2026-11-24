@@ -9,6 +9,7 @@ import workspace.runtime.WorkspaceDirectories;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
+import workspace.transport.RpcCalls;
 
 /** Exercises the real authorized RPC route and durable metadata for every provider, without launching CLIs. */
 class AgentMoveTest {
@@ -39,14 +40,14 @@ class AgentMoveTest {
    }
    bind(true);
    var advertised:Null<AgentCatalog> = null;
-   client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,
+   RpcCalls.call(client, WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,
     function(catalog) advertised=catalog,function(error) throw error.message);
    server.poll();client.poll();
    require(advertised != null && advertised.canMove == true && advertised.canRename == true,kind+" omitted move support negotiation");
    var value:Null<AgentView> = null, code = "";
    function action(kind:String,expected:String,target:String,?order:Int):Void {
     value=null;code="";
-    client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"agent",action:kind,text:target,request:expected,order:order},1000,
+    RpcCalls.call(client, WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"agent",action:kind,text:target,request:expected,order:order},1000,
      function(result) value=result,function(error) code=error.code);
     server.poll();client.poll();
    }
@@ -88,7 +89,7 @@ class AgentMoveTest {
    store.fail=false;service.dispose();
    service=new WorkspaceAgentService("w","owner",directories.root,workspace.provider.AgentProviderFactory.built([make()]),store);bind(true);
    var listed:Null<AgentCatalog>=null;
-   client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,function(catalog) listed=catalog,function(error) throw error.message);
+   RpcCalls.call(client, WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,function(catalog) listed=catalog,function(error) throw error.message);
    server.poll();client.poll();
    require(listed != null && listed.records.length==1 && listed.records[0].order==3,kind+" lost its position across restart");
    store.fail=true;move("one","two");require(code=="storage_unavailable" && store.record.group=="one",kind+" accepted failed storage");

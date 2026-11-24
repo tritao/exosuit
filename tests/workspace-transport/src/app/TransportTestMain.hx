@@ -8,6 +8,7 @@ import workspace.service.*;
 import workspace.service.WorkspaceProtocol;
 import workspace.runtime.WorkspaceRelayHost;
 import haxeon.rpc.*;
+import workspace.transport.RpcCalls;
 
 class TransportTestMain {
 	static function require(value:Bool, message:String):Void {
@@ -83,7 +84,7 @@ class TransportTestMain {
 					if (current == null)
 						throw "Missing client";
 					snapshot = null;
-					connection.call(WorkspaceProtocol.QUERY, {workspace: "workspace"}, 1000, function(value) {
+					RpcCalls.call(connection, WorkspaceProtocol.QUERY, {workspace: "workspace"}, 1000, function(value) {
 						if (current.isCurrent(generation)) snapshot = value;
 					}, function(_) {});
 				}, 10, 40, 1000);
@@ -120,7 +121,7 @@ class TransportTestMain {
 				name: operation,
 				action: "update", parent: null, cwd: "/workspace", order: 0
 			};
-			connection.call(WorkspaceProtocol.GROUP, change, 1000, function(_) {
+			RpcCalls.call(connection, WorkspaceProtocol.GROUP, change, 1000, function(_) {
 				throw "Reply should be interrupted";
 			}, function(error) {
 				failures++;
@@ -153,7 +154,7 @@ class TransportTestMain {
 				throw "No reconnected client";
 			// The interrupted call, sent again with its operation id, answers the recorded outcome.
 			var known = false;
-			next.call(WorkspaceProtocol.GROUP, change, 1000, function(value) {
+			RpcCalls.call(next, WorkspaceProtocol.GROUP, change, 1000, function(value) {
 				known = value.sequence == sequence + 1;
 			}, function(_) {
 				throw "Retried group change failed";

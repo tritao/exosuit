@@ -3,6 +3,7 @@ package app;
 import testing.TestEndpoint;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.service.WorkspaceAgentProtocol;
 
 /** A second submission must use fresh admission metadata even while old history pages are still loading. */
@@ -18,7 +19,7 @@ class PiClientInputTest {
   server.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
    if(q.after!=null) {pending=ctx;return;}
    if(q.action=="read") {ctx.respond(view("token-0",false));return;}
-   if(q.text=="reject") {ctx.fail({code:"busy",message:"Keep the draft",ambiguous:false});return;}
+   if(q.text=="reject") {ctx.fail(new RpcError("busy", "Keep the draft", false));return;}
    require(q.request=="token-"+sequence,"Submission reused a token while history was loading");
    sequence++;ctx.respond(view("token-"+sequence,sequence==1));
   });

@@ -7,6 +7,7 @@ import haxeon.wire.MessagePack;
 import workspace.service.*;
 import workspace.service.WorkspaceProtocol;
 import workspace.transport.*;
+import workspace.transport.RpcCalls;
 
 private typedef Link = {var stream:MessageTransport; var client:RpcConnection; var server:RpcConnection;}
 
@@ -55,7 +56,7 @@ class NetworkLifecycleTests {
 			function(connection, _, accepted) {
 				ready++;
 				grants.push(accepted);
-				connection.call(WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) {
+				RpcCalls.call(connection, WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) {
 					require(value.epoch == "e", "Policy reconnect changed workspace epoch");
 					snapshots++;
 				}, function(error) {
@@ -88,7 +89,7 @@ class NetworkLifecycleTests {
 			if (connection == null)
 				throw "Missing policy connection";
 			var denied = false;
-			connection.call(WorkspaceProtocol.GROUP, {
+			RpcCalls.call(connection, WorkspaceProtocol.GROUP, {
 				workspace: "w",
 				epoch: "e",
 				operation: "denied",
@@ -171,7 +172,7 @@ class NetworkLifecycleTests {
 		};
 		var slow = open(), healthy = open();
 		var success = false;
-		healthy.client.call(WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) {
+		RpcCalls.call(healthy.client, WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(value) {
 			success = value.cursor == 0 && value.groups[0].cwd == "/workspace";
 		}, function(error) {
 			throw "Healthy peer failed: " + error.code;
@@ -194,7 +195,7 @@ class NetworkLifecycleTests {
 		require(slow.server.bufferedBytes() == 0 && healthy.server.isOpen() && healthy.client.isOpen(), "Overload retained bytes or closed unrelated peer");
 		// The surviving peer can still perform a later request after overload cleanup.
 		success = false;
-		healthy.client.call(WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(_) {
+		RpcCalls.call(healthy.client, WorkspaceProtocol.QUERY, {workspace: "w"}, 1000, function(_) {
 			success = true;
 		}, function(_) {
 			throw "Healthy follow-up failed";

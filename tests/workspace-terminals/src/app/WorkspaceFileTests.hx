@@ -19,6 +19,7 @@ import workspace.service.WorkspaceFileProtocol.FileReadCloseResult;
 import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
+import workspace.transport.RpcCalls;
 
 /** The server's side of a memory pair that remembers the largest message it sent: the encoded RPC replies as they go on the wire. */
 private class WireRecorder implements haxeon.rpc.MessageTransport {
@@ -566,7 +567,7 @@ class WorkspaceFileTests {
 		require(stat != null && stat.entry.kind == "file" && stat.entry.size == 11, "Root-relative stat returned incorrect file metadata");
 
 		var rawStat:Null<FileStatResult> = null;
-		client.call(WorkspaceFileProtocol.STAT,
+		RpcCalls.call(client, WorkspaceFileProtocol.STAT,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID + "-1", path: "read.raw"}, 1000,
 			function(value) rawStat = value, function(error) throw error.code);
 		poll(client, server);
@@ -608,7 +609,7 @@ class WorkspaceFileTests {
 		for (offsetAndLength in [{offset: Int64.ofInt(-1), length: 1},
 			{offset: Int64.ofInt(0), length: 262145}, {offset: Int64.ofInt(8), length: 1}]) {
 			var invalidRange = "";
-			client.call(WorkspaceFileProtocol.READ_CHUNK,
+			RpcCalls.call(client, WorkspaceFileProtocol.READ_CHUNK,
 				{workspace: "workspace", handle: readHandle.handle, offset: offsetAndLength.offset, length: offsetAndLength.length}, 1000,
 				function(_) throw "Invalid byte range was accepted", function(error) invalidRange = error.code);
 			poll(client, server);
@@ -620,7 +621,7 @@ class WorkspaceFileTests {
 		poll(client, server);
 		require(closed != null && closed.closed, "File read handle did not close");
 		var closedAgain:Null<FileReadCloseResult> = null;
-		client.call(WorkspaceFileProtocol.READ_CLOSE,
+		RpcCalls.call(client, WorkspaceFileProtocol.READ_CLOSE,
 			{workspace: "workspace", handle: readHandle.handle}, 1000,
 			function(value) closedAgain = value, function(error) throw error.code);
 		poll(client, server);
@@ -631,7 +632,7 @@ class WorkspaceFileTests {
 		var foreignServer = new RpcConnection(foreignPair.server, clock);
 		var revokeForeign = service.bind(foreignServer, [WorkspaceFileProtocol.READ]);
 		var foreignHandle = "";
-		foreignClient.call(WorkspaceFileProtocol.READ_CHUNK,
+		RpcCalls.call(foreignClient, WorkspaceFileProtocol.READ_CHUNK,
 			{workspace: "workspace", handle: readHandle.handle, offset: Int64.ofInt(0), length: 1}, 1000,
 			function(_) throw "Another connection reused a file read handle", function(error) foreignHandle = error.code);
 		poll(foreignClient, foreignServer);
@@ -642,7 +643,7 @@ class WorkspaceFileTests {
 		poll(client, server);
 		if (privateSearch == null) throw "Connection-scoped workspace search did not start";
 		var ownedSearch = privateSearch, foreignSearchError = "";
-		foreignClient.call(WorkspaceFileProtocol.SEARCH_PAGE,
+		RpcCalls.call(foreignClient, WorkspaceFileProtocol.SEARCH_PAGE,
 			{workspace: "workspace", root: ownedSearch.root, searchId: ownedSearch.searchId, limit: 1}, 1000,
 			function(_) throw "Another connection reused a workspace search handle", function(error) foreignSearchError = error.code);
 		poll(foreignClient, foreignServer);
@@ -654,7 +655,7 @@ class WorkspaceFileTests {
 		foreignServer.close();
 
 		var secondRootStat:Null<FileStatResult> = null;
-		client.call(WorkspaceFileProtocol.STAT,
+		RpcCalls.call(client, WorkspaceFileProtocol.STAT,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID + "-1", path: "other.txt"}, 1000,
 			function(value) secondRootStat = value, function(error) throw error.code);
 		poll(client, server);
@@ -662,7 +663,7 @@ class WorkspaceFileTests {
 			&& secondRootStat.entry.size == 12, "Stat did not stay within the selected authorized root");
 
 		var cases:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "folder", limit: 2, cursor: null}, 1000,
 			function(value) cases = value, function(error) throw error.code);
 		poll(client, server);
@@ -672,7 +673,7 @@ class WorkspaceFileTests {
 			"Directory listing changed filename case or failed the filesystem's exact ordering");
 
 		var unicodeOrder:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID + "-1", path: "unicode-order", limit: 2, cursor: null}, 1000,
 			function(value) unicodeOrder = value, function(error) throw error.code);
 		poll(client, server);
@@ -681,7 +682,7 @@ class WorkspaceFileTests {
 			"Directory entries were not ordered by their exact UTF-8 names");
 
 		var first:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 1, cursor: null}, 1000,
 			function(value) first = value, function(error) throw error.code);
 		poll(client, server);
@@ -695,14 +696,14 @@ class WorkspaceFileTests {
 		var cursorOne = pageOne.next;
 		File.saveContent(rootPath + "/new-after-snapshot.txt", "new entry");
 		var wrongRootCursor = "";
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID + "-1", path: "", limit: 1, cursor: cursorOne}, 1000,
 			function(_) throw "A cursor crossed between authorized roots", function(error) wrongRootCursor = error.code);
 		poll(client, server);
 		require(wrongRootCursor == "cursor_expired", "Directory cursor was not bound to its root");
 
 		var second:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 1, cursor: pageOne.next}, 1000,
 			function(value) second = value, function(error) throw error.code);
 		poll(client, server);
@@ -716,7 +717,7 @@ class WorkspaceFileTests {
 		var cursorTwo = pageTwo.next;
 
 		var repeated:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 1, cursor: cursorOne}, 1000,
 			function(value) repeated = value, function(error) throw error.code);
 		poll(client, server);
@@ -724,7 +725,7 @@ class WorkspaceFileTests {
 			"Retrying a page cursor changed its response");
 
 		var third:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 1, cursor: cursorTwo}, 1000,
 			function(value) third = value, function(error) throw error.code);
 		poll(client, server);
@@ -732,7 +733,7 @@ class WorkspaceFileTests {
 			"UTF-8 filename was lost from the paginated listing");
 
 		var refreshed:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 32, cursor: null}, 1000,
 			function(value) refreshed = value, function(error) throw error.code);
 		poll(client, server);
@@ -742,7 +743,7 @@ class WorkspaceFileTests {
 
 		for (path in ["../outside", "/etc/passwd", "C:/outside", "nested//file", "nested/."]) {
 			var invalidPath = "";
-			client.call(WorkspaceFileProtocol.STAT,
+			RpcCalls.call(client, WorkspaceFileProtocol.STAT,
 				{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: path}, 1000,
 				function(_) throw 'Workspace file service accepted invalid path "$path"', function(error) invalidPath = error.code);
 			poll(client, server);
@@ -750,7 +751,7 @@ class WorkspaceFileTests {
 		}
 
 		var missing = "";
-		client.call(WorkspaceFileProtocol.STAT,
+		RpcCalls.call(client, WorkspaceFileProtocol.STAT,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "missing.txt"}, 1000,
 			function(_) throw "Workspace file service reported a missing file as present", function(error) missing = error.code);
 		poll(client, server);
@@ -758,7 +759,7 @@ class WorkspaceFileTests {
 
 		File.saveContent(rootPath + "/changing.txt", "before");
 		var changingStat:Null<FileStatResult> = null;
-		client.call(WorkspaceFileProtocol.STAT,
+		RpcCalls.call(client, WorkspaceFileProtocol.STAT,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "changing.txt"}, 1000,
 			function(value) changingStat = value, function(error) throw error.code);
 		poll(client, server);
@@ -766,7 +767,7 @@ class WorkspaceFileTests {
 			throw "Changing file stat failed";
 		var changingRevision = changingStat.entry.revision;
 		var changingOpen:Null<FileReadOpenResult> = null;
-		client.call(WorkspaceFileProtocol.READ_OPEN,
+		RpcCalls.call(client, WorkspaceFileProtocol.READ_OPEN,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "changing.txt",
 				expectedRevision: changingRevision}, 1000,
 			function(value) changingOpen = value, function(error) throw error.code);
@@ -777,14 +778,14 @@ class WorkspaceFileTests {
 		Sys.sleep(0.01);
 		File.saveContent(rootPath + "/changing.txt", "after!");
 		var changedDuringRead = "";
-		client.call(WorkspaceFileProtocol.READ_CHUNK,
+		RpcCalls.call(client, WorkspaceFileProtocol.READ_CHUNK,
 			{workspace: "workspace", handle: changingHandle, offset: Int64.ofInt(0), length: 4}, 1000,
 			function(_) throw "Read handle mixed bytes after its file revision changed",
 			function(error) changedDuringRead = error.code);
 		poll(client, server);
 		require(changedDuringRead == "revision_changed", "Concurrent same-size write was not reported as revision_changed");
 		var staleOpen = "";
-		client.call(WorkspaceFileProtocol.READ_OPEN,
+		RpcCalls.call(client, WorkspaceFileProtocol.READ_OPEN,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "changing.txt",
 				expectedRevision: changingRevision}, 1000,
 			function(_) throw "Read open accepted a stale expected revision", function(error) staleOpen = error.code);
@@ -792,7 +793,7 @@ class WorkspaceFileTests {
 		require(staleOpen == "revision_changed", "Stale expected revision was not rejected");
 
 		var expiring:Null<FileListPage> = null;
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 1, cursor: null}, 1000,
 			function(value) expiring = value, function(error) throw error.code);
 		poll(client, server);
@@ -800,7 +801,7 @@ class WorkspaceFileTests {
 			throw "Expiring directory cursor was missing";
 		var expiringCursor = expiring.next;
 		var expiringRead:Null<FileReadOpenResult> = null;
-		client.call(WorkspaceFileProtocol.READ_OPEN,
+		RpcCalls.call(client, WorkspaceFileProtocol.READ_OPEN,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "a.txt", expectedRevision: null}, 1000,
 			function(value) expiringRead = value, function(error) throw error.code);
 		poll(client, server);
@@ -815,13 +816,13 @@ class WorkspaceFileTests {
 		var idleSearch = expiringSearch;
 		now += 31000;
 		var expiredRead = "";
-		client.call(WorkspaceFileProtocol.READ_CHUNK,
+		RpcCalls.call(client, WorkspaceFileProtocol.READ_CHUNK,
 			{workspace: "workspace", handle: expiringHandle, offset: Int64.ofInt(0), length: 1}, 1000,
 			function(_) throw "Expired file read handle was accepted", function(error) expiredRead = error.code);
 		poll(client, server);
 		require(expiredRead == "invalid_handle", "Idle file read handle expiry was not explicit");
 		var expired = "";
-		client.call(WorkspaceFileProtocol.LIST,
+		RpcCalls.call(client, WorkspaceFileProtocol.LIST,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "", limit: 1, cursor: expiringCursor}, 1000,
 			function(_) throw "Expired workspace cursor was accepted", function(error) expired = error.code);
 		poll(client, server);
@@ -837,14 +838,14 @@ class WorkspaceFileTests {
 		var deniedServer = new RpcConnection(deniedPair.server, clock);
 		var revokeDenied = service.bind(deniedServer, []);
 		var denied = "";
-		deniedClient.call(WorkspaceFileProtocol.ROOTS, {workspace: "workspace"}, 1000,
+		RpcCalls.call(deniedClient, WorkspaceFileProtocol.ROOTS, {workspace: "workspace"}, 1000,
 			function(_) throw "Peer without a file grant discovered roots", function(error) denied = error.code);
 		poll(deniedClient, deniedServer);
 		require(denied == "unauthorized", "File read capability was not enforced");
 
 		revoke();
 		var revoked = "";
-		client.call(WorkspaceFileProtocol.ROOTS, {workspace: "workspace"}, 1000,
+		RpcCalls.call(client, WorkspaceFileProtocol.ROOTS, {workspace: "workspace"}, 1000,
 			function(_) throw "Revoked peer retained file access", function(error) revoked = error.code);
 		poll(client, server);
 		require(revoked == "unauthorized", "Per-connection file grant revocation failed");

@@ -3,6 +3,7 @@ import workspace.client.WorkspaceLink;
 import workspace.service.WorkspaceTerminalProtocol;
 import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
+import workspace.transport.RpcCalls;
 
 /** Real native client aggregation and metadata actions across multiple RPC pages. */
 class TerminalCatalogClientTests {
@@ -24,7 +25,7 @@ class TerminalCatalogClientTests {
     if (connection == null) throw "Native connection missing";
     for (index in 0...9) {
       var done = false;
-      connection.call(WorkspaceTerminalProtocol.OPEN, {
+      RpcCalls.call(connection, WorkspaceTerminalProtocol.OPEN, {
         workspace: "workspace",
         instance: client.instance,
         id: "probe-" + index,
@@ -37,7 +38,7 @@ class TerminalCatalogClientTests {
       );
       while (!done) step();
       done = false;
-      connection.call(WorkspaceTerminalProtocol.TERMINATE, {
+      RpcCalls.call(connection, WorkspaceTerminalProtocol.TERMINATE, {
         workspace: "workspace",
         instance: client.instance,
         id: "probe-" + index

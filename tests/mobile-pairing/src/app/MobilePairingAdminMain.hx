@@ -15,6 +15,7 @@ import workspace.service.WorkspaceTerminalProtocol;
 import workspace.transport.NativeRpcConnector;
 import workspace.transport.NativeRpcHub;
 import workspace.client.WorkspaceIds;
+import workspace.transport.RpcCalls;
 
 /**
 	Desktop-side helper for the phone rigs: it talks to a workspace service's local socket (`--socket S`) to make the
@@ -111,7 +112,7 @@ class MobilePairingAdminMain {
 			if (!catalogReady) {
 				if (!catalogPending) {
 					catalogPending = true;
-					connection.call(WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: resume, watch: false}, 5000, function(page) {
+					RpcCalls.call(connection, WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: resume, watch: false}, 5000, function(page) {
 						catalogPending = false;
 						if (catalog == null || page.reset) {
 							if (page.reset) {
@@ -147,7 +148,7 @@ class MobilePairingAdminMain {
 						// No seeded group exists any more: with none, the session goes to the workspace root.
 						var group = groups.length > 0 ? groups[0].id : WorkspaceProtocol.ROOT_GROUP;
 						var h1 = 5381, h2 = 52711; for (c in 0...name.length) { h1 = ((h1 * 33) ^ name.charCodeAt(c)) & 0x7fffffff; h2 = ((h2 * 31) + name.charCodeAt(c)) & 0x7fffffff; } var id = "agent-" + StringTools.hex(h1, 8).toLowerCase() + StringTools.hex(h2, 8).toLowerCase();
-						connection.call(WorkspaceAgentProtocol.CREATE, {workspace: "workspace", instance: instance, id: id, group: group, name: name,
+						RpcCalls.call(connection, WorkspaceAgentProtocol.CREATE, {workspace: "workspace", instance: instance, id: id, group: group, name: name,
 							thread: null}, 20000, function(record) {
 							emit(Json.stringify({created: true, id: record.id, name: record.name, group: record.group, cwd: record.cwd,
 								workspace: workspaceId}));
@@ -159,7 +160,7 @@ class MobilePairingAdminMain {
 						started = true;
 						var h1 = 5381, h2 = 52711; for (c in 0...name.length) { h1 = ((h1 * 33) ^ name.charCodeAt(c)) & 0x7fffffff; h2 = ((h2 * 31) + name.charCodeAt(c)) & 0x7fffffff; }
 						var id = "workspace-terminal-" + StringTools.hex(h1, 8).toLowerCase() + StringTools.hex(h2, 8).toLowerCase();
-						connection.call(WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: id, create: true, columns: 80, rows: 24,
+						RpcCalls.call(connection, WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: id, create: true, columns: 80, rows: 24,
 							group: null, directory: null, watch: null, theme: null, agentProvider: provider}, 20000, function(info) {
 							emit(Json.stringify({created: true, id: info.id, state: info.state, agentProvider: info.agentProvider, workspace: workspaceId}));
 							done = true;
@@ -177,16 +178,16 @@ class MobilePairingAdminMain {
 					var terminalId = "workspace-terminal-" + StringTools.hex(hash1, 8).toLowerCase() + StringTools.hex(hash2, 8).toLowerCase();
 					if (holdStep == 0) {
 						holdStep = 1;
-						connection.call(WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: terminalId, create: false,
+						RpcCalls.call(connection, WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: terminalId, create: false,
 							columns: holdColumns, rows: holdRows, group: null, directory: null, watch: true, theme: null, agentProvider: null}, 20000,
 							function(_) holdStep = 2, function(error) failure = "attach failed: " + error.code + " " + error.message);
 					} else if (holdStep == 2) {
 						holdStep = 3;
-						connection.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "workspace", instance: instance, id: terminalId, claim: true,
+						RpcCalls.call(connection, WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "workspace", instance: instance, id: terminalId, claim: true,
 							takeover: true}, 5000, function(_) holdStep = 4, function(error) failure = "take control failed: " + error.code);
 					} else if (holdStep == 4) {
 						holdStep = 5;
-						connection.call(WorkspaceTerminalProtocol.RESIZE, {workspace: "workspace", instance: instance, id: terminalId, columns: holdColumns,
+						RpcCalls.call(connection, WorkspaceTerminalProtocol.RESIZE, {workspace: "workspace", instance: instance, id: terminalId, columns: holdColumns,
 							rows: holdRows, theme: null}, 5000, function(_) {
 							holdStep = 6;
 							holdUntil = clock() + holdSeconds * 1000;
@@ -196,12 +197,12 @@ class MobilePairingAdminMain {
 				case "prompt":
 					if (!sent) {
 						sent = true;
-						connection.call(WorkspaceAgentProtocol.ACTION, {workspace: "workspace", instance: instance, id: sessionId, action: "prompt",
+						RpcCalls.call(connection, WorkspaceAgentProtocol.ACTION, {workspace: "workspace", instance: instance, id: sessionId, action: "prompt",
 							text: text, request: null}, 20000, function(_) {}, function(error) failure = "prompt failed: " + error.code + " " + error.message);
 					} else if (!reading && clock() >= nextRead) {
 						reading = true;
 						nextRead = clock() + 500;
-						connection.call(WorkspaceAgentProtocol.ACTION, {workspace: "workspace", instance: instance, id: sessionId, action: "read",
+						RpcCalls.call(connection, WorkspaceAgentProtocol.ACTION, {workspace: "workspace", instance: instance, id: sessionId, action: "read",
 							text: "", request: null}, 5000, function(value) {
 							reading = false;
 							view = value;
@@ -255,18 +256,18 @@ class MobilePairingAdminMain {
 			if (connection == null || pending || step >= total) continue;
 			pending = true;
 			if (instance == null) {
-				connection.call(WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: null, watch: false}, 5000, function(page) {
+				RpcCalls.call(connection, WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: null, watch: false}, 5000, function(page) {
 					pending = false;
 					instance = page.instance;
 				}, done);
 			} else if (epoch == null) {
-				connection.call(WorkspaceProtocol.QUERY, {workspace: "workspace"}, 5000, function(snapshot) {
+				RpcCalls.call(connection, WorkspaceProtocol.QUERY, {workspace: "workspace"}, 5000, function(snapshot) {
 					pending = false;
 					epoch = snapshot.epoch;
 				}, done);
 			} else if (step < groups.length) {
 				var item = groups[step], id = WorkspaceIds.create("group");
-				connection.call(WorkspaceProtocol.GROUP, {workspace: "workspace", epoch: epoch, operation: WorkspaceIds.create("operation"), group: id,
+				RpcCalls.call(connection, WorkspaceProtocol.GROUP, {workspace: "workspace", epoch: epoch, operation: WorkspaceIds.create("operation"), group: id,
 					expectedRevision: 0, name: item.name, action: "create", parent: WorkspaceProtocol.parentFor(group(item.parent)), cwd: null,
 					order: step}, 5000, function(result) {
 					pending = false;
@@ -276,7 +277,7 @@ class MobilePairingAdminMain {
 				}, done);
 			} else if (step < groups.length + sessions.length) {
 				var item = sessions[step - groups.length];
-				connection.call(WorkspaceAgentProtocol.CREATE, {workspace: "workspace", instance: instance, id: WorkspaceIds.create("agent"),
+				RpcCalls.call(connection, WorkspaceAgentProtocol.CREATE, {workspace: "workspace", instance: instance, id: WorkspaceIds.create("agent"),
 					group: group(item.group), name: item.name, thread: null, provider: item.provider}, 20000, function(record) {
 					pending = false;
 					sessionIds.push(record.id);
@@ -284,7 +285,7 @@ class MobilePairingAdminMain {
 				}, done);
 			} else {
 				var item = terminals[step - groups.length - sessions.length];
-				connection.call(WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: WorkspaceIds.create("workspace-terminal"),
+				RpcCalls.call(connection, WorkspaceTerminalProtocol.OPEN, {workspace: "workspace", instance: instance, id: WorkspaceIds.create("workspace-terminal"),
 					create: true, columns: 120, rows: 30, group: group(item.group), directory: null, watch: null, theme: null, agentProvider: null}, 20000,
 					function(info) {
 					pending = false;

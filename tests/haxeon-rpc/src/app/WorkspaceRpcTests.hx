@@ -3,6 +3,7 @@ package app;
 import haxeon.rpc.*;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceService;
+import workspace.transport.RpcCalls;
 
 private typedef Link = {var client:RpcConnection; var server:RpcConnection; var transport:MemoryTransport; var revoke:Void->Void;}
 
@@ -43,7 +44,7 @@ class WorkspaceRpcTests {
 	/** What a QUERY on `link` answers, after pumping it. */
 	static function query(link:Link):WorkspaceSnapshot {
 		var result:Null<WorkspaceSnapshot> = null;
-		link.client.call(WorkspaceProtocol.QUERY, {workspace: "workspace"}, 100, function(value) result = value, function(error) throw error.code);
+		RpcCalls.call(link.client, WorkspaceProtocol.QUERY, {workspace: "workspace"}, 100, function(value) result = value, function(error) throw error.code);
 		pump(link);
 		var answered = result;
 		if (answered == null)
@@ -67,7 +68,7 @@ class WorkspaceRpcTests {
 		var outcomes:Array<RenameResult> = [], errors:Array<String> = [];
 		var ambiguity:Array<Bool> = [];
 		var rename = function(link:Link, operation:String, revision:Int, name:String):Void {
-			link.client.call(WorkspaceProtocol.GROUP, {
+			RpcCalls.call(link.client, WorkspaceProtocol.GROUP, {
 				workspace: "workspace",
 				epoch: "epoch-1",
 				operation: operation,
@@ -138,7 +139,7 @@ class WorkspaceRpcTests {
 		var fresh = query(restarted);
 		require(fresh.epoch == "epoch-2" && fresh.cursor == 0 && fresh.groups[0].name == "Restarted", "epoch restart failed to replace snapshot");
 		var staleError = "";
-		restarted.client.call(WorkspaceProtocol.GROUP, {
+		RpcCalls.call(restarted.client, WorkspaceProtocol.GROUP, {
 			workspace: "workspace",
 			epoch: "epoch-1",
 			operation: "rename-2",

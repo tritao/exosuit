@@ -2,6 +2,7 @@ package app;
 
 import haxeon.rpc.*;
 import haxe.io.Bytes;
+import workspace.transport.RpcCalls;
 
 private class Attempt implements RpcConnectAttempt {
 	public var cancelled:Bool = false;
@@ -56,7 +57,7 @@ class RpcLifecycleTests {
 			if (at == null) throw "retryNow fixture: no wake time";
 			return at;
 		};
-		var offline = function(index:Int) connector.callbacks[index](Failed({code: "offline", message: "offline", ambiguous: false}, true));
+		var offline = function(index:Int) connector.callbacks[index](Failed(new RpcError("offline", "offline", false), true));
 		// Three failed dials grow the backoff to its cap (10, 20, 40).
 		for (index in 0...3) {
 			client.poll();
@@ -87,11 +88,11 @@ class RpcLifecycleTests {
 		var service = server.connection;
 		if (service == null)
 			throw "missing server connection";
-		var method = new RpcMethod<String, String>(100, Bytes.ofString, function(bytes:Bytes) return bytes.toString(), Bytes.ofString,
+		var method = new RpcMethod<String, String>(100, function(value:String) return Bytes.ofString(value), function(bytes:Bytes) return bytes.toString(), function(value:String) return Bytes.ofString(value),
 			function(bytes:Bytes) return bytes.toString());
 		service.register(method, function(_, _) {});
 		var failed:Null<RpcError> = null;
-		connection.call(method, "pending", 1000, function(_) throw "A dropped call completed", function(error) failed = error);
+		RpcCalls.call(connection, method, "pending", 1000, function(_) throw "A dropped call completed", function(error) failed = error);
 		service.poll();
 		client.retryNow(false);
 		client.poll();
@@ -150,7 +151,7 @@ class RpcLifecycleTests {
 			"policy widened or hook mutated it");
 		var first = ready[0];
 		require(client.isCurrent(1), "fresh generation guard false");
-		var method = new RpcMethod<String, String>(100, Bytes.ofString, function(bytes:Bytes) return bytes.toString(), Bytes.ofString,
+		var method = new RpcMethod<String, String>(100, function(value:String) return Bytes.ofString(value), function(bytes:Bytes) return bytes.toString(), function(value:String) return Bytes.ofString(value),
 			function(bytes:Bytes) return bytes.toString());
 		var service = server.connection;
 		if (service == null)
@@ -160,7 +161,7 @@ class RpcLifecycleTests {
 			retained.push(context);
 		});
 		var failures = 0, ambiguous = false;
-		first.call(method, "mutation", 25, function(value) {
+		RpcCalls.call(first, method, "mutation", 25, function(value) {
 			throw "old request completed";
 		}, function(error) {
 			failures++;
@@ -226,13 +227,13 @@ class RpcLifecycleTests {
 		client = new RpcClient(connector, clock, function() return 1.0, options, function(_, _, _) {}, 10, 40, 30);
 		for (index in 0...4) {
 			client.poll();
-			connector.callbacks[index](Failed({code: "offline", message: "offline", ambiguous: false}, true));
+			connector.callbacks[index](Failed(new RpcError("offline", "offline", false), true));
 			var expected = index == 0 ? 10.0 : index == 1 ? 20.0 : 40.0;
 			require(client.nextWakeAt() == now + expected, "backoff failed to double/cap");
 			now += expected;
 		}
 		client.poll();
-		connector.callbacks[4](Failed({code: "authentication_refused", message: "denied", ambiguous: false}, true));
+		connector.callbacks[4](Failed(new RpcError("authentication_refused", "denied", false), true));
 		require(client.state == Closed
 			&& client.lastError != null
 			&& client.lastError.code == "authentication_refused", "authentication refusal retried");
@@ -248,13 +249,15 @@ class RpcLifecycleTests {
 		client.poll();
 		pair = MemoryTransport.pair(4096, 16);
 		connector.callbacks[0](Opened(pair.client));
-		server = RpcHandshake.server(pair.server, clock, new RpcPeerOptions("future/1", ["read"], [], 50, 1024, 4, 4096, 2));
-		pump(client, server);
+		// A peer of a later protocol: RpcPeerOptions no longer takes versions, so it answers the Hello by hand.
+		client.poll();
+		require(pair.server.receive() != null, "client sent no Hello");
+		pair.server.send(RpcProtocol.encode(Welcome(RpcProtocol.VERSION + 1, RpcProtocol.CODEC_VERSION, "future/1", ["read"]), 1024));
+		for (_ in 0...4)
+			client.poll();
 		require(client.state == Closed
 			&& client.lastError != null
-			&& client.lastError.code == "unsupported_protocol"
-			&& server.connection == null
-			&& server.isFinished(),
+			&& client.lastError.code == "unsupported_protocol",
 			"incompatible version not refused");
 		// An unanswered Hello expires without publishing a connection.
 		now = 0;
@@ -279,7 +282,7 @@ class RpcLifecycleTests {
 		now = 0;
 		pair = MemoryTransport.pair();
 		var negotiating = RpcHandshake.client(pair.client, clock, options, options.offered());
-		server = RpcHandshake.server(pair.server, clock, options, function(_, _) return {code: "unauthorized", message: "denied", ambiguous: false});
+		server = RpcHandshake.server(pair.server, clock, options, function(_, _) return new RpcError("unauthorized", "denied", false));
 		for (index in 0...8) {
 			negotiating.poll();
 			server.poll();
@@ -291,22 +294,27 @@ class RpcLifecycleTests {
 			"authorization refusal lost");
 
 		// Codec compatibility is independent; required capabilities cannot disappear.
-		for (codec in 1...3) {
-			pair = MemoryTransport.pair();
-			negotiating = RpcHandshake.client(pair.client, clock, options, options.offered());
-			server = RpcHandshake.server(pair.server, clock, new RpcPeerOptions("peer", codec == 1 ? [] : ["read"], [], 50, 1024, 4, 4096, 1, codec));
-			for (index in 0...8) {
-				negotiating.poll();
-				server.poll();
-			}
-			require(negotiating.failure != null && negotiating.failure.code == (codec == 1 ? "missing_capability" : "unsupported_codec"),
-				"compatibility gate failed");
+		pair = MemoryTransport.pair();
+		negotiating = RpcHandshake.client(pair.client, clock, options, options.offered());
+		server = RpcHandshake.server(pair.server, clock, new RpcPeerOptions("peer", [], [], 50, 1024, 4, 4096));
+		for (index in 0...8) {
+			negotiating.poll();
+			server.poll();
 		}
+		require(negotiating.failure != null && negotiating.failure.code == "missing_capability", "compatibility gate failed");
+		// A peer of another codec answers by hand: RpcPeerOptions no longer takes versions.
 		pair = MemoryTransport.pair();
 		negotiating = RpcHandshake.client(pair.client, clock, options, options.offered());
 		negotiating.poll();
 		pair.server.receive();
-		pair.server.send(RpcProtocol.encode(Welcome(1, 1, "peer", ["read", "secret"]), 1024));
+		pair.server.send(RpcProtocol.encode(Welcome(RpcProtocol.VERSION, RpcProtocol.CODEC_VERSION + 1, "peer", ["read"]), 1024));
+		negotiating.poll();
+		require(negotiating.failure != null && negotiating.failure.code == "unsupported_codec", "codec gate failed");
+		pair = MemoryTransport.pair();
+		negotiating = RpcHandshake.client(pair.client, clock, options, options.offered());
+		negotiating.poll();
+		pair.server.receive();
+		pair.server.send(RpcProtocol.encode(Welcome(RpcProtocol.VERSION, RpcProtocol.CODEC_VERSION, "peer", ["read", "secret"]), 1024));
 		negotiating.poll();
 		require(negotiating.failure != null && negotiating.failure.code == "capability_widening" && negotiating.connection == null,
 			"forged Welcome widened policy");

@@ -15,6 +15,7 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
+import workspace.transport.RpcCalls;
 
 private typedef Link = {var client:RpcConnection; var server:RpcConnection;}
 
@@ -115,7 +116,7 @@ class CatalogTestMain {
 	static function read(resume:Null<String>, watch = false, workspace:String = "ws1"):Outcome {
 		now += 1;
 		var outcome:Outcome = {page: null, error: null};
-		client.call(WorkspaceCatalogProtocol.CATALOG, {ref: ref(workspace), resume: resume, watch: watch}, 1000, function(page) outcome.page = page,
+		RpcCalls.call(client, WorkspaceCatalogProtocol.CATALOG, {ref: ref(workspace), resume: resume, watch: watch}, 1000, function(page) outcome.page = page,
 			function(error:RpcError) outcome.error = error.code);
 		pump();
 		return outcome;
@@ -480,7 +481,7 @@ class CatalogTestMain {
 		check(changes.length == 1, "watch: one hint after a change, got " + changes.length);
 		check(terminalIds(page(token)) == "t100", "watch: the hint's change can be read");
 		var unwatched:Null<WorkspaceRef> = null;
-		client.call(WorkspaceCatalogProtocol.UNWATCH, ref(), 1000, function(r) unwatched = r, function(e) {});
+		RpcCalls.call(client, WorkspaceCatalogProtocol.UNWATCH, ref(), 1000, function(r) unwatched = r, function(e) {});
 		pump();
 		check(unwatched != null && service.watcherCount() == 0, "unwatch: acknowledged and removed");
 		terminals.push(terminal("t101"));
