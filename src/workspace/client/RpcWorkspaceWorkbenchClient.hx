@@ -784,7 +784,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     var expectedRoot=root(), done=false, ack=false;
     function current():Bool return rpc()==connection && instance()==generation && root()==expectedRoot && agentTokens.get(id)==selected;
     function fail(message:String):Void {
-      if (!done && current()) { done=true; failure({code:"invalid_snapshot",message:message,ambiguous:false},ack); }
+      if (!done && current()) { done=true; failure(new RpcError("invalid_snapshot", message, false),ack); }
     }
     if (expectedRoot == null) { fail("Workspace is unavailable"); return; }
     RpcCalls.call(connection, WorkspaceAgentProtocol.ACTION,query,query.action == "rename-native" ? 60000 : 20000,function(view) {
@@ -1192,7 +1192,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       function() return rpc() == connection && instance() == owner && root() == record.workspaceRoot && canReadTerminals() && canControlTerminals(),
       function(_) catalogCompleted(connection),function(error) {
         if (error.code == "terminal_running") {catalogCompleted(connection);return;}
-        catalogFailed(connection,{code:error.code,message:WorkspaceTerminalRestart.message(error),ambiguous:false});
+        catalogFailed(connection,new RpcError(error.code, WorkspaceTerminalRestart.message(error), false));
       });
   }
 
@@ -1225,7 +1225,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     },5000,function(result) {
       if(rpc()!=connection || instance()!=owner || root()!=scope) return;
       if(result.id!=record.id || result.instance!=owner || result.workspace!="workspace") {
-        catalogFailed(connection,{code:"invalid_response",message:"Terminal close could not be confirmed. Refresh before retrying.",ambiguous:false});return;
+        catalogFailed(connection,new RpcError("invalid_response", "Terminal close could not be confirmed. Refresh before retrying.", false));return;
       }
       if(catalog!=null) catalog.terminals=[for(current in catalog.terminals) if(current.id!=record.id) current];
       catalogCompleted(connection);
@@ -1235,7 +1235,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         ? "This workspace service cannot close running terminals."
         : error.ambiguous || error.code=="timeout" ? "Terminal close could not be confirmed. Refresh before retrying; its views have been kept open."
         : error.message;
-      catalogFailed(connection,{code:error.code,message:message,ambiguous:false});
+      catalogFailed(connection,new RpcError(error.code, message, false));
     });
   }
 
