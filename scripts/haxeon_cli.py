@@ -24,6 +24,8 @@ def run_cli(
     environment = os.environ.copy()
     environment["HAXEON_ROOT"] = str(haxeon_root)
     environment["HAXEON_HOME"] = str(haxeon_root)
+    # The CLI run as `hl haxeon-cli.hl` finds its SDK from this, as the haxeon launcher tells it.
+    environment["HAXEON_SDK"] = str(haxeon_root / "out" / "sdk")
     if environment_overrides:
         environment.update(environment_overrides)
 

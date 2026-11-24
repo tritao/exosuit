@@ -145,6 +145,7 @@ function Read-Stamp { try { return [IO.File]::ReadAllText("$liveModule.live.stam
 function Start-LiveCompile {
     $projectPath = Write-HaxeProject $liveOut
     $env:HAXEON_HOME = $HaxeonRoot
+    $env:HAXEON_SDK = Join-Path $HaxeonRoot 'out/sdk'
     $info = [Diagnostics.ProcessStartInfo]::new((Get-Command pwsh).Source)
     $compileArguments = '"' + $Cli + '" build --compiler-only --live --project "' + $projectPath + '"'
     foreach ($argument in '-NoProfile', '-File', $script:Guard, '-TimeoutSeconds', '900', '-Exe', $Hl, "-ArgLine:$compileArguments",

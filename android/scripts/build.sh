@@ -63,7 +63,7 @@ text = json.dumps(project, indent=2)
 if not os.path.exists(path) or open(path).read() != text:
     open(path, "w").write(text)
 PY
-    HAXEON_HOME="$HAXEON_ROOT" DYLD_LIBRARY_PATH="$HAXEON_ROOT/out:${DYLD_LIBRARY_PATH:-}" LD_LIBRARY_PATH="$HAXEON_ROOT/out:${LD_LIBRARY_PATH:-}" \
+    HAXEON_HOME="$HAXEON_ROOT" HAXEON_SDK="$HAXEON_ROOT/out/sdk" DYLD_LIBRARY_PATH="$HAXEON_ROOT/out:${DYLD_LIBRARY_PATH:-}" LD_LIBRARY_PATH="$HAXEON_ROOT/out:${LD_LIBRARY_PATH:-}" \
         "$HL" "$CLI" build --compiler-only --project "$out/haxeon.json" > "$out/compile.log" 2>&1 || { tail -40 "$out/compile.log" >&2; exit 1; }
     python3 - "$out/output/host/main.hl" "$ASSETS" <<'PY'
 import json, shutil, sys

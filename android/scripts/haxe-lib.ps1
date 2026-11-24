@@ -34,6 +34,7 @@ function Write-HaxeProject([string]$out) {
 function Invoke-HaxeCompile([string]$out, [string]$assets, [int]$timeout = 900, [switch]$Live) {
     $projectPath = Write-HaxeProject $out
     $env:HAXEON_HOME = $HaxeonRoot
+    $env:HAXEON_SDK = Join-Path $HaxeonRoot 'out/sdk'
     Invoke-Guarded $Hl ('"' + $Cli + '" build --compiler-only ' + $(if ($Live) { '--live ' } else { '' }) + '--project "' + $projectPath + '"') `
         (Join-Path $out 'compile.log') $timeout
     Publish-HaxeModule $out $assets
