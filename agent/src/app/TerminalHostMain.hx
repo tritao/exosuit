@@ -415,6 +415,11 @@ class TerminalHostMain {
 				ending = true;
 			}
 		}
+		// The listening socket goes first, before `host.json` below: on macOS and Linux its path is the same for every host of
+		// this terminal (TerminalHosts.socketPath), and closing it removes that path. A Restart starts the next host once
+		// `host.json` is gone (TerminalHosts.endExited), so a socket removed after that would be the new host's.
+		if (listening) hub.forget(listener);
+		listening = false;
 		// Let a last EXITED reach the service before the pipe closes.
 		var last = owner;
 		if (last != null) {
@@ -435,7 +440,6 @@ class TerminalHostMain {
 		try FileSystem.deleteFile(lease) catch (_:Dynamic) {}
 		pty.close();
 		emulator.close();
-		if (listening) hub.forget(listener);
 		hub.dispose();
 		runtime.dispose();
 		log(logPath, "host ended");

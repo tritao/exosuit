@@ -902,8 +902,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         save(starting);
         if (t.backend != null) t.backend.close();
         t.backend = spawnBackend(starting, t.columns, t.rows, agent, prelude);
-        // Views replay what the new host starts from (the prelude begins with a reset), then the new program's output.
-        t.replay.output(prelude, prelude.length);
+        // Views take the new host's screen: it starts from the prelude (which begins with a reset), and holds what the new
+        // program writes before this service is attached to the host, which no output event carries. The journal skips one
+        // so every view, also one that had read all of the ended program's output, finds a gap and asks for that screen.
+        t.replay.continueFrom(t.replay.endCursor + 1, t.replay.endOffset);
         var restartingTheme:Null<TerminalTheme> = r.theme;
         t.state = "running"; t.exitCode = 0;
         applyTheme(t, restartingTheme);

@@ -82,6 +82,13 @@ class TestTerminals {
     }
   }
 
+  static function zombie(pid:Int):Bool {
+    var ps = new sys.io.Process("ps", ["-o", "stat=", "-p", Std.string(pid)]);
+    var state = try StringTools.trim(ps.stdout.readAll().toString()) catch (_:Dynamic) "";
+    ps.close();
+    return StringTools.startsWith(state, "Z");
+  }
+
   /** Kills the hosts whose host.json names a running process; returns how many there were. */
   static function killRunning():Int {
     var killed = 0;
@@ -93,12 +100,18 @@ class TestTerminals {
         var host:Dynamic = Json.parse(File.getContent(path));
         var pid:Int = host.pid, executable:String = host.executable;
         if (!app.AgentNative.processAlive(pid, executable)) continue;
-        killed++;
         var handle = app.AgentNative.openProcessIdentity(pid, executable);
         if (handle != null) {
+          killed++;
           app.AgentNative.terminateProcess(handle);
           app.AgentNative.closeProcessIdentity(handle);
-        }
+        } else if (Sys.systemName() != "Windows") {
+          // macOS has no process handle (openProcessIdentity returns null): the host is signalled by its pid. It is this
+          // process's child, so once it has ended it stays a zombie, which kill(pid, 0) still finds, until this process exits.
+          if (zombie(pid)) continue;
+          killed++;
+          Sys.command("kill", [Std.string(pid)]);
+        } else killed++;
       } catch (_:Dynamic) {}
     }
     return killed;

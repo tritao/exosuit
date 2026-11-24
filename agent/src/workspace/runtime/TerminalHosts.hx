@@ -459,7 +459,12 @@ class TerminalHosts {
 
 	/**
 		Kills the host of `terminal` once its program has ended and its last screen is written: it keeps nothing more, and
-		a Restart must not wait for it to go on its own. Waits up to a second for it to be gone.
+		a Restart must not wait for it to go on its own. Waits up to END_EXITED_SECONDS for it to be gone.
+
+		Where no process handle can be opened (macOS has none: `openProcessIdentity` returns null) the host is not killed,
+		but it is still waited for: a host whose ended program this service heard of was told to END when the service let
+		go of it (HostedPtyBackend.close), and one with no service attached ends by itself. Until it has gone its
+		`host.json` names a running process, and a Restart that did not wait took that host back instead of restarting.
 	**/
 	public function endExited(terminal:String):Void {
 		var directory = folder(terminal);
@@ -468,13 +473,17 @@ class TerminalHosts {
 		if (pid <= 0 || executable == null) return;
 		try {
 			var held = app.AgentNative.openProcessIdentity(pid, executable);
-			if (held == null) return;
-			app.AgentNative.terminateProcess(held);
-			app.AgentNative.closeProcessIdentity(held);
+			if (held != null) {
+				app.AgentNative.terminateProcess(held);
+				app.AgentNative.closeProcessIdentity(held);
+			}
 		} catch (_:Dynamic) {}
-		var until = Sys.time() + 1;
+		var until = Sys.time() + END_EXITED_SECONDS;
 		while (runs(directory) && Sys.time() < until) Sys.sleep(0.02);
 	}
+
+	/** How long a Restart waits for the host of an ended program to be gone: a host told to END flushes for up to half a second, then closes its PTY and runtime. */
+	static inline final END_EXITED_SECONDS = 2.0;
 
 	/**
 		Removes the spec a host was started with, for a host that did not start (or was given up on before it was ready):

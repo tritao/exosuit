@@ -34,7 +34,9 @@ def end_hosts(fixture):
             try: os.kill(pid,9)
             except OSError: pass
 with tempfile.TemporaryDirectory(prefix='extty-',ignore_cleanup_errors=True) as temporary:
-    fixture=Path(temporary); root=fixture/'project'; root.mkdir(); state=fixture/'state'
+    # Resolved: macOS's /tmp is a link to /private/tmp, and the service names its folder by the real path, which a terminal
+    # view compares with the root it was given (RpcTerminalBackend.serves).
+    fixture=Path(temporary).resolve(); root=fixture/'project'; root.mkdir(); state=fixture/'state'
     environment=dict(isolated_environment(state,SERVICE,'workspace-terminals'),SHELL='/bin/sh',EXOSUIT_SERVICE_IDLE_SECONDS=IDLE)
     log=service_log(state,workspace_id(root))
     def client(mode,timeout=40): run_tree([*RUNNER,mode,str(root),str(SERVICE)],environment,timeout=timeout)
