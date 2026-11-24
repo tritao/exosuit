@@ -14,13 +14,13 @@ class WorkspaceTerminalRestart {
   RpcCalls.call(connection, WorkspaceTerminalProtocol.OPEN, {
    workspace:"workspace",instance:instance,id:id,create:false,columns:80,rows:24
   },3000,function(info) {
-   if (!current()) {failed({code:"disconnected",message:"Workspace connection or permissions changed",ambiguous:false});return;}
-   if (info.id != id) {failed({code:"invalid_response",message:"Invalid terminal identity",ambiguous:false});return;}
+   if (!current()) {failed(new RpcError("disconnected", "Workspace connection or permissions changed", false));return;}
+   if (info.id != id) {failed(new RpcError("invalid_response", "Invalid terminal identity", false));return;}
    if (info.state == "running" || info.state == "starting") {
-    failed({code:"terminal_running",message:"This terminal is already running",ambiguous:false});return;
+    failed(new RpcError("terminal_running", "This terminal is already running", false));return;
    }
    if (info.restartable != true) {
-    failed({code:"unsupported",message:"This workspace service cannot restart this terminal",ambiguous:false});return;
+    failed(new RpcError("unsupported", "This workspace service cannot restart this terminal", false));return;
    }
    RpcCalls.call(connection, WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:instance,id:id,theme:theme},5000,done,failed);
   },failed);
