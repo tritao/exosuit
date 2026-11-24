@@ -390,7 +390,9 @@ class TerminalHosts {
 	/** A host's socket: a short name from its folder, in `terminal-sockets` beside the runtime copies. */
 	function socketPath(hostDirectory:String):String {
 		var sockets = Path.join([Path.directory(runtimeBase), "terminal-sockets"]);
-		if (!FileSystem.exists(sockets)) FileSystem.createDirectory(sockets);
+		// NativeKit listens only in a folder this user owns with mode 700; a plain createDirectory takes the umask (755).
+		if (!FileSystem.exists(Path.directory(sockets))) FileSystem.createDirectory(Path.directory(sockets));
+		if (!app.AgentNative.prepareDirectory(sockets)) throw "Terminal socket folder must be private and owned by this user";
 		return Path.join([sockets, Sha256.encode(hostDirectory).substr(0, 16) + ".sock"]);
 	}
 
