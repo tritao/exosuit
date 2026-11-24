@@ -70,7 +70,7 @@ def main() -> int:
         print(f"Unable to build the workspace agent: {error}", file=sys.stderr)
         return 127
 
-    # --watch rebuilds and relaunches the app after source edits. --live also watches, but patches Haxe
+    # --watch rebuilds and relaunches the app after source edits. --live (haxeon's own `run --watch`) patches Haxe
     # edits into the running app instead of relaunching it. --profile records each launch with the
     # profiler and writes a Perfetto trace when it ends; the other --profile-* options (start, duration,
     # max size, window) go to haxeon with it. --strict-live is --live that reports an edit it cannot patch
@@ -93,9 +93,12 @@ def main() -> int:
         arguments.append("--self-hosted")
     if watch or live:
         arguments.append("--watch")
+    if watch and not live:
+        # haxeon patches a watched app by itself; plain --watch keeps relaunching it.
+        arguments.append("--restart")
     if live:
         # Live builds carry patch history and must not overwrite the ordinary app build.
-        arguments.extend(["--live", "--output", str(root_dir / "graphical" / "build" / "host" / "live.hl")])
+        arguments.extend(["--output", str(root_dir / "graphical" / "build" / "host" / "live.hl")])
     if strict_live:
         arguments.append("--strict-live")
     arguments.extend(profile_arguments)
