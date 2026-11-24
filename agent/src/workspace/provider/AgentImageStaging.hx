@@ -134,9 +134,9 @@ class AgentImageStaging {
       entry.path = path;
       persist();
       if (FileSystem.exists(path)) throw "Image identity already exists";
-      // The private directory and journal own this exact path. Writing it
-      // directly avoids an untracked image-bearing atomic temporary file.
-      File.saveBytes(path,data);
+      // The private directory and journal own this exact path. Created from a temporary the process makes mode 0600
+      // (a plain write takes the umask, 0644, which secureFile refuses on macOS and Linux) and never replaces a file.
+      sys.io.AtomicFile.createBytes(path,data);
       if (!secureFile(path)) throw "Could not protect staged image";
       entry.bytes = new BytesBuffer();
     } catch (_:Dynamic) { try if (FileSystem.exists(path)) FileSystem.deleteFile(path) catch (_:Dynamic) {} discard(entry); throw "Could not stage image"; }
