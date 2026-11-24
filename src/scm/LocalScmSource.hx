@@ -274,7 +274,11 @@ class LocalScmSource implements ScmSource implements ScmRemoteReader {
 	}
 
 	/** The machine's full spelling with `/` separators and no trailing one; case is kept for display. */
-	static function normalize(path:String):String return PathKey.of(sys.FileSystem.fullPath(path), false);
+	static function normalize(path:String):String {
+		// fullPath resolves links and is null on POSIX for a path that does not exist (a folder deleted since it was chosen).
+		var full:Null<String> = sys.FileSystem.fullPath(path);
+		return PathKey.of(full != null ? full : sys.FileSystem.absolutePath(path), false);
+	}
 
 	static function within(parent:String, child:String):Bool return PathKey.within(parent, normalize(child));
 }
