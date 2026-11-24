@@ -6,6 +6,7 @@ import haxeon.rpc.MessageTransport;
 import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
 import haxeon.rpc.RpcConnector;
+import haxeon.rpc.RpcError;
 
 private class CompletedDeviceAttempt implements RpcConnectAttempt {
 	public function new() {}
@@ -87,7 +88,7 @@ private class DeviceConnectAttempt implements RpcConnectAttempt {
 	}
 
 	function fail(code:String, retryable:Bool):Void
-		finish(haxeon.rpc.RpcConnectResult.Failed({code: code, message: code, ambiguous: false}, retryable));
+		finish(haxeon.rpc.RpcConnectResult.Failed(new RpcError(code, code, false), retryable));
 
 	function finish(result:RpcConnectResult):Void {
 		if (finished) {
@@ -171,7 +172,7 @@ class DeviceRpcConnector implements RpcConnector {
 	public function connect(complete:RpcConnectResult->Void):RpcConnectAttempt {
 		if (complete == null) throw "Device RPC completion callback cannot be null";
 		if (disposed) {
-			complete(haxeon.rpc.RpcConnectResult.Failed({code: "connector_closed", message: "connector_closed", ambiguous: false}, false));
+			complete(haxeon.rpc.RpcConnectResult.Failed(new RpcError("connector_closed", "connector_closed", false), false));
 			return new CompletedDeviceAttempt();
 		}
 		var initial = first;
@@ -181,7 +182,7 @@ class DeviceRpcConnector implements RpcConnector {
 			return new CompletedDeviceAttempt();
 		}
 		if (pending.length >= 4) {
-			complete(haxeon.rpc.RpcConnectResult.Failed({code: "connector_overloaded", message: "connector_overloaded", ambiguous: false}, true));
+			complete(haxeon.rpc.RpcConnectResult.Failed(new RpcError("connector_overloaded", "connector_overloaded", false), true));
 			return new CompletedDeviceAttempt();
 		}
 		var attempt = new DeviceConnectAttempt(this, complete);

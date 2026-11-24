@@ -49,7 +49,7 @@ private class MachineStreamConnector implements RpcConnector {
 					var stream = owner.adopt(transport);
 					if (stream == null) {
 						transport.close();
-						complete(Failed({code: "disconnected", message: "disconnected", ambiguous: false}, true));
+						complete(Failed(new RpcError("disconnected", "disconnected", false), true));
 					} else
 						complete(Opened(stream));
 				case Failed(error, retryable):
@@ -85,7 +85,7 @@ private class WorkspaceStreamConnector implements RpcConnector {
 		var attempt = new WaitingAttempt();
 		var machine = owner.machineId;
 		if (machine == null) {
-			complete(Failed({code: "disconnected", message: "The machine has not answered yet", ambiguous: false}, true));
+			complete(Failed(new RpcError("disconnected", "The machine has not answered yet", false), true));
 			return attempt;
 		}
 		owner.openStream({machine: machine, workspace: workspace}, false, function(stream, _, error) {
@@ -97,7 +97,7 @@ private class WorkspaceStreamConnector implements RpcConnector {
 			if (stream != null)
 				complete(Opened(stream));
 			else {
-				var failure = error == null ? {code: "disconnected", message: "disconnected", ambiguous: false} : error;
+				var failure = error == null ? new RpcError("disconnected", "disconnected", false) : error;
 				// A refusal about the workspace (not granted, not available, too many streams) may change; the client backs off and asks again.
 				complete(Failed(failure, failure.code != "invalid_request" && failure.code != "machine_mismatch"));
 			}
@@ -342,18 +342,18 @@ class DeviceMachine {
 	public function openStream(ref:WorkspaceRef, start:Bool, done:(Null<MessageTransport>, Null<WorkspaceStream>, Null<RpcError>) -> Void):Void {
 		var connection = machineConnection, link = mux;
 		if (disposed || connection == null || link == null || !connected() || !link.isOpen()) {
-			done(null, null, {code: "disconnected", message: "The machine is not connected", ambiguous: false});
+			done(null, null, new RpcError("disconnected", "The machine is not connected", false));
 			return;
 		}
 		RpcCalls.call(connection, MachineDirectoryProtocol.OPEN, {ref: ref, start: start}, OPEN_TIMEOUT, function(opened:WorkspaceStream) {
 			if (machineConnection != connection || mux != link) {
 				// The channel changed while the machine was answering: the stream died with it. Tell the machine anyway.
-				done(null, null, {code: "disconnected", message: "The machine connection changed", ambiguous: false});
+				done(null, null, new RpcError("disconnected", "The machine connection changed", false));
 				return;
 			}
 			var stream = link.open(opened.stream);
 			if (stream == null || !sameRef(opened.ref, ref)) {
-				done(null, null, {code: "invalid_response", message: "The machine opened an unusable stream", ambiguous: false});
+				done(null, null, new RpcError("invalid_response", "The machine opened an unusable stream", false));
 				if (stream != null)
 					stream.close();
 				else
