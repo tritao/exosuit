@@ -187,21 +187,21 @@ static int history_contract(void) {
     terminalkit_close(source); terminalkit_close(restored);
     /* A long, densely styled session must retain complete newest rows within
        the byte budget, even when raw output and the screen outgrow that budget. */
-    REQUIRE(terminalkit_open(512, 4, 1000, "xterm-256color", &source));
+    REQUIRE(terminalkit_open(512, 4, 3000, "xterm-256color", &source));
     char dense[18000]; size_t used = 0;
     for (int column = 0; column < 512; ++column)
         used += (size_t)sprintf(dense + used, "\033[38;2;%d;34;56mX", column % 2 ? 12 : 13);
     used += (size_t)sprintf(dense + used, "\r\n");
-    for (int row = 0; row < 900; ++row) REQUIRE(feed(source, dense) >= 0);
+    for (int row = 0; row < 2500; ++row) REQUIRE(feed(source, dense) >= 0);
     REQUIRE(feed(source, "\033[0mNEWEST_RETAINED") >= 0);
     length = 0;
     REQUIRE(terminalkit_history_copy(source, NULL, &length) == 1);
-    REQUIRE(length < 4u * 1024u * 1024u && length > 3u * 1024u * 1024u);
+    REQUIRE(length < 16u * 1024u * 1024u && length > 12u * 1024u * 1024u);
     history = malloc((size_t)length + 16);
     memset(history + length, 0x5a, 16);
     REQUIRE(terminalkit_history_copy(source, history, &length) == 0);
     for (int i = 0; i < 16; ++i) REQUIRE(history[length + i] == 0x5a);
-    REQUIRE(terminalkit_open(512, 4, 1000, "xterm-256color", &restored));
+    REQUIRE(terminalkit_open(512, 4, 3000, "xterm-256color", &restored));
     REQUIRE(terminalkit_feed(restored, history, length) >= 0);
     REQUIRE(same_screen(source, restored));
     free(history); terminalkit_close(source); terminalkit_close(restored);
