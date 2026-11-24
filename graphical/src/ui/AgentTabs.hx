@@ -609,13 +609,14 @@ class AgentTabs {
   if (terminal != null) app.terminalTabs.showTerminalInEditor(terminal);
  }
  function syncWorkbenchSessionSelection(tab:Null<UiEditorTab>):Void {
-  if(app.workbenchPanel == null) return;
+  var panel=app.workbenchPanel;
+  if(panel == null) return;
   var agent=tab == null ? null : UiEditorTabs.agent(tab);
   var terminal=tab == null ? null : UiEditorTabs.terminal(tab);
-  var shown=app.workbenchPanel.model.openWorkspace;
-  if(agent != null) app.workbenchPanel.syncActiveSession(WorkbenchRowKey.agent(shown == null ? "" : shown,agent.resource));
-  else if(terminal != null && terminal.remote) app.workbenchPanel.syncActiveSession(app.terminalTabs.terminalRow(terminal));
-  else app.workbenchPanel.syncActiveSession(null);
+  var shown=panel.model.openWorkspace;
+  if(agent != null) panel.syncActiveSession(WorkbenchRowKey.agent(shown == null ? "" : shown,agent.resource));
+  else if(terminal != null && terminal.remote) panel.syncActiveSession(app.terminalTabs.terminalRow(terminal));
+  else panel.syncActiveSession(null);
  }
  function openCreatedAgent(record:workspace.service.WorkspaceAgentProtocol.AgentRecord):Void {
   var client=app.workbenchClient;

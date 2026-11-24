@@ -290,8 +290,9 @@ private class GutterMarkerLane {
 
 	public function update(next:Array<PluginGutterMarker>, nextRevision:Int, nextAdded:Color,
 			nextModified:Color, nextDeleted:Color):Void {
-		var colorChanged = addedColor == null || modifiedColor == null || deletedColor == null ||
-			!sameColor(addedColor, nextAdded) || !sameColor(modifiedColor, nextModified) || !sameColor(deletedColor, nextDeleted);
+		var added = addedColor, modified = modifiedColor, deleted = deletedColor;
+		var colorChanged = added == null || modified == null || deleted == null ||
+			!sameColor(added, nextAdded) || !sameColor(modified, nextModified) || !sameColor(deleted, nextDeleted);
 		if (revision == nextRevision && !colorChanged) return;
 		markers = next == null ? [] : next.copy();
 		revision = nextRevision;

@@ -231,9 +231,10 @@ class CommandView {
 	function filter():Void {
 		var previousValue = selected >= 0 && selected < results.length ? results[selected].value : null;
 		results.resize(0);
-		if (provider == null) return;
-		for (index in 0...provider.entries.length) {
-			var entry = provider.entries[index];
+		var source = provider;
+		if (source == null) return;
+		for (index in 0...source.entries.length) {
+			var entry = source.entries[index];
 			var score = fuzzyScore(entry.label, query);
 			if (score < 0) score = fuzzyScore(entry.searchText, query);
 			if (score >= 0) {

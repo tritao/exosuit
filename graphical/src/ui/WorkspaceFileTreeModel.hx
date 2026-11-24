@@ -507,18 +507,20 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		// Subscribe before the first snapshot so the initial watch reset cannot
 		// invalidate a listing that was just fetched. Fall back after watch failure.
 		if (watchRequested && watchEpoch == null) return;
-		var listing = listings.get(path);
-		if (listing == null) {
+		var known = listings.get(path);
+		if (known == null) {
 			var directoryCount = 0;
 			for (_ in listings.keys()) directoryCount++;
-			listing = new WorkspaceDirectoryListing();
-			listings.set(path, listing);
+			known = new WorkspaceDirectoryListing();
+			listings.set(path, known);
 			if (directoryCount >= MAX_LISTED_DIRECTORIES) {
-				listing.error = "Explorer folder limit reached";
-				listing.limited = true;
+				known.error = "Explorer folder limit reached";
+				known.limited = true;
 				return;
 			}
 		}
+		// The callbacks below capture the listing; a local never assigned again keeps its null check in them.
+		final listing:WorkspaceDirectoryListing = known;
 		if (listing.loading || listing.refreshing || listing.limited) return;
 		var replacing = cursor == null;
 		var snapshot = new WorkspaceDirectoryListing();
