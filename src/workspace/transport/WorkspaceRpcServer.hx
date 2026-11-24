@@ -44,7 +44,7 @@ class WorkspaceRpcServer {
 		if (offered.indexOf(workspace.service.WorkspaceCatalogProtocol.CAPABILITY) < 0)
 			offered.push(workspace.service.WorkspaceCatalogProtocol.CAPABILITY);
 		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
-			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes);
 	}
 
 	/** What a paired device may be granted: the service's offered set, plus the catalog watch when it is enabled (a device reads its workspace with it). */
@@ -61,7 +61,7 @@ class WorkspaceRpcServer {
 		var offered = localOptions.offered();
 		offered.push(workspace.service.WorkspaceFoldersProtocol.CAPABILITY);
 		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
-			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes);
 	}
 
 	function registerFolders(connection:haxeon.rpc.RpcConnection, grants:Array<String>, localAdmin:Bool):Void {
@@ -154,7 +154,7 @@ class WorkspaceRpcServer {
 		// The stream frame's header takes part of the Noise message, so a message here is smaller than a local one.
 		var maxMessageBytes = Std.int(Math.min(options.maxMessageBytes, ForwardedStream.MAX_MESSAGE_BYTES));
 		return new RpcPeerOptions(options.application, allowed, [], options.timeoutMs, maxMessageBytes, options.maxCalls,
-			options.maxQueuedBytes < maxMessageBytes ? maxMessageBytes : options.maxQueuedBytes, options.protocol, options.codec);
+			options.maxQueuedBytes < maxMessageBytes ? maxMessageBytes : options.maxQueuedBytes);
 	}
 
 	/** Waits for a local connection's first message: exohost's intro makes it a forwarded device stream; anything else is a normal client's hello. */
