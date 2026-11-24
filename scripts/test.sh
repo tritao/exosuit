@@ -180,7 +180,7 @@ fixture() {
 # The checks of kind `check`.
 own_check() {
 	case $1 in
-	document-save-mode) test "$(stat -c '%a' "$root_dir/build/document-save-smoke.txt")" = 640 ;;
+	document-save-mode) test "$(python3 -c 'import os, stat, sys; print(format(stat.S_IMODE(os.stat(sys.argv[1]).st_mode), "o"))' "$root_dir/build/document-save-smoke.txt")" = 640 ;;
 	*)
 		echo "test.sh: unknown check $1" >&2
 		return 1
