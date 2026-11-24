@@ -12,7 +12,7 @@ from prepare_agent_naming import prepare
 ROOT = Path(__file__).resolve().parent.parent
 prepare(ROOT, required=True)
 with tempfile.TemporaryDirectory(prefix='exosuit-native-claude-names-') as temporary:
-    fixture = Path(temporary)
+    fixture = Path(temporary).resolve()  # the SDK keys a project by its real path (macOS's /tmp and /var are links)
     workspace = fixture / 'workspace'
     workspace.mkdir()
     config = fixture / 'claude'

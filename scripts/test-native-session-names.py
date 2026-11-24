@@ -8,7 +8,7 @@ prepare(ROOT, required=True)
 RUNNER=build_test('native-session-names')
 output=ROOT/'tests/native-session-names/build/host'
 with tempfile.TemporaryDirectory(prefix='exosuit-native-names-',ignore_cleanup_errors=True) as temporary:
- root=Path(temporary);config=root/'claude-config';session='12345678-1234-1234-1234-123456789abc'
+ root=Path(temporary).resolve();config=root/'claude-config';session='12345678-1234-1234-1234-123456789abc'
  (root/'title.json').write_text(json.dumps('Native title'))
  project=config/'projects'/''.join(c if c.isascii() and c.isalnum() else '-' for c in str(root));project.mkdir(parents=True)
  (project/(session+'.jsonl')).write_text(json.dumps({'type':'user','sessionId':session,'uuid':'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','parentUuid':None,'cwd':str(root),'isSidechain':False,'timestamp':'2026-01-01T00:00:00Z','message':{'role':'user','content':'Fixture only, never sent'}})+'\n')
