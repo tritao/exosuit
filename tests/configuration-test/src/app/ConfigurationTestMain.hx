@@ -41,6 +41,7 @@ class ConfigurationTestMain {
 		File.saveContent(haxeonCommand, "fixture");
 		require(config.LanguageServerCommand.resolve([], null, "bundled", false, discovery + "/haxeon", true).join("|") == haxeonCommand + "|lsp",
 			"the Windows language server command is not `haxeon lsp` from the checkout's SDK");
+		FileSystem.deleteFile(haxeonCommand); // the fixture folder outlives a run
 		File.saveContent(launcher, "fixture");
 		// Compared as absolute paths: on Windows the root is found with the absolute start's backslashes and a "/haxeon" suffix.
 		var found = config.LanguageServerCommand.findCompilerRoot(discovery + "/graphical/build/host");
