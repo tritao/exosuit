@@ -17,7 +17,10 @@ for target in wasm32 wasm-gc; do
   --root="$exosuit_dir/tests/haxeon-rpc/src" --root="$exosuit_dir/src" \
   "$exosuit_dir/tests/haxeon-rpc/src/app/WorkspaceRpcPortableMain.hx" > "$fixture_dir/$target.log" 2>&1 || { cat "$fixture_dir/$target.log"; exit 1; }
 done
-node - "$fixture_dir" <<'JS'
+# wasm-gc modules use exception handling's exnref, which Node 24 (V8 13.6) only has behind a flag.
+node_flags=()
+if node --v8-options | grep -q -- '--experimental-wasm-exnref'; then node_flags+=(--experimental-wasm-exnref); fi
+node ${node_flags[@]+"${node_flags[@]}"} - "$fixture_dir" <<'JS'
 const fs = require("fs");
 const runtime = {__math_is_finite:Number.isFinite, __math_ceil:Math.ceil, __math_floor:Math.floor,
  __math_pow:Math.pow, __math_sqrt:Math.sqrt, __math_fmod:(a,b)=>a%b, __std_int_f64:Math.trunc};
