@@ -1,6 +1,7 @@
 package workspace.service;
 
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspacePersistence;
 
@@ -152,49 +153,49 @@ class WorkspaceService {
 		var write = capabilities.indexOf(WorkspaceProtocol.WRITE) >= 0;
 		connection.register(WorkspaceProtocol.QUERY, function(request, context) {
 			if (storageFailed) {
-				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
+				context.fail(new RpcError("storage_unavailable", "Workspace storage requires recovery", true));
 				return;
 			}
 			if (!observer.granted || !read) {
-				context.fail({code: "unauthorized", message: "Read denied", ambiguous: false});
+				context.fail(new RpcError("unauthorized", "Read denied", false));
 				return;
 			}
 			if (request == null || !validId(request.workspace)) {
-				context.fail({code: "invalid_request", message: "Invalid workspace query", ambiguous: false});
+				context.fail(new RpcError("invalid_request", "Invalid workspace query", false));
 				return;
 			}
 			if (request.workspace != id) {
-				context.fail({code: "unknown_workspace", message: "Unknown workspace", ambiguous: false});
+				context.fail(new RpcError("unknown_workspace", "Unknown workspace", false));
 				return;
 			}
 			context.respond(snapshot());
 		});
 		function mutate(request:RenameGroup, context:haxeon.rpc.RpcContext<RenameResult>):Void {
 			if (storageFailed) {
-				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
+				context.fail(new RpcError("storage_unavailable", "Workspace storage requires recovery", true));
 				return;
 			}
 			if (!observer.granted || !write || capabilities.indexOf(WorkspaceProtocol.TREE) < 0) {
-				context.fail({code: "unauthorized", message: "Group change denied", ambiguous: false});
+				context.fail(new RpcError("unauthorized", "Group change denied", false));
 				return;
 			}
 			if (request == null || !validId(request.workspace) || !validId(request.epoch)) {
-				context.fail({code: "invalid_request", message: "Invalid group change identity", ambiguous: false});
+				context.fail(new RpcError("invalid_request", "Invalid group change identity", false));
 				return;
 			}
 			if (request.workspace != id || request.epoch != epoch) {
-				context.fail({code: "stale_epoch", message: "Workspace epoch changed", ambiguous: true});
+				context.fail(new RpcError("stale_epoch", "Workspace epoch changed", true));
 				return;
 			}
 			if (!validId(request.operation) || !validId(request.group) || !validName(request.name) || request.expectedRevision < (request.action == "create" ? 0 : 1)
 				|| request.action != "create" && request.action != "update" && request.action != "delete") {
-				context.fail({code: "invalid_request", message: "Invalid group change", ambiguous: false});
+				context.fail(new RpcError("invalid_request", "Invalid group change", false));
 				return;
 			}
 			var prior = operations.get(request.operation);
 			if (prior != null) {
 				if (WorkspaceProtocol.GROUP.encodeRequest(prior.request).compare(WorkspaceProtocol.GROUP.encodeRequest(request)) != 0) {
-					context.fail({code: "operation_conflict", message: "Operation id reused", ambiguous: false});
+					context.fail(new RpcError("operation_conflict", "Operation id reused", false));
 					return;
 				}
 				context.respond(WorkspaceProtocol.copyOutcome(prior.outcome));
@@ -202,36 +203,36 @@ class WorkspaceService {
 			}
 			var group = groups.get(request.group);
 			if (request.action == "create" ? group != null || removedGroups.exists(request.group) : group == null) {
-				context.fail({code: request.action == "create" ? "group_exists" : "unknown_group", message: "Group identity unavailable", ambiguous: false});
+				context.fail(new RpcError(request.action == "create" ? "group_exists" : "unknown_group", "Group identity unavailable", false));
 				return;
 			}
 			if ((group == null ? 0 : group.revision) != request.expectedRevision) {
-				context.fail({code: "stale_revision", message: "Group changed", ambiguous: false});
+				context.fail(new RpcError("stale_revision", "Group changed", false));
 				return;
 			}
 			if (request.action == "delete") {
 				if (capabilities.indexOf(WorkspaceProtocol.REMOVE) < 0 || canRemoveGroup == null) {
-					context.fail({code:"unsupported", message:"Group removal is not available", ambiguous:false}); return;
+					context.fail(new RpcError("unsupported", "Group removal is not available", false)); return;
 				}
 				for (child in groups) if (child.parent == request.group) {
-					context.fail({code:"group_not_empty", message:"Remove or move child groups first", ambiguous:false}); return;
+					context.fail(new RpcError("group_not_empty", "Remove or move child groups first", false)); return;
 				}
 				var permitsRemoval:String->Bool = cast canRemoveGroup;
 				if (!permitsRemoval(request.group)) {
-					context.fail({code:"group_not_empty", message:"Remove or move the group's terminals and agents first", ambiguous:false}); return;
+					context.fail(new RpcError("group_not_empty", "Remove or move the group's terminals and agents first", false)); return;
 				}
 				var deletedGroup:WorkspaceGroup = cast group;
 				if (request.name != deletedGroup.name || request.parent != deletedGroup.parent || request.cwd != deletedGroup.cwd ||
 					WorkspaceProtocol.order(request.order) != WorkspaceProtocol.order(deletedGroup.order)) {
-					context.fail({code:"stale_revision", message:"Group changed", ambiguous:false}); return;
+					context.fail(new RpcError("stale_revision", "Group changed", false)); return;
 				}
 			}
 			if (operationCount >= operationLimit || sequence == 0x7fffffff || (group != null && group.revision == 0x7fffffff)) {
-				context.fail({code: "operation_limit", message: "Operation retention full", ambiguous: false});
+				context.fail(new RpcError("operation_limit", "Operation retention full", false));
 				return;
 			}
 			if (request.action == "create" && snapshot().groups.length >= 32) {
-				context.fail({code: "group_limit", message: "Workspace group limit", ambiguous: false}); return;
+				context.fail(new RpcError("group_limit", "Workspace group limit", false)); return;
 			}
 			var cwd:Null<String> = request.cwd;
 			// Store the machine's canonical spelling (separators, case, symlinks) of a newly chosen directory.
@@ -240,7 +241,7 @@ class WorkspaceService {
 			if (chosen.length > 0 && chosen.length <= 1024 && resolve != null && (group == null || chosen != group.cwd)) {
 				var resolved = resolve(chosen);
 				if (resolved == null) {
-					context.fail({code: "invalid_directory", message: "Choose an existing folder", ambiguous: false}); return;
+					context.fail(new RpcError("invalid_directory", "Choose an existing folder", false)); return;
 				}
 				cwd = resolved;
 			}
@@ -253,7 +254,7 @@ class WorkspaceService {
 			};
 			if (!validHierarchy(updated.id, updated.parent) || WorkspaceProtocol.order(updated.order) < 0 || WorkspaceProtocol.order(updated.order) > WorkspaceProtocol.MAX_ORDER
 				|| updated.cwd != null && (updated.cwd.length == 0 || updated.cwd.length > 1024)) {
-				context.fail({code: "invalid_group", message: "Invalid parent or workspace directory", ambiguous: false}); return;
+				context.fail(new RpcError("invalid_group", "Invalid parent or workspace directory", false)); return;
 			}
 			var outcome:RenameResult = {
 				epoch: epoch,
@@ -266,7 +267,7 @@ class WorkspaceService {
 					persistence.commit(request, outcome)
 				catch (_:Dynamic) {
 					storageFailed = true;
-					context.fail({code: "storage_failed", message: "Workspace commit failed; reopen storage to reconcile", ambiguous: true});
+					context.fail(new RpcError("storage_failed", "Workspace commit failed; reopen storage to reconcile", true));
 					return;
 				}
 			}

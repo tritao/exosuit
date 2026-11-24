@@ -6,6 +6,7 @@ import haxeon.wire.MessagePack;
 import sys.FileSystem;
 import sys.io.File;
 import haxeon.rpc.RpcContext;
+import haxeon.rpc.RpcError;
 import process.OwnedProcess;
 import process.ProcessManager;
 import workspace.runtime.WorkspaceDirectories;
@@ -68,10 +69,10 @@ class PiProvider implements AgentMessageSource {
  }
  public function nativeNamingSupported():Bool return false;
  public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
-  ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
+  ctx.fail(new RpcError("unsupported_operation", "Load models from an attached session", false));
  }
  public function discover(q:AgentDiscoveryQuery,ctx:RpcContext<AgentDiscovery>):Void {
-  ctx.fail({code:"unsupported_operation",message:"Session discovery is not supported by this provider",ambiguous:false});
+  ctx.fail(new RpcError("unsupported_operation", "Session discovery is not supported by this provider", false));
  }
  public function driverKind():String return "pi";
  public function summary():String return "Pi: " + [for(s in sessions) true].length + " sessions";
@@ -425,28 +426,28 @@ class PiProvider implements AgentMessageSource {
   var ids=q.imageIds;
   if(text == null || (kind!="clear" && (text.length>4096 || (StringTools.trim(text)=="" && (ids==null || ids.length==0))))
    || (kind=="clear" && ids!=null && ids.length>0) || q.request==null || !valid(q.request,128)) {
-   ctx.fail({code:"invalid_request",message:"A current input token and a message of at most 4096 bytes are required",ambiguous:false});return;
+   ctx.fail(new RpcError("invalid_request", "A current input token and a message of at most 4096 bytes are required", false));return;
   }
   var existing=s.inputs.find(q.request);
   if(existing != null) {
-   if(existing.kind!=kind || existing.fingerprint!=PiInputQueue.fingerprint(kind,text,ids)) ctx.fail({code:"conflict",message:"Input token already belongs to another message",ambiguous:false});
+   if(existing.kind!=kind || existing.fingerprint!=PiInputQueue.fingerprint(kind,text,ids)) ctx.fail(new RpcError("conflict", "Input token already belongs to another message", false));
    else ctx.respond(view(s));return;
   }
-  if(q.request!=s.inputs.token()) {ctx.fail({code:"stale_input",message:"The input token has expired; refresh the session before submitting again",ambiguous:false});return;}
-  if(!s.ready || s.transport==null) {ctx.fail({code:"disconnected",message:"Resume Pi before submitting messages",ambiguous:false});return;}
-  if((kind!="queue" && s.inputs.hasNativeOperation()) || (s.busy && s.record.turn==null)) {ctx.fail({code:"busy",message:"Wait for the pending Pi operation",ambiguous:false});return;}
-  if(kind=="steer" && !canSteerText(s,text)) {ctx.fail({code:"invalid_request",message:"Send extension commands when Pi is idle; steering supports text, skills and prompt templates",ambiguous:false});return;}
-  if(!s.inputs.canAdd(text,kind,ids)) {ctx.fail({code:"limit",message:"Pending inputs are limited to eight messages and 4096 total bytes",ambiguous:false});return;}
+  if(q.request!=s.inputs.token()) {ctx.fail(new RpcError("stale_input", "The input token has expired; refresh the session before submitting again", false));return;}
+  if(!s.ready || s.transport==null) {ctx.fail(new RpcError("disconnected", "Resume Pi before submitting messages", false));return;}
+  if((kind!="queue" && s.inputs.hasNativeOperation()) || (s.busy && s.record.turn==null)) {ctx.fail(new RpcError("busy", "Wait for the pending Pi operation", false));return;}
+  if(kind=="steer" && !canSteerText(s,text)) {ctx.fail(new RpcError("invalid_request", "Send extension commands when Pi is idle; steering supports text, skills and prompt templates", false));return;}
+  if(!s.inputs.canAdd(text,kind,ids)) {ctx.fail(new RpcError("limit", "Pending inputs are limited to eight messages and 4096 total bytes", false));return;}
   var blocks=imageBlocks(s,ids);
-  if(blocks==null || !imageFrameFits(text,blocks)) {ctx.fail({code:"image_unavailable",message:"An image is unavailable or exceeds the Pi input limit",ambiguous:false});return;}
+  if(blocks==null || !imageFrameFits(text,blocks)) {ctx.fail(new RpcError("image_unavailable", "An image is unavailable or exceeds the Pi input limit", false));return;}
   if(ids!=null && ids.length>0) {
    var turn=kind=="steer" && s.busy ? s.record.turn : "pi-turn-"+q.request;
    if(turn==null || imageHold==null || !imageHold(s.record.id,s.record.thread,turn,q.request,ids)) {
-    ctx.fail({code:"image_unavailable",message:"Could not retain this image for the Pi input",ambiguous:false});return;
+    ctx.fail(new RpcError("image_unavailable", "Could not retain this image for the Pi input", false));return;
    }
   }
   var input=s.inputs.add(q.request,kind,text,ids);
-  try save(s) catch(_:Dynamic) {fail(s,"Pi input could not be saved before delivery");ctx.fail({code:"storage_unavailable",message:"Pi input could not be saved",ambiguous:false});return;}
+  try save(s) catch(_:Dynamic) {fail(s,"Pi input could not be saved before delivery");ctx.fail(new RpcError("storage_unavailable", "Pi input could not be saved", false));return;}
   if(kind=="steer") {
    if(s.busy) {
     s.revision++;s.settled=false;
@@ -523,29 +524,29 @@ class PiProvider implements AgentMessageSource {
   }
  }
  public function create(q:AgentCreate,ctx:RpcContext<AgentRecord>):Void {
-  if(storageFailed) {ctx.fail({code:"storage_unavailable",message:"Agent storage requires recovery",ambiguous:false});return;}
+  if(storageFailed) {ctx.fail(new RpcError("storage_unavailable", "Agent storage requires recovery", false));return;}
   var selected=q.permissionProfile == null ? "supervised" : q.permissionProfile;
   if(!valid(q.id,128) || !valid(q.name,256) || q.thread != null || !mode(selected) || (q.defaultEffort != null && !valid(q.defaultEffort,32))
    || (q.defaultModel != null && !modelId(q.defaultModel))) {
-   ctx.fail({code:"invalid_request",message:"Invalid Pi configuration; native session import is not supported yet",ambiguous:false});return;
+   ctx.fail(new RpcError("invalid_request", "Invalid Pi configuration; native session import is not supported yet", false));return;
   }
   var previous=sessions.get(q.id);
   if(previous != null) {
    if(previous.record.name != q.name || previous.record.group != q.group || directories.differs(q.directory,previous.record.cwd))
-    ctx.fail({code:"conflict",message:"Agent identity is reserved",ambiguous:false});
+    ctx.fail(new RpcError("conflict", "Agent identity is reserved", false));
    else ctx.respond(copy(previous.record));return;
   }
   var cwd=directories.forAgent(groups(),q.group,q.directory,error->ctx.fail(error));
   if(cwd == null) return;
   var s=session({id:q.id,name:q.name,group:q.group,cwd:cwd,thread:"",state:"disconnected",turn:null,workspaceRoot:directories.root,
    provider:"pi",permissionMode:selected,preferredModel:q.defaultModel,preferredEffort:q.defaultEffort});
-  try save(s) catch(_:Dynamic) {ctx.fail({code:"storage_unavailable",message:"Pi reservation failed",ambiguous:false});return;}
+  try save(s) catch(_:Dynamic) {ctx.fail(new RpcError("storage_unavailable", "Pi reservation failed", false));return;}
   sessions.set(q.id,s);launch(s);ctx.respond(copy(s.record));
  }
  static function modelId(v:String):Bool return valid(v,384) && v.indexOf("/") > 0 && v.indexOf("/") < v.length-1;
  public function action(q:AgentAction,ctx:RpcContext<AgentView>):Void {
   var s=sessions.get(q.id);
-  function error(code:String,message:String,ambiguous:Bool=false):Void ctx.fail({code:code,message:message,ambiguous:ambiguous});
+  function error(code:String,message:String,ambiguous:Bool=false):Void ctx.fail(new RpcError(code, message, ambiguous));
   if(s == null) {error("unknown_agent","Unknown Pi agent");return;}
   if(q.action == "read") {
    importTranscript(s);
@@ -559,10 +560,10 @@ class PiProvider implements AgentMessageSource {
     var error = q.action == "move"
      ? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s), q.order)
      : AgentMetadata.rename(s.record, q.request, q.text, function() save(s));
-    if (error != null) {ctx.fail({code:error,message:"Session metadata changed or the new name or destination is invalid",ambiguous:false});return;}
+    if (error != null) {ctx.fail(new RpcError(error, "Session metadata changed or the new name or destination is invalid", false));return;}
    } catch (_:Dynamic) {
     storageFailed = true;
-    ctx.fail({code:"storage_unavailable",message:"Session metadata could not be saved",ambiguous:false});return;
+    ctx.fail(new RpcError("storage_unavailable", "Session metadata could not be saved", false));return;
    }
    ctx.respond(view(s));return;
   }

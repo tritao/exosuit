@@ -2,6 +2,7 @@ package workspace.provider;
 
 import haxe.Json;
 import haxeon.rpc.RpcContext;
+import haxeon.rpc.RpcError;
 import process.OwnedProcess;
 import process.ProcessManager;
 import workspace.runtime.WorkspaceDirectories;
@@ -47,10 +48,10 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
  public var imagePrepare:Null<(String,Array<String>,Null<String>,Null<String>)->Null<Array<Dynamic>>>;
  public var imageHold:Null<(String,String,String,String,Array<String>)->Bool>;
  public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
-  ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
+  ctx.fail(new RpcError("unsupported_operation", "Load models from an attached session", false));
  }
  public function discover(q:AgentDiscoveryQuery,ctx:RpcContext<AgentDiscovery>):Void {
-  ctx.fail({code:"unsupported_operation",message:"Session discovery is not supported by this provider",ambiguous:false});
+  ctx.fail(new RpcError("unsupported_operation", "Session discovery is not supported by this provider", false));
  }
  public function driverKind():String return "claude";
  final directories:WorkspaceDirectories;
@@ -307,29 +308,29 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
   }
  }
  public function create(q:AgentCreate,ctx:RpcContext<AgentRecord>):Void {
-  if(storageFailed) {ctx.fail({code:"storage_unavailable",message:"Agent storage requires recovery",ambiguous:false});return;}
+  if(storageFailed) {ctx.fail(new RpcError("storage_unavailable", "Agent storage requires recovery", false));return;}
   if(!valid(q.id,128) || !valid(q.name,256) || (q.thread != null && !uuid(q.thread))
     || (q.defaultModel != null && !valid(q.defaultModel,256)) || q.defaultEffort != null) {
-   ctx.fail({code:"invalid_request",message:"Invalid Claude session configuration; effort overrides are not supported",ambiguous:false});return;
+   ctx.fail(new RpcError("invalid_request", "Invalid Claude session configuration; effort overrides are not supported", false));return;
   }
   var previous=sessions.get(q.id);
   if(previous != null) {
    if(previous.record.name != q.name || previous.record.group != q.group || (q.thread != null && previous.record.thread != q.thread)
     || directories.differs(q.directory,previous.record.cwd))
-    ctx.fail({code:"conflict",message:"Agent identity is already reserved",ambiguous:false});
+    ctx.fail(new RpcError("conflict", "Agent identity is already reserved", false));
    else ctx.respond(copy(previous.record));
    return;
   }
   var cwd=directories.forAgent(groups(),q.group,q.directory,error->ctx.fail(error));
   if(cwd == null) return;
   var selected=q.permissionProfile == null ? "default" : q.permissionProfile;
-  if(!mode(selected)) {ctx.fail({code:"invalid_permissions",message:"Choose default, acceptEdits or plan",ambiguous:false});return;}
-  if(q.thread != null) for(s in sessions) if(s.record.thread == q.thread) {ctx.fail({code:"conflict",message:"Session is already attached",ambiguous:false});return;}
+  if(!mode(selected)) {ctx.fail(new RpcError("invalid_permissions", "Choose default, acceptEdits or plan", false));return;}
+  if(q.thread != null) for(s in sessions) if(s.record.thread == q.thread) {ctx.fail(new RpcError("conflict", "Session is already attached", false));return;}
   var hex=haxe.crypto.Sha256.encode(Std.string(clock()) + ":" + Math.random() + ":" + q.id);
   var id=hex.substr(0,8)+"-"+hex.substr(8,4)+"-4"+hex.substr(13,3)+"-a"+hex.substr(17,3)+"-"+hex.substr(20,12);
   var s=session({id:q.id,name:q.name,group:q.group,cwd:cwd,thread:q.thread == null ? id : q.thread,state:"disconnected",turn:null,
    workspaceRoot:directories.root,provider:"claude",nameMetadata:{source:"native",nativeName:null},permissionMode:selected,preferredModel:q.defaultModel});
-  try save(s) catch(_:Dynamic) {ctx.fail({code:"storage_unavailable",message:"Claude reservation failed",ambiguous:false});return;}
+  try save(s) catch(_:Dynamic) {ctx.fail(new RpcError("storage_unavailable", "Claude reservation failed", false));return;}
   sessions.set(q.id,s);launch(s,q.thread != null);ctx.respond(copy(s.record));
  }
  /** Sends one prompt to the running process. Null when it was queued; else why it was not. */
@@ -364,8 +365,8 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
  }
  public function action(q:AgentAction,ctx:RpcContext<AgentView>):Void {
   var s=sessions.get(q.id);
-  if(s == null) {ctx.fail({code:"unknown_agent",message:"Unknown Claude agent",ambiguous:false});return;}
-  function error(code:String,message:String,ambiguous:Bool=false):Void {ctx.fail({code:code,message:message,ambiguous:ambiguous});}
+  if(s == null) {ctx.fail(new RpcError("unknown_agent", "Unknown Claude agent", false));return;}
+  function error(code:String,message:String,ambiguous:Bool=false):Void {ctx.fail(new RpcError(code, message, ambiguous));}
   if(q.action == "read") {
    importTranscript(s);
    var before=q.after == null ? null : s.conversation.offset(q.after);
@@ -378,10 +379,10 @@ class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts
     var error = q.action == "move"
      ? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s), q.order)
      : AgentMetadata.rename(s.record, q.request, q.text, function() save(s));
-    if (error != null) {ctx.fail({code:error,message:"Session metadata changed or the new name or destination is invalid",ambiguous:false});return;}
+    if (error != null) {ctx.fail(new RpcError(error, "Session metadata changed or the new name or destination is invalid", false));return;}
    } catch (_:Dynamic) {
     storageFailed = true;
-    ctx.fail({code:"storage_unavailable",message:"Session metadata could not be saved",ambiguous:false});return;
+    ctx.fail(new RpcError("storage_unavailable", "Session metadata could not be saved", false));return;
    }
    ctx.respond(view(s));return;
   }

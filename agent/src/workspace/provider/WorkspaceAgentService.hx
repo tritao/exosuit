@@ -1,6 +1,7 @@
 package workspace.provider;
 
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import workspace.service.WorkspaceAgents;
 import workspace.service.WorkspaceAgentPersistence;
 import workspace.service.WorkspaceAgentProtocol;
@@ -124,7 +125,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
   function allowed(w:String,i:String,control:Bool):Bool return w == workspace && i == instance
    && capabilities.contains(WorkspaceAgentProtocol.READ) && (!control || capabilities.contains(WorkspaceAgentProtocol.CONTROL));
   connection.register(WorkspaceAgentProtocol.LIST,function(q,ctx) {
-   if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Agent catalog denied",ambiguous:false});return;}
+   if(!allowed(q.workspace,q.instance,false)) {ctx.fail(new RpcError("unauthorized", "Agent catalog denied", false));return;}
    var found=records();
    found.sort(function(a,b) return Reflect.compare(a.id,b.id));
    found=[for(r in found) if(q.after == null || Reflect.compare(r.id,q.after)>0) r];
@@ -134,34 +135,34 @@ class WorkspaceAgentService implements WorkspaceAgents {
     canMove:true,canRename:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(f in factories) f.kind],next:more ? found[found.length-1].id : null});
   });
   connection.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
-   if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Agent creation denied",ambiguous:false});return;}
+   if(!allowed(q.workspace,q.instance,true)) {ctx.fail(new RpcError("unauthorized", "Agent creation denied", false));return;}
    if(q.id == null || q.id.length == 0 || q.id.length>128 || q.name == null || q.name.length == 0 || q.name.length>256) {
-    ctx.fail({code:"invalid_request",message:"Invalid agent identity",ambiguous:false});return;
+    ctx.fail(new RpcError("invalid_request", "Invalid agent identity", false));return;
    }
    var kind=q.provider == null ? "codex" : q.provider;
    var provider=provider(kind);
-   if(provider == null) {ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;}
+   if(provider == null) {ctx.fail(new RpcError("invalid_provider", "Unsupported agent provider", false));return;}
    var existing=owner(q.id);
-   if(existing != null && existing != provider) {ctx.fail({code:"conflict",message:"Agent id belongs to another provider",ambiguous:false});return;}
-   if(existing == null && records().length>=32) {ctx.fail({code:"limit",message:"Agent catalog is full",ambiguous:false});return;}
+   if(existing != null && existing != provider) {ctx.fail(new RpcError("conflict", "Agent id belongs to another provider", false));return;}
+   if(existing == null && records().length>=32) {ctx.fail(new RpcError("limit", "Agent catalog is full", false));return;}
    provider.create(q,ctx);
   });
   function action(q:AgentAction,ctx:haxeon.rpc.RpcContext<AgentView>):Void {
-   if(!allowed(q.workspace,q.instance,q.action != "read")) {ctx.fail({code:"unauthorized",message:"Agent operation denied",ambiguous:false});return;}
+   if(!allowed(q.workspace,q.instance,q.action != "read")) {ctx.fail(new RpcError("unauthorized", "Agent operation denied", false));return;}
    var provider=owner(q.id);
-   if(provider == null) {ctx.fail({code:"unknown_agent",message:"Unknown agent",ambiguous:false});return;}
+   if(provider == null) {ctx.fail(new RpcError("unknown_agent", "Unknown agent", false));return;}
    if (q.imageIds != null && q.imageIds.length > 0) {
     if(Std.isOfType(provider,ClaudeProvider)) {
-     if(q.action!="prompt") {ctx.fail({code:"unsupported_operation",message:"This Claude action cannot attach images",ambiguous:false});return;}
+     if(q.action!="prompt") {ctx.fail(new RpcError("unsupported_operation", "This Claude action cannot attach images", false));return;}
      provider.action(q,ctx);return;
     }
     if(Std.isOfType(provider,PiProvider)) {
-     if(q.action!="prompt" && q.action!="queue" && q.action!="steer") {ctx.fail({code:"unsupported_operation",message:"This Pi action cannot attach images",ambiguous:false});return;}
+     if(q.action!="prompt" && q.action!="queue" && q.action!="steer") {ctx.fail(new RpcError("unsupported_operation", "This Pi action cannot attach images", false));return;}
      provider.action(q,ctx);return;
     }
-    if (q.action != "prompt" || !Std.isOfType(provider, CodexProvider)) {ctx.fail({code:"unsupported_operation",message:"This provider does not support image attachments",ambiguous:false});return;}
+    if (q.action != "prompt" || !Std.isOfType(provider, CodexProvider)) {ctx.fail(new RpcError("unsupported_operation", "This provider does not support image attachments", false));return;}
     var paths = images().resolve(q.id, q.imageIds);
-    if (paths == null) {ctx.fail({code:"image_unavailable",message:"An image expired or is unavailable. Remove it and upload it again.",ambiguous:false});return;}
+    if (paths == null) {ctx.fail(new RpcError("image_unavailable", "An image expired or is unavailable. Remove it and upload it again.", false));return;}
     (cast provider:CodexProvider).actionWithImages(q,ctx,paths,function(thread) return images().pin(q.id,thread,q.imageIds)); return;
    }
    provider.action(q,ctx);
@@ -170,53 +171,53 @@ class WorkspaceAgentService implements WorkspaceAgents {
   // long or non-ASCII texts can still be too large: `fitted` cuts its texts further, so one reply always carries it.
   connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) action(q,new FittedViewContext(ctx,function(view) return fitted(view,connection.maxMessageBytes - 1024))));
   connection.register(WorkspaceAgentProtocol.MESSAGE_CONTENT,function(q,ctx) {
-   if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Message content denied",ambiguous:false});return;}
+   if (!allowed(q.workspace,q.instance,false)) {ctx.fail(new RpcError("unauthorized", "Message content denied", false));return;}
    if (q.session == null || q.session.length == 0 || q.session.length > 128 || q.turn == null || q.item == null || q.token == null
        || q.turn.length > 128 || q.item.length > 512 || q.token.length > 32 || q.offset < 0) {
-    ctx.fail({code:"content_unavailable",message:"Message content is unavailable",ambiguous:false});return;
+    ctx.fail(new RpcError("content_unavailable", "Message content is unavailable", false));return;
    }
    var provider=owner(q.session);
    if (provider == null || !Std.isOfType(provider,AgentMessageSource)) {
-    ctx.fail({code:"content_unavailable",message:"Message content is unavailable",ambiguous:false});return;
+    ctx.fail(new RpcError("content_unavailable", "Message content is unavailable", false));return;
    }
    var source:AgentMessageSource = cast provider;
    var chunk=source.messageContent(q.session,q.turn,q.item,q.token,q.offset);
-   if (chunk == null) ctx.fail({code:"content_unavailable",message:"Message content changed or is no longer available",ambiguous:false});
+   if (chunk == null) ctx.fail(new RpcError("content_unavailable", "Message content changed or is no longer available", false));
    else ctx.respond(chunk);
   });
   connection.register(WorkspaceAgentProtocol.IMAGE_UPLOAD,function(q,ctx) {
-   if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Image upload denied",ambiguous:false});return;}
+   if(!allowed(q.workspace,q.instance,true)) {ctx.fail(new RpcError("unauthorized", "Image upload denied", false));return;}
    var provider = owner(q.session);
-   if (provider == null || (!Std.isOfType(provider,CodexProvider) && !Std.isOfType(provider,PiProvider) && !Std.isOfType(provider,ClaudeProvider))) {ctx.fail({code:"unsupported_operation",message:"Image upload is unavailable for this session",ambiguous:false});return;}
+   if (provider == null || (!Std.isOfType(provider,CodexProvider) && !Std.isOfType(provider,PiProvider) && !Std.isOfType(provider,ClaudeProvider))) {ctx.fail(new RpcError("unsupported_operation", "Image upload is unavailable for this session", false));return;}
    try ctx.respond(images().process(q)) catch (error:Dynamic) {
     var message = Std.string(error);
     var safe = ["Image staging requires recovery; check the workspace service", "Invalid session", "Image must be at most 2 MiB",
      "Image staging quota reached; wait for abandoned uploads to expire or reconcile the session", "Could not create image identity",
      "Image upload expired or is unavailable", "Invalid image upload chunk", "Image upload is incomplete",
      "Choose a valid PNG, JPEG, or GIF image up to 4096 pixels per side", "Could not stage image"];
-    ctx.fail({code:"invalid_image_upload",message:safe.indexOf(message) >= 0 ? message : "Image staging failed; retry or check the workspace service",ambiguous:false});
+    ctx.fail(new RpcError("invalid_image_upload", safe.indexOf(message) >= 0 ? message : "Image staging failed; retry or check the workspace service", false));
    }
   });
   connection.register(WorkspaceAgentProtocol.MESSAGE_IMAGE,function(q,ctx) {
-   if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Image access denied",ambiguous:false});return;}
+   if (!allowed(q.workspace,q.instance,false)) {ctx.fail(new RpcError("unauthorized", "Image access denied", false));return;}
    if (q.session == null || q.turn == null || q.item == null || q.token == null || q.session.length > 128
        || q.turn.length > 128 || q.item.length > 128 || q.token.length > 256 || q.offset < 0 || owner(q.session) == null) {
-    ctx.fail({code:"image_unavailable",message:"Sent image is unavailable",ambiguous:false});return;
+    ctx.fail(new RpcError("image_unavailable", "Sent image is unavailable", false));return;
    }
    var chunk=images().readArchive(q.session,q.turn,q.item,q.token,q.offset);
-   if (chunk == null) ctx.fail({code:"image_unavailable",message:"Sent image is no longer available",ambiguous:false});
+   if (chunk == null) ctx.fail(new RpcError("image_unavailable", "Sent image is no longer available", false));
    else ctx.respond(chunk);
   });
   connection.register(WorkspaceAgentProtocol.MODELS,function(q,ctx) {
-   if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Model catalog denied",ambiguous:false});return;}
+   if(!allowed(q.workspace,q.instance,false)) {ctx.fail(new RpcError("unauthorized", "Model catalog denied", false));return;}
    var provider=provider(q.provider == null ? "codex" : q.provider);
-   if(provider == null) {ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;}
+   if(provider == null) {ctx.fail(new RpcError("invalid_provider", "Unsupported agent provider", false));return;}
    provider.modelCatalog(q,ctx);
   });
   connection.register(WorkspaceAgentProtocol.DISCOVER,function(q,ctx) {
-   if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Session discovery denied",ambiguous:false});return;}
+   if(!allowed(q.workspace,q.instance,false)) {ctx.fail(new RpcError("unauthorized", "Session discovery denied", false));return;}
    var provider=provider(q.provider == null ? "codex" : q.provider);
-   if(provider == null) {ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;}
+   if(provider == null) {ctx.fail(new RpcError("invalid_provider", "Unsupported agent provider", false));return;}
    provider.discover(q,ctx);
   });
  }

@@ -80,7 +80,7 @@ class WorkspaceDirectories {
 	public function forAgent(groups:Array<WorkspaceGroup>, group:String, explicit:Null<String>, fail:RpcError->Bool):Null<String> {
 		var resolved = forSession(groups, group, explicit);
 		if (resolved.path == null)
-			fail({code: explicit == null ? "invalid_request" : "invalid_directory", message: resolved.error, ambiguous: false});
+			fail(new RpcError(explicit == null ? "invalid_request" : "invalid_directory", resolved.error, false));
 		return resolved.path;
 	}
 

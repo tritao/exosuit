@@ -1,6 +1,7 @@
 package workspace.runtime;
 
 import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcError;
 import haxeon.wire.MessagePack;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceAgentProtocol.AgentRecord;
@@ -152,11 +153,11 @@ class WorkspaceCatalogService {
 		};
 		connection.register(WorkspaceCatalogProtocol.CATALOG, function(query, context) {
 			if (!WorkspaceCatalogProtocol.validQuery(query)) {
-				context.fail({code: "invalid_request", message: "Invalid catalog query", ambiguous: false});
+				context.fail(new RpcError("invalid_request", "Invalid catalog query", false));
 				return;
 			}
 			if (query.ref.workspace != workspace && query.ref.workspace != "workspace") {
-				context.fail({code: "unknown_workspace", message: "This service does not serve that workspace", ambiguous: false});
+				context.fail(new RpcError("unknown_workspace", "This service does not serve that workspace", false));
 				return;
 			}
 			var ref:WorkspaceRef = {machine: query.ref.machine, workspace: workspace};
@@ -170,7 +171,7 @@ class WorkspaceCatalogService {
 		});
 		connection.register(WorkspaceCatalogProtocol.UNWATCH, function(ref, context) {
 			if (!WorkspaceCatalogProtocol.validRef(ref)) {
-				context.fail({code: "invalid_request", message: "Invalid workspace", ambiguous: false});
+				context.fail(new RpcError("invalid_request", "Invalid workspace", false));
 				return;
 			}
 			unwatch(connection);

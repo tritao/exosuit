@@ -134,14 +134,14 @@ private class WorkspaceFileBinding {
 	function authorized<T>(context:RpcContext<T>):Bool {
 		if (active && granted && !service.disposed)
 			return true;
-		context.fail({code: "unauthorized", message: "Workspace file access denied", ambiguous: false});
+		context.fail(new RpcError("unauthorized", "Workspace file access denied", false));
 		return false;
 	}
 
 	function onRoots(request:WorkspaceQuery, context:RpcContext<FileRootsResult>):Void {
 		if (!authorized(context)) return;
 		if (request == null || request.workspace != service.workspace) {
-			context.fail({code: "unknown_workspace", message: "Unknown workspace", ambiguous: false});
+			context.fail(new RpcError("unknown_workspace", "Unknown workspace", false));
 			return;
 		}
 		context.respond({workspace: service.workspace, roots: [for (root in service.roots) {
@@ -156,11 +156,11 @@ private class WorkspaceFileBinding {
 		if (!authorized(context))
 			return;
 		if (request == null || !service.validRef(request.workspace, request.root)) {
-			context.fail({code: "invalid_request", message: "Invalid workspace file reference", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace file reference", false));
 			return;
 		}
 		if (!service.validPath(request.path)) {
-			context.fail({code: "invalid_path", message: "Workspace paths must be canonical and root-relative", ambiguous: false});
+			context.fail(new RpcError("invalid_path", "Workspace paths must be canonical and root-relative", false));
 			return;
 		}
 		try {
@@ -169,7 +169,7 @@ private class WorkspaceFileBinding {
 				entry: WorkspaceFileService.metadata(service.workspace, request.root, null, nativeEntry)});
 		} catch (error:Dynamic) {
 			var result = WorkspaceFileService.nativeResult(error);
-			context.fail(result == null ? {code: "file_unavailable", message: "Workspace file metadata is unavailable", ambiguous: false}
+			context.fail(result == null ? new RpcError("file_unavailable", "Workspace file metadata is unavailable", false)
 				: WorkspaceFileService.fileErrorResult(result));
 		}
 	}
@@ -178,11 +178,11 @@ private class WorkspaceFileBinding {
 		if (!authorized(context)) return;
 		if (request == null || !service.validRef(request.workspace, request.root)
 			|| request.limit < 1 || request.limit > WorkspaceFileService.PAGE_LIMIT) {
-			context.fail({code: "invalid_request", message: "Invalid workspace directory request", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace directory request", false));
 			return;
 		}
 		if (!service.validPath(request.path)) {
-			context.fail({code: "invalid_path", message: "Workspace paths must be canonical and root-relative", ambiguous: false});
+			context.fail(new RpcError("invalid_path", "Workspace paths must be canonical and root-relative", false));
 			return;
 		}
 		prune();
@@ -196,24 +196,24 @@ private class WorkspaceFileBinding {
 	function onReadOpen(request:FileReadOpenRequest, context:RpcContext<FileReadOpenResult>):Void {
 		if (!authorized(context)) return;
 		if (request == null || !service.validRef(request.workspace, request.root)) {
-			context.fail({code: "invalid_request", message: "Invalid workspace file reference", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace file reference", false));
 			return;
 		}
 		if (!service.validPath(request.path)) {
-			context.fail({code: "invalid_path", message: "Workspace paths must be canonical and root-relative", ambiguous: false});
+			context.fail(new RpcError("invalid_path", "Workspace paths must be canonical and root-relative", false));
 			return;
 		}
 		if (request.expectedRevision != null && request.expectedRevision.length > 128) {
-			context.fail({code: "invalid_request", message: "Invalid file revision", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid file revision", false));
 			return;
 		}
 		if (request.initialBytesLimit != null && (request.initialBytesLimit < 0 || request.initialBytesLimit > WorkspaceFileService.READ_CHUNK_BYTES)) {
-			context.fail({code: "invalid_range", message: "Invalid initial file byte limit", ambiguous: false});
+			context.fail(new RpcError("invalid_range", "Invalid initial file byte limit", false));
 			return;
 		}
 		pruneReadHandles();
 		if (readHandleCount() >= WorkspaceFileService.MAX_READ_HANDLES_PER_CLIENT) {
-			context.fail({code: "resource_limit", message: "Too many open workspace file reads", ambiguous: false});
+			context.fail(new RpcError("resource_limit", "Too many open workspace file reads", false));
 			return;
 		}
 		var file:Null<FileSystemFile> = null;
@@ -224,7 +224,7 @@ private class WorkspaceFileBinding {
 			if (request.expectedRevision != null && request.expectedRevision != revision) {
 				file.close();
 				file = null;
-				context.fail({code: "revision_changed", message: "File changed since it was listed", ambiguous: false});
+				context.fail(new RpcError("revision_changed", "File changed since it was listed", false));
 				return;
 			}
 			var size = entry.get_size();
@@ -238,7 +238,7 @@ private class WorkspaceFileBinding {
 				if (bytes.length != length || WorkspaceFileService.fileRevision(service.workspace, request.root, file.info()) != revision) {
 					file.close();
 					file = null;
-					context.fail({code: "revision_changed", message: "File changed during the read", ambiguous: false});
+					context.fail(new RpcError("revision_changed", "File changed during the read", false));
 					return;
 				}
 			}
@@ -252,9 +252,9 @@ private class WorkspaceFileBinding {
 			if (file != null)
 				try file.close() catch (_:Dynamic) {}
 			var result = WorkspaceFileService.nativeResult(error);
-			context.fail(result == null ? {code: "file_unavailable", message: "Workspace file could not be opened", ambiguous: false}
+			context.fail(result == null ? new RpcError("file_unavailable", "Workspace file could not be opened", false)
 				: result == Result.ErrorInvalidArgument
-					? {code: "unsupported_type", message: "Only regular files can be read", ambiguous: false}
+					? new RpcError("unsupported_type", "Only regular files can be read", false)
 					: WorkspaceFileService.fileErrorResult(result));
 		}
 	}
@@ -265,24 +265,24 @@ private class WorkspaceFileBinding {
 			|| request.handle.length == 0 || request.handle.length > 128 || request.offset == null
 			|| Int64.compare(request.offset, Int64.ofInt(0)) < 0 || request.length < 1
 			|| request.length > WorkspaceFileService.READ_CHUNK_BYTES) {
-			context.fail({code: "invalid_range", message: "Invalid workspace file byte range", ambiguous: false});
+			context.fail(new RpcError("invalid_range", "Invalid workspace file byte range", false));
 			return;
 		}
 		pruneReadHandles();
 		var state = readHandles.get(request.handle);
 		if (state == null) {
-			context.fail({code: "invalid_handle", message: "Workspace file handle is unavailable", ambiguous: false});
+			context.fail(new RpcError("invalid_handle", "Workspace file handle is unavailable", false));
 			return;
 		}
 		if (Int64.compare(request.offset, state.size) > 0) {
-			context.fail({code: "invalid_range", message: "File offset is beyond end of file", ambiguous: false});
+			context.fail(new RpcError("invalid_range", "File offset is beyond end of file", false));
 			return;
 		}
 		try {
 			var before = state.file.info();
 			if (WorkspaceFileService.fileRevision(service.workspace, state.root, before) != state.revision) {
 				closeReadHandle(request.handle);
-				context.fail({code: "revision_changed", message: "File changed during the read", ambiguous: false});
+				context.fail(new RpcError("revision_changed", "File changed during the read", false));
 				return;
 			}
 			var remaining = Int64.sub(state.size, request.offset);
@@ -295,7 +295,7 @@ private class WorkspaceFileBinding {
 			if (WorkspaceFileService.fileRevision(service.workspace, state.root, after) != state.revision
 				|| bytes.length != length) {
 				closeReadHandle(request.handle);
-				context.fail({code: "revision_changed", message: "File changed during the read", ambiguous: false});
+				context.fail(new RpcError("revision_changed", "File changed during the read", false));
 				return;
 			}
 			state.lastUsed = service.clock();
@@ -305,9 +305,9 @@ private class WorkspaceFileBinding {
 			var result = WorkspaceFileService.nativeResult(error);
 			closeReadHandle(request.handle);
 			if (result != null && result == Result.ErrorInvalidRequest) {
-				context.fail({code: "revision_changed", message: "File handle was invalidated", ambiguous: false});
+				context.fail(new RpcError("revision_changed", "File handle was invalidated", false));
 			} else {
-				context.fail(result == null ? {code: "file_unavailable", message: "Workspace file read failed", ambiguous: false}
+				context.fail(result == null ? new RpcError("file_unavailable", "Workspace file read failed", false)
 					: WorkspaceFileService.fileErrorResult(result));
 			}
 		}
@@ -317,7 +317,7 @@ private class WorkspaceFileBinding {
 		if (!authorized(context)) return;
 		if (request == null || request.workspace != service.workspace || request.handle == null
 			|| request.handle.length == 0 || request.handle.length > 128) {
-			context.fail({code: "invalid_request", message: "Invalid workspace file handle", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace file handle", false));
 			return;
 		}
 		context.respond({closed: closeReadHandle(request.handle)});
@@ -327,11 +327,11 @@ private class WorkspaceFileBinding {
 		if (!authorized(context)) return;
 		if (request == null || !service.validRef(request.workspace, request.root) || request.cursor < 0
 			|| request.epoch != null && request.epoch.length > 128) {
-			context.fail({code: "invalid_request", message: "Invalid workspace file watch", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace file watch", false));
 			return;
 		}
 		if (!service.watching(request.root)) {
-			context.fail({code: "unsupported", message: "Workspace file watching is unavailable", ambiguous: false});
+			context.fail(new RpcError("unsupported", "Workspace file watching is unavailable", false));
 			return;
 		}
 		watchedRoots.set(request.root, true);
@@ -341,7 +341,7 @@ private class WorkspaceFileBinding {
 	function onUnwatch(request:FileUnwatchRequest, context:RpcContext<FileUnwatchResult>):Void {
 		if (!authorized(context)) return;
 		if (request == null || !service.validRef(request.workspace, request.root)) {
-			context.fail({code: "invalid_request", message: "Invalid workspace file watch", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace file watch", false));
 			return;
 		}
 		if (watchedRoots.exists(request.root)) {
@@ -354,19 +354,19 @@ private class WorkspaceFileBinding {
 	function onSearchStart(request:FileSearchStartRequest, context:RpcContext<FileSearchHandle>):Void {
 		if (!authorized(context)) return;
 		if (request != null && service.rootGone(request.workspace, request.root)) {
-			context.fail({code: UNKNOWN_ROOT, message: "Workspace root is not attached", ambiguous: false});
+			context.fail(new RpcError(UNKNOWN_ROOT, "Workspace root is not attached", false));
 			return;
 		}
 		if (request == null || !service.validRef(request.workspace, request.root)
 			|| request.mode != "name" && request.mode != "content" || request.query == null
 			|| request.query.length == 0 || Bytes.ofString(request.query).length > MAX_SEARCH_QUERY_BYTES
 			|| hasNul(request.query) || request.query.indexOf("\n") >= 0) {
-			context.fail({code: "unsupported_query", message: "Invalid workspace file search query", ambiguous: false});
+			context.fail(new RpcError("unsupported_query", "Invalid workspace file search query", false));
 			return;
 		}
 		pruneSearches();
 		if (searchCount() >= MAX_ACTIVE_SEARCHES) {
-			context.fail({code: "resource_limit", message: "Too many active workspace searches", ambiguous: false});
+			context.fail(new RpcError("resource_limit", "Too many active workspace searches", false));
 			return;
 		}
 		counter++;
@@ -399,19 +399,19 @@ private class WorkspaceFileBinding {
 	function onSearchPage(request:FileSearchPageRequest, context:RpcContext<FileSearchPageResult>):Void {
 		if (!authorized(context)) return;
 		if (request != null && service.rootGone(request.workspace, request.root)) {
-			context.fail({code: UNKNOWN_ROOT, message: "Workspace root is not attached", ambiguous: false});
+			context.fail(new RpcError(UNKNOWN_ROOT, "Workspace root is not attached", false));
 			return;
 		}
 		if (request == null || request.workspace != service.workspace || request.searchId == null
 			|| request.searchId.length == 0 || request.searchId.length > 128 || request.limit < 1
 			|| request.limit > MAX_SEARCH_PAGE_SIZE || !service.validRef(request.workspace, request.root)) {
-			context.fail({code: "invalid_request", message: "Invalid workspace search page", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace search page", false));
 			return;
 		}
 		pruneSearches();
 		var state = searches.get(request.searchId);
 		if (state == null || state.root != request.root) {
-			context.fail({code: "invalid_handle", message: "Workspace search is unavailable", ambiguous: false});
+			context.fail(new RpcError("invalid_handle", "Workspace search is unavailable", false));
 			return;
 		}
 		state.lastUsed = service.clock();
@@ -432,7 +432,7 @@ private class WorkspaceFileBinding {
 		if (request == null || request.workspace != service.workspace || request.searchId == null
 			|| request.searchId.length == 0 || request.searchId.length > 128
 			|| !service.validRef(request.workspace, request.root)) {
-			context.fail({code: "invalid_request", message: "Invalid workspace search cancellation", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid workspace search cancellation", false));
 			return;
 		}
 		var state = searches.get(request.searchId);
@@ -792,10 +792,10 @@ private class WorkspaceFileBinding {
 			context.respond(response);
 		} catch (error:Dynamic) {
 			if (Std.string(error) == "workspace_list_limit")
-				context.fail({code: "resource_limit", message: "Workspace directory listing exceeds the bounded snapshot limit", ambiguous: false});
+				context.fail(new RpcError("resource_limit", "Workspace directory listing exceeds the bounded snapshot limit", false));
 			else {
 				var result = WorkspaceFileService.nativeResult(error);
-				context.fail(result == null ? {code: "file_unavailable", message: "Workspace directory listing is unavailable", ambiguous: false}
+				context.fail(result == null ? new RpcError("file_unavailable", "Workspace directory listing is unavailable", false)
 					: WorkspaceFileService.fileErrorResult(result));
 			}
 		}
@@ -804,12 +804,12 @@ private class WorkspaceFileBinding {
 	function continueList(request:FileListRequest, context:RpcContext<FileListPage>):Void {
 		var token = request.cursor;
 		if (token == null || token.length == 0 || token.length > 128) {
-			context.fail({code: "invalid_request", message: "Invalid directory cursor", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid directory cursor", false));
 			return;
 		}
 		var state = cursors.get(token);
 		if (state == null || state.snapshot.root != request.root || state.snapshot.path != request.path) {
-			context.fail({code: "cursor_expired", message: "Directory listing expired; list again", ambiguous: false});
+			context.fail(new RpcError("cursor_expired", "Directory listing expired; list again", false));
 			return;
 		}
 		state.snapshot.lastUsed = service.clock();
@@ -1335,7 +1335,7 @@ class WorkspaceFileService {
 			case Result.ErrorUnsupported: "unsupported";
 			case _: "file_unavailable";
 		};
-		return {code: code, message: "Workspace file operation failed", ambiguous: false};
+		return new RpcError(code, "Workspace file operation failed", false);
 	}
 
 	static function compareEntries(a:WorkspaceFileEntry, b:WorkspaceFileEntry):Int {

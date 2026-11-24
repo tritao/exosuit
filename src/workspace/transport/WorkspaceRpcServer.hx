@@ -75,14 +75,14 @@ class WorkspaceRpcServer {
 	static function answerFolders(change:Array<String>->Array<String>, request:workspace.service.WorkspaceFoldersProtocol.FoldersSetRequest,
 			context:haxeon.rpc.RpcContext<workspace.service.WorkspaceFoldersProtocol.FoldersSetResult>):Void {
 		if (request == null || request.folders == null) {
-			context.fail({code: "invalid_request", message: "Invalid folder list", ambiguous: false});
+			context.fail(new RpcError("invalid_request", "Invalid folder list", false));
 			return;
 		}
 		try {
 			var folders = change(request.folders);
 			context.respond({folders: folders, roots: folders.length == 0 ? 1 : folders.length});
 		} catch (error:Dynamic) {
-			context.fail({code: "invalid_folders", message: Std.string(error), ambiguous: false});
+			context.fail(new RpcError("invalid_folders", Std.string(error), false));
 		}
 	}
 
@@ -244,11 +244,11 @@ class WorkspaceRpcServer {
 					if (currentIdentity != null)
 						peer.connection.register(WorkspaceProtocol.IDENTITY, function(request, context) {
 							if (grants.indexOf(WorkspaceProtocol.READ) < 0 || grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) < 0) {
-								context.fail({code: "unauthorized", message: "Identity query denied", ambiguous: false});
+								context.fail(new RpcError("unauthorized", "Identity query denied", false));
 								return;
 							}
 							if (request.workspace != service.id) {
-								context.fail({code: "invalid_request", message: "Invalid workspace identity query", ambiguous: false});
+								context.fail(new RpcError("invalid_request", "Invalid workspace identity query", false));
 								return;
 							}
 							context.respond({workspace: currentIdentity.workspace, root: currentIdentity.root, instance: currentIdentity.instance});

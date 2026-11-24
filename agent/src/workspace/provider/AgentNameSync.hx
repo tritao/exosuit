@@ -23,7 +23,7 @@ class AgentNameSync {
   this.record=record;this.save=save;this.read=read;this.write=write;this.clock=clock;
  }
  public function dispose():Void disposed=true;
- static function error(code:String,message:String,ambiguous:Bool=false):RpcError return {code:code,message:message,ambiguous:ambiguous};
+ static function error(code:String,message:String,ambiguous:Bool=false):RpcError return new RpcError(code, message, ambiguous);
  function update(name:String,metadata:AgentNameMetadata):Void {
   var previous=record.name,old=record.nameMetadata;
   record.name=name;record.nameMetadata=metadata;

@@ -24,6 +24,7 @@ import scm.ScmService;
 import workspace.service.WorkspaceScmProtocol;
 import workspace.service.WorkspaceScmProtocol.ScmWatchEvent;
 import workspace.service.WorkspaceScmProtocol.ScmWatchResult;
+import haxeon.rpc.RpcError;
 
 private typedef ScmRootStream = {
 	var id:String;
@@ -785,7 +786,7 @@ private class WorkspaceScmBinding {
 	}
 
 	function fail<T>(context:haxeon.rpc.RpcContext<T>, code:String, message:String, retryable:Bool = false):Void
-		context.fail({code: code, message: message, ambiguous: retryable});
+		context.fail(new RpcError(code, message, retryable));
 
 	static function parseReference(kind:Null<String>, value:Null<String>):ScmRef {
 		return switch kind {

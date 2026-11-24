@@ -353,7 +353,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     controlled: owner != null
     };
   }
-  function error(code:String):RpcError return {code: code, message: code, ambiguous: false};
+  function error(code:String):RpcError return new RpcError(code, code, false);
   function valid(workspace:String, instance:String, id:String):Bool return workspace == this.workspace
     && instance == this.instance && id != null && id.length > 0 && id.length <= 128;
   function size(columns:Int, rows:Int):Bool return columns >= 1 && columns <= 512 && rows >= 1 && rows <= 256;
@@ -515,7 +515,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         save(updated);
         c.respond(copy(updated));
       } catch (_:Dynamic) {
-        c.fail({code: "storage_failed", message: "Terminal metadata requires recovery", ambiguous: true}
+        c.fail(new RpcError("storage_failed", "Terminal metadata requires recovery", true)
         );
       }
     }
@@ -565,7 +565,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         AgentTerminalIdentity.remove(AgentTerminalIdentity.folder(hosts.stateDirectory, r.id));
       } catch (_:Dynamic) {
         storageFailed = true;
-        c.fail({code: "storage_failed", message: "Terminal metadata requires recovery", ambiguous: true}
+        c.fail(new RpcError("storage_failed", "Terminal metadata requires recovery", true)
         );
         return;
       }
@@ -636,7 +636,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           if (!knownGroup(selectedGroup)) { c.fail(error("unknown_group")); return; }
           // The explicit directory, else the group's or nearest ancestor's folder, else the root (ADR 0006).
           var chosen = new WorkspaceDirectories(root).forSession(groupList, selectedGroup, r.directory);
-          if (chosen.path == null) { c.fail({code: "invalid_directory", message: chosen.error, ambiguous: false}); return; }
+          if (chosen.path == null) { c.fail(new RpcError("invalid_directory", chosen.error, false)); return; }
           record = {
             id: r.id,
             name: r.agentProvider == null ? nextTerminalName() : (r.agentProvider == "claude" ? "Claude Code" : r.agentProvider == "codex" ? "Codex" : "Pi") + " · Terminal",
@@ -657,7 +657,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         try {
           save(record);
         } catch (_:Dynamic) {
-          c.fail({code: "storage_failed", message: "Terminal creation requires recovery", ambiguous: true}
+          c.fail(new RpcError("storage_failed", "Terminal creation requires recovery", true)
           );
           return;
         }
@@ -671,11 +671,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           failed.revision += 1;
           try save(failed) catch (_:Dynamic) {
           }
-          c.fail({
-            code: storageFailed ? "storage_failed" : "terminal_spawn_failed",
-            message : "Terminal creation failed: " + Std.string(cause),
-            ambiguous : storageFailed
-          }
+          c.fail(new RpcError(storageFailed ? "storage_failed" : "terminal_spawn_failed", "Terminal creation failed: " + Std.string(cause), storageFailed)
           );
           return;
         }
@@ -685,7 +681,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         try save(running) catch (_:Dynamic) {
           created.backend.kill();
           created.backend.close();
-          c.fail({code: "storage_failed", message: "Terminal creation requires recovery", ambiguous: true}
+          c.fail(new RpcError("storage_failed", "Terminal creation requires recovery", true)
           );
           return;
         }
@@ -815,7 +811,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         t.backend.write(r.data);
         c.respond(info(t, connection));
       } catch (_:Dynamic) {
-        c.fail({code: "input_failed", message: "Input delivery is uncertain", ambiguous: true}
+        c.fail(new RpcError("input_failed", "Input delivery is uncertain", true)
         );
       }
     }
@@ -924,7 +920,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           var failed = copy(current == null ? record : current); failed.state = "failed"; failed.revision += 1;
           try save(failed) catch (_:Dynamic) {}
         }
-        c.fail({code:"terminal_restart_failed", message:"Could not restart shell; its last screen was kept", ambiguous:true});
+        c.fail(new RpcError("terminal_restart_failed", "Could not restart shell; its last screen was kept", true));
       }
     });
   }

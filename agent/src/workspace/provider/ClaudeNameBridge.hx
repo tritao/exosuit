@@ -59,10 +59,7 @@ class ClaudeNameBridge {
   if(current==null) {done(new language.JsonRpcResponse(null,"provider_starting: Claude session metadata helper is reconnecting; retry shortly"));return;}
   current.request(method,params,clock(),done);
  }
- static function failure(message:String):RpcError return {
-  code:StringTools.startsWith(message,"conflict:") ? "conflict" : StringTools.startsWith(message,"unsupported:") ? "unsupported_operation" : StringTools.startsWith(message,"provider_starting:") ? "provider_starting" : "provider_error",
-  message:message,ambiguous:message.toLowerCase().indexOf("timeout")>=0
- };
+ static function failure(message:String):RpcError return new RpcError(StringTools.startsWith(message,"conflict:") ? "conflict" : StringTools.startsWith(message,"unsupported:") ? "unsupported_operation" : StringTools.startsWith(message,"provider_starting:") ? "provider_starting" : "provider_error", message, message.toLowerCase().indexOf("timeout")>=0);
  public function read(session:String,cwd:String,done:NativeNameReadDone):Void {
   call("session/name/read",{sessionId:session,cwd:cwd},function(result) {
    if(result.error!=null) {done(null,failure(result.error));return;}

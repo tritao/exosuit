@@ -2,6 +2,7 @@ package workspace.transport;
 
 import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
+import haxeon.rpc.RpcError;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
 import nativekit.ffi.NativeKitTypes.Result;
@@ -67,7 +68,7 @@ class NativeRpcHub {
 	public function connect(options:TransportOptions, done:RpcConnectResult->Void):RpcConnectAttempt {
 		return connectBytes(options, function(stream, error) {
 			if (stream == null) {
-				done(Failed({code: error == null ? "connect_failed" : error, message: error == null ? "Connect failed" : error, ambiguous: false}, true));
+				done(Failed(new RpcError(error == null ? "connect_failed" : error, error == null ? "Connect failed" : error, false), true));
 				return;
 			}
 			done(Opened(new NativeRpcTransport(stream, maxMessageBytes)));
