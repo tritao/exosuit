@@ -5,6 +5,7 @@ import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceCatalogProtocol.CatalogChange;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceCatalog;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
+import workspace.transport.RpcCalls;
 
 /**
 	A watch on one workspace service's catalog, carried on a connection its owner holds (a WorkspaceLink's client):
@@ -129,7 +130,7 @@ class WorkspaceCatalogWatch {
 			ConnectTimeline.mark("catalog-read", ref.workspace, mirror.token == null ? "first" : "again");
 		var staged = staging;
 		var resume = staged != null ? staged.token : mirror.token;
-		source.call(WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: resume, watch: true}, CALL_TIMEOUT, function(page) {
+		RpcCalls.call(source, WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: resume, watch: true}, CALL_TIMEOUT, function(page) {
 			if (closed || source != connection)
 				return;
 			receive(source, page, resume);
@@ -252,6 +253,6 @@ class WorkspaceCatalogWatch {
 		var current = connection;
 		closeNow();
 		if (current != null && current.isOpen())
-			current.call(WorkspaceCatalogProtocol.UNWATCH, ref, Std.int(LINGER_MS), function(_) {}, function(_) {});
+			RpcCalls.call(current, WorkspaceCatalogProtocol.UNWATCH, ref, Std.int(LINGER_MS), function(_) {}, function(_) {});
 	}
 }

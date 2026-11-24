@@ -7,6 +7,7 @@ import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceAgentProtocol.AgentImageUploadResult;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 private typedef PendingModelList = {
   var cursor:Null<String>;
@@ -237,7 +238,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       return;
     }
     pending.next = pending.deadline;
-    pending.connection.call(WorkspaceAgentProtocol.MODELS,
+    RpcCalls.call(pending.connection, WorkspaceAgentProtocol.MODELS,
       {workspace: "workspace", instance: instance(), cursor: pending.cursor}, 20000,
       function(page) {
         if (pendingModels != pending) return;
@@ -323,7 +324,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     after:Null<String>,
     records:Array<WorkspaceAgentProtocol.AgentRecord>
   ):Void {
-    connection.call(WorkspaceAgentProtocol.LIST,
+    RpcCalls.call(connection, WorkspaceAgentProtocol.LIST,
       {workspace: "workspace", instance: instance(), after: after}, 3000, function(value) {
       if (rpc() != connection || requestToken != agentsRequestToken) return;
       var workspaceRoot = root();
@@ -398,7 +399,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
     var token = discoveryToken;
     discoveryNext = discoveryDeadline;
-    connection.call(WorkspaceAgentProtocol.DISCOVER, query, 20000, function(value) {
+    RpcCalls.call(connection, WorkspaceAgentProtocol.DISCOVER, query, 20000, function(value) {
       if (rpc() != connection || token != discoveryToken) return;
       pendingDiscovery = null;
       discovery = value;
@@ -470,7 +471,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
     }
     operation.inFlight=true;operation.phase="creating";agentsRevision++;
-    connection.call(WorkspaceAgentProtocol.CREATE,query,20000,function(record) {
+    RpcCalls.call(connection, WorkspaceAgentProtocol.CREATE,query,20000,function(record) {
       if(creation != operation || rpc() != connection || query.instance != instance() || root() != operation.root) return;
       var expected=query.provider == null ? "codex" : query.provider;
       var actual=record.provider == null ? "codex" : record.provider;
@@ -515,7 +516,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     agentTokens.set(id, selected);
     agentsError = null;
     agentActionError = null;
-    connection.call(WorkspaceAgentProtocol.ACTION, {
+    RpcCalls.call(connection, WorkspaceAgentProtocol.ACTION, {
       workspace: "workspace",
       instance: instance(),
       id: id,
@@ -681,7 +682,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
     function send(operation:String, offset:Int, chunk:Null<haxe.io.Bytes>, success:AgentImageUploadResult->Void):Void {
       if (rpc() != connection || instance() != generation) { fail("Workspace connection changed; upload the image again."); return; }
-      connection.call(WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:generation, session:id,
+      RpcCalls.call(connection, WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:generation, session:id,
         operation:operation, upload:upload, size:bytes.length, offset:offset, bytes:chunk}, 20000,
         function(result) {
           if (finished) return;
@@ -717,7 +718,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     var next:Int->Void=null;
     next=function(offset:Int) {
       if (rpc()!=connection || instance()!=generation || agentViews.get(id)==null) {fail("Workspace connection changed; retry the image");return;}
-      connection.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:imageId,offset:offset},20000,function(chunk) {
+      RpcCalls.call(connection, WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:imageId,offset:offset},20000,function(chunk) {
         if (finished) return;
         if (rpc()!=connection || instance()!=generation || agentViews.get(id)==null) {fail("Workspace connection changed; retry the image");return;}
         if (chunk == null || chunk.token != imageId || chunk.offset != offset || chunk.total <= 0 || chunk.total > 2*1024*1024
@@ -742,7 +743,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     var next:Int->Void = null;
     next=function(offset:Int) {
       if (rpc()!=connection || instance()!=generation) { fail("Workspace connection changed; retry loading the message"); return; }
-      connection.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:token,offset:offset},20000,
+      RpcCalls.call(connection, WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:token,offset:offset},20000,
         function(chunk) {
           if (finished) return;
           if (rpc()!=connection || instance()!=generation) { fail("Workspace connection changed; retry loading the message"); return; }
@@ -766,7 +767,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function removeAgentImage(id:String, upload:String):Void {
     var connection = rpc();
     if (connection == null || !canControlAgents() || upload == null || upload == "") return;
-    connection.call(WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:instance(), session:id,
+    RpcCalls.call(connection, WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:instance(), session:id,
       operation:"remove", upload:upload, size:0, offset:0, bytes:null}, 5000, function(_) {}, function(_) {});
   }
 
@@ -786,7 +787,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (!done && current()) { done=true; failure({code:"invalid_snapshot",message:message,ambiguous:false},ack); }
     }
     if (expectedRoot == null) { fail("Workspace is unavailable"); return; }
-    connection.call(WorkspaceAgentProtocol.ACTION,query,query.action == "rename-native" ? 60000 : 20000,function(view) {
+    RpcCalls.call(connection, WorkspaceAgentProtocol.ACTION,query,query.action == "rename-native" ? 60000 : 20000,function(view) {
       if (done || !current()) return;
       if (view == null || view.record == null || view.record.id != id || view.record.workspaceRoot != expectedRoot) { fail("Invalid agent view"); return; }
       ack=true; acknowledged(view.inputToken);
@@ -1002,7 +1003,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     after:Null<String>,
     records:Array<WorkspaceTerminalProtocol.TerminalRecord>
   ):Void {
-    connection.call(WorkspaceTerminalProtocol.LIST,
+    RpcCalls.call(connection, WorkspaceTerminalProtocol.LIST,
       {workspace: "workspace", instance: instance(), after: after}, 2000, function(value) {
       if (rpc() != connection) return;
       var workspaceRoot = root();
@@ -1108,7 +1109,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function renameTerminal(record:WorkspaceTerminalProtocol.TerminalRecord, name:String, group:String, ?order:Int):Void {
     var connection = rpc();
     if (record.workspaceRoot != root() || connection == null || !catalogReady()) return;
-    connection.call(
+    RpcCalls.call(connection,
       WorkspaceTerminalProtocol.RENAME,
       {
       workspace: "workspace",
@@ -1149,7 +1150,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (done != null) done(null, "Workspace group editing is unavailable");
       return;
     }
-    connection.call(
+    RpcCalls.call(connection,
       WorkspaceProtocol.GROUP,
       {
       workspace: "workspace",
@@ -1172,7 +1173,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function removeGroup(owner:String, group:WorkspaceProtocol.WorkspaceGroup):Void {
     var connection = rpc(), epoch = endpoint.workspaceEpoch();
     if (owner != instance() || connection == null || epoch == null || !canRemoveGroups() || !catalogReady()) return;
-    connection.call(WorkspaceProtocol.GROUP, {
+    RpcCalls.call(connection, WorkspaceProtocol.GROUP, {
       workspace:"workspace", epoch:epoch, operation:WorkspaceIds.create("operation"), group:group.id,
       expectedRevision:group.revision, name:group.name, action:"delete", parent:group.parent, cwd:group.cwd, order:group.order
     }, 2000, function(_) catalogCompleted(connection), function(error) catalogFailed(connection,error));
@@ -1198,7 +1199,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function stopTerminal(record:WorkspaceTerminalProtocol.TerminalRecord):Void {
     var connection = rpc();
     if (record.workspaceRoot != root() || connection == null || !catalogReady()) return;
-    connection.call(
+    RpcCalls.call(connection,
       WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "workspace", instance: instance(), id: record.id},
       2000,
@@ -1218,7 +1219,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       catalogActionError="This terminal changed. Refresh before closing it.";catalogRevision++;return;
     }
     if(!catalogReady()) return;
-    connection.call(WorkspaceTerminalProtocol.FORGET,{
+    RpcCalls.call(connection, WorkspaceTerminalProtocol.FORGET,{
       workspace:"workspace",instance:owner,id:record.id,resourceInstance:record.instance,
       expectedRevision:record.revision,terminate:true
     },5000,function(result) {
@@ -1241,7 +1242,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function forgetTerminal(record:WorkspaceTerminalProtocol.TerminalRecord):Void {
     var connection = rpc();
     if (record.workspaceRoot != root() || connection == null || !catalogReady()) return;
-    connection.call(
+    RpcCalls.call(connection,
       WorkspaceTerminalProtocol.FORGET,
       {
       workspace: "workspace",

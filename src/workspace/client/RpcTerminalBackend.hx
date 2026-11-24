@@ -7,6 +7,7 @@ import haxe.io.Bytes;
 import haxe.Int64;
 import haxeon.rpc.RpcConnection;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 /** Client attachment only: close/detach never kills a service-owned shell. */
 class RpcTerminalBackend implements TerminalBackend {
@@ -287,12 +288,12 @@ class RpcTerminalBackend implements TerminalBackend {
     var epoch = attachEpoch;
     if (closed || !attached || controlUnavailable || c == null || !c.isOpen() || !hasControlGrant() || controlPending) return;
     controlPending = true;
-    c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+    RpcCalls.call(c, WorkspaceTerminalProtocol.SET_CONTROL, {
       workspace: "workspace", instance: instance, id: terminalId,
       claim: claim, takeover: claim && takeover, clientKey: clientKey()
     }, 2000, function(info) {
       if (closed || !current(c, epoch)) {
-        if (info.controller == true && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+        if (info.controller == true && c.isOpen()) RpcCalls.call(c, WorkspaceTerminalProtocol.SET_CONTROL, {
           workspace: "workspace", instance: instance, id: terminalId,
           claim: false, takeover: false
         }, 1000, function(_) {}, function(_) {});
@@ -416,7 +417,7 @@ class RpcTerminalBackend implements TerminalBackend {
     writing = true;
     sequence++;
     terminalsession.TerminalLatencyTrace.mark("terminal.input.sent");
-    c.call(WorkspaceTerminalProtocol.INPUT, {
+    RpcCalls.call(c, WorkspaceTerminalProtocol.INPUT, {
       workspace: "workspace",
       instance: instance,
       id: terminalId,
@@ -487,7 +488,7 @@ class RpcTerminalBackend implements TerminalBackend {
     var c = connection;
     if (c == null || !c.isOpen() || instance.length == 0) throw "Terminal is not connected";
     var epoch = attachEpoch;
-    c.call(WorkspaceTerminalProtocol.TERMINATE,
+    RpcCalls.call(c, WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "workspace", instance: instance, id: terminalId}, 2000, function(_) {
     }, function(e) {
       if (!closed && current(c, epoch)) {
@@ -512,9 +513,9 @@ class RpcTerminalBackend implements TerminalBackend {
     var lastListener = releaseEvents == null || releaseEvents();
     releaseEvents = null;
     var c = connection;
-    if (lastListener && eventDriven && c != null && c.isOpen()) c.call(WorkspaceTerminalProtocol.UNWATCH,
+    if (lastListener && eventDriven && c != null && c.isOpen()) RpcCalls.call(c, WorkspaceTerminalProtocol.UNWATCH,
       {workspace:"workspace", instance:instance, id:terminalId}, 1000, function(_) {}, function(_) {});
-    if (lastListener && controller && c != null && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+    if (lastListener && controller && c != null && c.isOpen()) RpcCalls.call(c, WorkspaceTerminalProtocol.SET_CONTROL, {
       workspace: "workspace", instance: instance, id: terminalId,
       claim: false, takeover: false
     }, 1000, function(_) {}, function(_) {});
@@ -591,7 +592,7 @@ class RpcTerminalBackend implements TerminalBackend {
         var router = client.terminalEvents();
         var creating = create;
         ConnectTimeline.mark("terminal-open", root, terminalId);
-        c.call(WorkspaceTerminalProtocol.OPEN, {
+        RpcCalls.call(c, WorkspaceTerminalProtocol.OPEN, {
           workspace: "workspace",
           instance: instance,
           id: terminalId,
@@ -606,9 +607,9 @@ class RpcTerminalBackend implements TerminalBackend {
           if (creating && router != null && info.id == terminalId) router.invalidateCatalog();
           if (closed || !current(c, epoch)) {
             if (info.notifications == true && c.isOpen() && router != null && !router.hasListeners(terminalId)) {
-              c.call(WorkspaceTerminalProtocol.UNWATCH, {workspace:"workspace", instance:instance, id:terminalId},
+              RpcCalls.call(c, WorkspaceTerminalProtocol.UNWATCH, {workspace:"workspace", instance:instance, id:terminalId},
                 1000, function(_) {}, function(_) {});
-              if (info.controller == true) c.call(WorkspaceTerminalProtocol.SET_CONTROL,
+              if (info.controller == true) RpcCalls.call(c, WorkspaceTerminalProtocol.SET_CONTROL,
                 {workspace:"workspace", instance:instance, id:terminalId, claim:false, takeover:false},
                 1000, function(_) {}, function(_) {});
             }
@@ -647,7 +648,7 @@ class RpcTerminalBackend implements TerminalBackend {
         resizePending = false;
         themePending = false;
         pending = true;
-        c.call(WorkspaceTerminalProtocol.RESIZE, {
+        RpcCalls.call(c, WorkspaceTerminalProtocol.RESIZE, {
           workspace: "workspace",
           instance: instance,
           id: terminalId,
@@ -718,7 +719,7 @@ class RpcTerminalBackend implements TerminalBackend {
     var requested = replayCursor;
     terminalsession.TerminalLatencyTrace.mark("terminal.replay.requested");
     if (echoAwaited) ConnectTimeline.mark("terminal-replay-requested", root, terminalId);
-    c.call(WorkspaceTerminalProtocol.REPLAY, {
+    RpcCalls.call(c, WorkspaceTerminalProtocol.REPLAY, {
       workspace:"workspace", instance:instance, id:terminalId, cursor:requested
     }, 2000, function(value) {
       TerminalReplyBudget.release(c, REPLAY_RESERVE);
@@ -794,7 +795,7 @@ class RpcTerminalBackend implements TerminalBackend {
   function requestSnapshotPage(c:RpcConnection, head:Null<WorkspaceTerminalProtocol.TerminalScreenSnapshot>, data:Null<Bytes>, offset:Int):Void {
     var epoch = attachEpoch;
     var token = head == null ? 0 : head.token;
-    c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
+    RpcCalls.call(c, WorkspaceTerminalProtocol.SNAPSHOT, {
       workspace: "workspace", instance: instance, id: terminalId, token: token, offset: offset,
       history: head == null && historyWanted ? true : null,
       historyLimit: head == null && historyWanted ? recentHistoryBytes : null
@@ -869,7 +870,7 @@ class RpcTerminalBackend implements TerminalBackend {
       if (!TerminalReplyBudget.reserve(c, reserved)) { resumePages = ask; return false; }
       var at = offset, length = total - at < size ? total - at : size;
       offset += length;
-      c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
+      RpcCalls.call(c, WorkspaceTerminalProtocol.SNAPSHOT, {
         workspace: "workspace", instance: instance, id: terminalId, token: first.token, offset: at, history: null
       }, 3000, function(value) {
         TerminalReplyBudget.release(c, reserved);

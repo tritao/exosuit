@@ -3,6 +3,7 @@ package workspace.client;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcError;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.transport.RpcCalls;
 
 /** Shared explicit restart: inspect an existing resource, then start a replacement process. */
 class WorkspaceTerminalRestart {
@@ -10,7 +11,7 @@ class WorkspaceTerminalRestart {
    current:Void->Bool, done:TerminalInfo->Void, failed:RpcError->Void):Void {
   // OPEN with create=false restores metadata/history only. It also lets older services
   // advertise restart support without requiring a new catalog capability.
-  connection.call(WorkspaceTerminalProtocol.OPEN, {
+  RpcCalls.call(connection, WorkspaceTerminalProtocol.OPEN, {
    workspace:"workspace",instance:instance,id:id,create:false,columns:80,rows:24
   },3000,function(info) {
    if (!current()) {failed({code:"disconnected",message:"Workspace connection or permissions changed",ambiguous:false});return;}
@@ -21,7 +22,7 @@ class WorkspaceTerminalRestart {
    if (info.restartable != true) {
     failed({code:"unsupported",message:"This workspace service cannot restart this terminal",ambiguous:false});return;
    }
-   connection.call(WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:instance,id:id,theme:theme},5000,done,failed);
+   RpcCalls.call(connection, WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:instance,id:id,theme:theme},5000,done,failed);
   },failed);
  }
  public static function message(error:RpcError):String {

@@ -10,6 +10,7 @@ import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.transport.RpcCalls;
 
 /**
 	The window's link to one machine workspace: one connection to its service, for everything the window does there
@@ -233,7 +234,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 			done(CANNOT_SET_FOLDERS);
 			return;
 		}
-		connection.call(workspace.service.WorkspaceFoldersProtocol.SET, {folders: folders}, 5000, function(_) done(null),
+		RpcCalls.call(connection, workspace.service.WorkspaceFoldersProtocol.SET, {folders: folders}, 5000, function(_) done(null),
 			function(failure) done(failure.message));
 	}
 
@@ -432,7 +433,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 		// IDENTITY, QUERY and the catalog watch go out together: one round trip, not three. Nothing they bring is used
 		// before IDENTITY names the generation exohost reported (`ready` needs `verified`), and a mismatch drops them all.
 		var callMs = remote ? 8000 : 2000;
-		connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, callMs, function(identity) {
+		RpcCalls.call(connection, WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, callMs, function(identity) {
 			if (selected != selection || !current.isCurrent(token)) return;
 			// Another generation answers on the pipe: the service exohost named stopped and another took its place. Ask again.
 			if (identity.instance != expectedInstance) {
@@ -451,7 +452,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 			if (selected != selection || !current.isCurrent(token)) return;
 			fail("Workspace identity validation failed: " + failure.code);
 		});
-		connection.call(WorkspaceProtocol.QUERY, {workspace: "workspace"}, callMs, function(snapshot) {
+		RpcCalls.call(connection, WorkspaceProtocol.QUERY, {workspace: "workspace"}, callMs, function(snapshot) {
 			if (selected != selection || !current.isCurrent(token) || error != null) return;
 			ConnectTimeline.mark("query-reply", timelineName());
 			if (snapshot.epoch == null || snapshot.epoch.length == 0) { fail("Workspace catalog unavailable: invalid_response"); return; }

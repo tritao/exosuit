@@ -15,6 +15,7 @@ import workspace.service.MachineDirectoryProtocol.WorkspaceStream;
 import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 import workspace.transport.StreamMultiplexer;
+import workspace.transport.RpcCalls;
 
 private class Finished implements RpcConnectAttempt {
 	public function new() {}
@@ -245,7 +246,7 @@ class DeviceMachine {
 		if (readingSessions)
 			return;
 		readingSessions = true;
-		connection.call(MachineDirectoryProtocol.SESSIONS, {machine: machineId}, CALL_TIMEOUT, function(value) {
+		RpcCalls.call(connection, MachineDirectoryProtocol.SESSIONS, {machine: machineId}, CALL_TIMEOUT, function(value) {
 			readingSessions = false;
 			if (machineConnection != connection)
 				return;
@@ -269,7 +270,7 @@ class DeviceMachine {
 		}
 		reading = true;
 		dirty = false;
-		connection.call(MachineDirectoryProtocol.DIRECTORY, {machine: machineId}, CALL_TIMEOUT, function(value) {
+		RpcCalls.call(connection, MachineDirectoryProtocol.DIRECTORY, {machine: machineId}, CALL_TIMEOUT, function(value) {
 			if (machineConnection != connection)
 				return;
 			reading = false;
@@ -344,7 +345,7 @@ class DeviceMachine {
 			done(null, null, {code: "disconnected", message: "The machine is not connected", ambiguous: false});
 			return;
 		}
-		connection.call(MachineDirectoryProtocol.OPEN, {ref: ref, start: start}, OPEN_TIMEOUT, function(opened:WorkspaceStream) {
+		RpcCalls.call(connection, MachineDirectoryProtocol.OPEN, {ref: ref, start: start}, OPEN_TIMEOUT, function(opened:WorkspaceStream) {
 			if (machineConnection != connection || mux != link) {
 				// The channel changed while the machine was answering: the stream died with it. Tell the machine anyway.
 				done(null, null, {code: "disconnected", message: "The machine connection changed", ambiguous: false});
@@ -367,7 +368,7 @@ class DeviceMachine {
 	}
 
 	function closeOnMachine(connection:RpcConnection, stream:Int):Void
-		connection.call(MachineDirectoryProtocol.CLOSE, {stream: stream}, CALL_TIMEOUT, function(_) {}, function(_) {});
+		RpcCalls.call(connection, MachineDirectoryProtocol.CLOSE, {stream: stream}, CALL_TIMEOUT, function(_) {}, function(_) {});
 
 	static function sameRef(left:WorkspaceRef, right:WorkspaceRef):Bool
 		return left.machine == right.machine && left.workspace == right.workspace;
