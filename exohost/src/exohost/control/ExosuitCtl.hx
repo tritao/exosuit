@@ -32,6 +32,9 @@ class ExosuitCtl {
 		"  call METHOD [JSON]           any control method with JSON params (e.g. exosuit.ui.snapshot, exosuit.state.get)",
 		"  quit [--mode prompt|recover|save]  close the window (prompt asks about unsaved work)",
 		"  watch [EVENT...]             print events as JSON lines until interrupted (all of them when none is named)",
+		"  devices                      remote access: paired and pending devices, as JSON",
+		"  approve [DEVICE [WORKSPACE...]]  approve the pending device (the only one when DEVICE is left out), granting the workspaces",
+		"                               (isolated test hosts only: EXOSUIT_EXOHOST_HOME must be set; the owner approves in the editor)",
 		"options: --instance ID, --new-window, --line N, --column N, --timeout N[s|ms] (default 5 s), --output text|json",
 		"exit codes: 0 ok, 2 usage, 3 no such window, 4 connection or timeout, 5 the window refused, 6 protocol, 7 internal"
 	].join("\n");
@@ -149,6 +152,15 @@ class ExosuitCtl {
 					report(call("exosuit.quit", {mode: mode}, null));
 				case "watch":
 					return watch(words);
+				case "devices":
+					print(Json.stringify(remote({op: "remote-devices"})));
+				case "approve":
+					var home = Sys.getEnv("EXOSUIT_EXOHOST_HOME");
+					if (home == null || home == "")
+						throw new Usage("approve only runs against an isolated exohost (set EXOSUIT_EXOHOST_HOME)");
+					var pending:Array<Dynamic> = remote({op: "remote-devices"}).pending ?? [];
+					var device = words.shift() ?? (pending.length == 1 ? pending[0].deviceId : throw new Usage("approve needs a DEVICE (" + pending.length + " pending)"));
+					print(Json.stringify(remote({op: "remote-approve", deviceId: device, workspaces: [for (id in words) {workspace: id, preset: "all"}]}, 60)));
 				default:
 					throw new Usage("unknown command " + command);
 			}
@@ -243,6 +255,16 @@ class ExosuitCtl {
 		}
 		var result:Dynamic = Reflect.field(reply, "result");
 		return result == null ? {} : result;
+	}
+
+	/** One exohost control request (`remote-*`); throws Failed (exit 4) when exohost does not answer, or its error. */
+	static function remote(request:Dynamic, seconds:Float = 15):Dynamic {
+		var reply = ExohostControl.request(request, seconds);
+		if (reply == null)
+			throw new Failed(ControlError.retry("timeout", "exohost did not answer within " + seconds + " s"), 4);
+		if (Reflect.field(reply, "ok") != true)
+			throw new Failed(ControlError.read(Reflect.field(reply, "error")), 5);
+		return reply;
 	}
 
 	static function startExohost():Void {

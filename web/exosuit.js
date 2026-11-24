@@ -195,6 +195,7 @@ async function startGuest() {
   if (departing) return;
   guest = started.exports;
   report.snapshot = () => guest["app.WebMain.snapshot"]();
+  report.openFirstWorkspace = () => guest["app.WebMain.openFirstWorkspace"]();
   report.openDocumentation = () => guest["app.WebMain.openDocumentation"]();
   report.unavailable = started.unavailable;
   if (guest["app.WebMain.configure"](canvas.clientWidth, canvas.clientHeight) !== 0)

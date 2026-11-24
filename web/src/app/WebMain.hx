@@ -148,6 +148,19 @@ class WebMain {
 		return 0;
 	}
 
+	/** Test hook (e2e-local-pair.mjs): opens the first workspace the first paired machine lists, as tapping it in the panel does. */
+	@:expose public static function openFirstWorkspace():Int {
+		var remote = remoteAccess;
+		if (remote == null) return 1;
+		for (machine in remote.machines) {
+			var directory = machine.machine.directory;
+			if (directory == null || directory.workspaces.length == 0) continue;
+			remote.openWorkspace(machine, directory.workspaces[0].workspace);
+			return 0;
+		}
+		return 2;
+	}
+
 	@:expose public static function openDocumentation():Int {
 		return NativeKit.nk_shell_open_url("https://github.com/tritao/exosuit") == Result.Ok ? 0 : 1;
 	}

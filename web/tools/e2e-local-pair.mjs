@@ -36,6 +36,17 @@ function machine(...parts) {
   return JSON.parse(execFileSync("bash", ["-c", command], {encoding: "utf8"}).trim().split("\n").pop());
 }
 
+/** Approves the pending device with grants of every listed workspace: exosuitctl when it has the subcommand, else connect-real.py. */
+function approve(deviceId, workspaceIds) {
+  if (process.env.E2E_APPROVE_WITH === "exosuitctl") {
+    const command = `source "${machineEnv}" && cd "${appDir}" && scripts/exosuitctl approve ${deviceId} ${workspaceIds.join(" ")}`;
+    return JSON.parse(execFileSync("bash", ["-c", command], {encoding: "utf8"}).trim().split("\n").pop());
+  }
+  const reply = machine("approve", "--home", '"$EXOSUIT_EXOHOST_HOME"', "--device", deviceId);
+  for (const id of workspaceIds) machine("grant", "--home", '"$EXOSUIT_EXOHOST_HOME"', "--device", deviceId, "--workspace", id);
+  return reply;
+}
+
 const types = {".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".ttf": "font/ttf", ".txt": "text/plain"};
 function serve() {
   const server = http.createServer((request, response) => {
@@ -77,12 +88,79 @@ async function main() {
     };
 
     await page.goto(`http://127.0.0.1:${SITE_PORT}/index.html`);
-    await page.waitForFunction(() => window.exosuit && window.exosuit.state === "running" && window.exosuit.frames > 5, {timeout: 120000});
+    try {
+      await page.waitForFunction(() => window.exosuit && window.exosuit.state === "running" && window.exosuit.frames > 5, {timeout: 120000});
+    } catch (error) {
+      log("startup state:", JSON.stringify(await page.evaluate(() => window.exosuit && {state: window.exosuit.state, frames: window.exosuit.frames, error: window.exosuit.error, unavailable: window.exosuit.unavailable})));
+      await shot("fail-startup");
+      throw error;
+    }
     log("editor running"); await shot("01-started");
     await waitState("snapshot", s => s && s.remoteAccess);
 
-    // The rest of the flow is canvas UI: filled in against the real build (pairing field, Pair, approve, workspace, terminal).
-    throw new Error("flow beyond startup is not implemented yet");
+    const targets = async () => (await state()).shell.testTargets;
+    const centre = box => ({x: box.x + box.width / 2, y: box.y + box.height / 2});
+    /** Clicks the element a snapshot target names (logical pixels = CSS pixels here). */
+    const click = async (name, seconds = 30) => {
+      const deadline = Date.now() + seconds * 1000;
+      while (Date.now() < deadline) {
+        const box = (await targets())[name];
+        if (box) { const {x, y} = centre(box); await page.mouse.click(x, y); log("click", name, Math.round(x), Math.round(y)); return; }
+        await sleep(300);
+      }
+      await shot("fail-click-" + name);
+      throw new Error(`no visible element for ${name}`);
+    };
+    const remote = async () => (await state()).remoteAccess;
+
+    // 1. The invitation, from the test machine's exohost.
+    const invitation = machine("invite").invitation;
+    log("invitation for device", invitation.deviceId);
+
+    // 2. Remote Access panel: paste the URL (with the machine key fragment), Pair.
+    await click("remoteAccessActivity");
+    await sleep(500);
+    await click("pairingUrl");
+    await page.keyboard.type(invitation.invitationUrl, {delay: 0});
+    await sleep(500);
+    await shot("02-url-typed");
+    await click("pairingConnect");
+
+    // 3. The page shows a code; the machine lists the same code for this device. Compare, confirm on the page, approve on the machine.
+    const withCode = await waitState("authentication code on the page", s => s.remoteAccess && s.remoteAccess.code, 60);
+    const code = withCode.remoteAccess.code;
+    let pending = null;
+    for (let attempt = 0; attempt < 60 && !pending; attempt++) {
+      pending = (machine("devices").pending || []).find(item => item.deviceId === invitation.deviceId);
+      if (!pending) await sleep(500);
+    }
+    if (!pending) throw new Error("the machine never listed the device as pending");
+    if (pending.authenticationCode !== code) throw new Error(`codes differ: page ${code}, machine ${pending.authenticationCode}`);
+    log("codes match:", code);
+    await shot("03-code");
+    await click("pairingConfirm");
+    const workspaces = process.env.E2E_WORKSPACE_IDS || execFileSync("bash", ["-c", `source "${machineEnv}" && cd "${appDir}" && python3 scripts/exohost.py machine --json`], {encoding: "utf8"});
+    const ids = process.env.E2E_WORKSPACE_IDS ? process.env.E2E_WORKSPACE_IDS.split(",") : [...workspaces.matchAll(/workspace-[0-9a-f]{32}/g)].map(match => match[0]);
+    const approval = approve(invitation.deviceId, ids);
+    log("approval:", JSON.stringify(approval));
+    if (!approval.ok) throw new Error("the machine refused the approval");
+    await waitState("machine online with a workspace", s => s.remoteAccess && s.remoteAccess.machines.some(m => m.online && m.workspaces.length > 0), 90);
+    await shot("04-paired");
+
+    // 4. Open the workspace, then a terminal.
+    if (await page.evaluate(() => window.exosuit.openFirstWorkspace()) !== 0) throw new Error("no workspace to open");
+    await waitState("workspace connected", s => s.remoteAccess && s.remoteAccess.open && s.remoteAccess.open.connected, 90);
+    await shot("05-workspace");
+    await click("workbenchActivity");
+    await click("newTerminal", 60);
+    await waitState("a terminal tab", s => s.shell.terminalIds && s.shell.terminalIds.length > 0, 90);
+    await sleep(2000);
+    await click("terminalPane", 60);
+    await page.keyboard.type("echo web-ok $((6*7))", {delay: 20});
+    await page.keyboard.press("Enter");
+    await waitState("web-ok 42 in the terminal", s => JSON.stringify(s.shell).includes("web-ok 42"), 60);
+    await shot("06-terminal");
+    log("PASS: paired, opened the workspace, and read `web-ok 42` back from the terminal");
   } catch (error) {
     failed = error; console.error("FAILED:", error.message);
   } finally {
