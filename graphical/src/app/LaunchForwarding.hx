@@ -89,11 +89,23 @@ class LaunchForwarding {
 	/** `path:line[:column]` when the suffix is digits and the argument is not an existing file. */
 	static function locate(argument:String):{path:String, line:Null<Int>, column:Null<Int>} {
 		var suffix = ~/^(.+?):([0-9]+)(?::([0-9]+))?$/;
-		if (!sys.FileSystem.exists(argument) && suffix.match(argument) && suffix.matched(1).length > 1) {
+		if (!sys.FileSystem.exists(absolute(argument)) && suffix.match(argument) && suffix.matched(1).length > 1) {
 			var column = suffix.matched(3);
-			return {path: sys.FileSystem.absolutePath(suffix.matched(1)), line: decimal(suffix.matched(2)), column: column == null ? null : decimal(column)};
+			return {path: absolute(suffix.matched(1)), line: decimal(suffix.matched(2)), column: column == null ? null : decimal(column)};
 		}
-		return {path: sys.FileSystem.absolutePath(argument), line: null, column: null};
+		return {path: absolute(argument), line: null, column: null};
+	}
+
+	/**
+		A relative path from the command line, against the directory the user typed it in. `haxeon run` starts the app in
+		its project's directory and names the one it was invoked from in HAXEON_INVOKED_FROM; a directly launched app runs
+		where it was started.
+	**/
+	static function absolute(path:String):String {
+		var invokedFrom = Sys.getEnv("HAXEON_INVOKED_FROM");
+		if (invokedFrom != null && invokedFrom.length > 0 && !haxe.io.Path.isAbsolute(path))
+			return haxe.io.Path.join([invokedFrom, path]);
+		return sys.FileSystem.absolutePath(path);
 	}
 
 	/** A decimal number written with digits only. */
