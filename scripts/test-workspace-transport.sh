@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
    try:
     request=urllib.request.Request(
      f'{origin}/v1/machines/{machine_id}/register',
-     data=b'',headers={'Authorization':'Bearer '+machine_token},method='POST')
+     data=None,headers={'Authorization':'Bearer '+machine_token,'Content-Length':'0'},method='POST')
     with urllib.request.urlopen(request,timeout=1) as response:
      # A timed-out response may already have committed enrollment; retries are idempotent.
      if response.status not in (201, 204): raise RuntimeError(f'machine enrollment returned {response.status}')
