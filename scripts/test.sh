@@ -188,11 +188,10 @@ own_check() {
 	esac
 }
 
-# coreutils timeout; macOS has it as gtimeout (brew install coreutils).
+# coreutils timeout; macOS has it as gtimeout (brew install coreutils), and scripts/timeout.py stands in without it.
 timeout=$(command -v timeout || command -v gtimeout || true)
 if [[ -z $timeout ]]; then
-	echo "test.sh: needs timeout (coreutils) to stop a suite that hangs" >&2
-	exit 2
+	timeout="$root_dir/scripts/timeout.py"
 fi
 # Each suite is stopped after its timeout (the list's column), and killed 10 s later if it is still running.
 # File descriptor 3: a suite that reads its standard input must not read the list.
@@ -201,9 +200,9 @@ while read -r -u 3 name _ kind seconds fixture_name target arguments; do
 	read -ra extra <<<"$arguments"
 	limit=("$timeout" --kill-after=10 "$seconds")
 	case $kind in
-	haxeon) check "$name" "${limit[@]}" env "${step_env[@]}" "$haxeon" run --project "$root_dir/$target" "${self_hosted[@]}" -- "${args[@]}" ;;
-	python) check "$name" "${limit[@]}" env "${step_env[@]}" python3 "$root_dir/$target" "${extra[@]}" ;;
-	bash) check "$name" "${limit[@]}" env "${step_env[@]}" bash "$root_dir/$target" "${extra[@]}" ;;
+	haxeon) check "$name" "${limit[@]}" env ${step_env[@]+"${step_env[@]}"} "$haxeon" run --project "$root_dir/$target" ${self_hosted[@]+"${self_hosted[@]}"} -- ${args[@]+"${args[@]}"} ;;
+	python) check "$name" "${limit[@]}" env ${step_env[@]+"${step_env[@]}"} python3 "$root_dir/$target" ${extra[@]+"${extra[@]}"} ;;
+	bash) check "$name" "${limit[@]}" env ${step_env[@]+"${step_env[@]}"} bash "$root_dir/$target" ${extra[@]+"${extra[@]}"} ;;
 	check) check "$name" own_check "$name" ;;
 	*)
 		echo "test.sh: $name has an unknown kind $kind" >&2
