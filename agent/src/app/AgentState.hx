@@ -38,6 +38,23 @@ class AgentState {
 			throw "Workspace socket folder must be private and owned by this user";
 	}
 
+	/**
+		Removes the `agent.sock` an older build left in this workspace's own state folder (`workspaces/<id>`, now unused:
+		the service listens in `workspace-sockets`). Only that one file, only when it is a socket and not a link.
+	**/
+	public static function removeStaleSocket(stateDirectory:String):Void {
+		if (Sys.systemName() == "Windows") return;
+		var stale = Path.join([stateDirectory, "agent.sock"]);
+		try {
+			if (!FileSystem.exists(stale) && !isLink(stale)) return;
+			if (isLink(stale) || Sys.command("test", ["-S", stale]) != 0) return;
+			FileSystem.deleteFile(stale);
+		} catch (_) {}
+	}
+
+	static function isLink(path:String):Bool
+		return Sys.command("test", ["-L", path]) == 0;
+
 	static function absolute(path:String):String {
 		// fullPath uses realpath on POSIX, which fails before a new state directory exists. Keep separators identical
 		// before and after creation: this path also names the pipe.
