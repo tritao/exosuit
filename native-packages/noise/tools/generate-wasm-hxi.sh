@@ -11,7 +11,7 @@ haxeon_root=${HAXEON_DIR:-${HAXEON_ROOT:-"$package_dir/../../haxeon"}}
 output=$1
 mkdir -p "$(dirname "$output")"
 
-"$haxeon_root/scripts/haxeon-ffi-audit" \
+"$haxeon_root/scripts/haxeon" ffi audit \
     --target=x86_64-linux-gnu \
     --target=x86_64-w64-windows-gnu \
     --target=x86_64-apple-darwin \

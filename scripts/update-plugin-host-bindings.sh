@@ -12,7 +12,7 @@ elif [[ $# -ne 0 ]]; then
     echo 'usage: scripts/update-plugin-host-bindings.sh [--check]' >&2
     exit 2
 fi
-"$haxeon_root/scripts/haxeon-ffi-audit" \
+"$haxeon_root/scripts/haxeon" ffi audit \
     --target=x86_64-linux-gnu --target=x86_64-w64-windows-gnu \
     --target=x86_64-apple-darwin --target=arm64-apple-darwin \
     --profile=portable-abi64 --library=exosuit_plugin_host --interface=ExosuitPluginHost \

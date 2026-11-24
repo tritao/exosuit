@@ -9,7 +9,7 @@ nativekit_dir=${NATIVEKIT_DIR:-"$real_dir/vendor/nativekit"}
 platform_dir="$real_dir/packages/platform"
 gpu_dir="$real_dir/packages/gpu"
 
-"$haxeon_dir/scripts/haxeon-ffi-audit" \
+"$haxeon_dir/scripts/haxeon" ffi audit \
     --target=x86_64-linux-gnu \
     --target=x86_64-w64-windows-gnu \
     --target=x86_64-apple-darwin \

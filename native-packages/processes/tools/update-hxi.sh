@@ -12,7 +12,7 @@ elif [[ $# -ne 0 ]]; then
     exit 2
 fi
 
-"$haxeon_root/scripts/haxeon-ffi-audit" \
+"$haxeon_root/scripts/haxeon" ffi audit \
     --target=x86_64-linux-gnu \
     --target=x86_64-w64-windows-gnu \
     --target=x86_64-apple-darwin \

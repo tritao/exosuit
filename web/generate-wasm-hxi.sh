@@ -5,7 +5,7 @@
 # Each kit already owns a script that audits its C import header and writes the
 # desktop (portable-abi64) interface. Rather than duplicating their header,
 # include and dependency lists, this runs those scripts against a shim
-# haxeon-ffi-audit that swaps the desktop targets for the Emscripten/WASI
+# `haxeon ffi audit` that swaps the desktop targets for the Emscripten/WASI
 # targets and points dependency interfaces at the wasm32 copies written here.
 set -euo pipefail
 
@@ -25,9 +25,11 @@ mkdir -p "$shim_dir/scripts"
 # Vendored package audit scripts resolve headers and projections below HAXEON_DIR.
 ln -s "$haxeon_dir/packages" "$shim_dir/packages"
 ln -s "$haxeon_dir/vendor" "$shim_dir/vendor"
-cat > "$shim_dir/scripts/haxeon-ffi-audit" <<SHIM
+cat > "$shim_dir/scripts/haxeon" <<SHIM
 #!/usr/bin/env bash
 set -euo pipefail
+# The callers run `scripts/haxeon ffi audit ...`; only that command is shimmed.
+shift 2
 arguments=(--target=wasm32-unknown-wasi --target=wasm32-unknown-emscripten --profile=portable-abi32)
 for argument in "\$@"; do
 	case \$argument in
@@ -37,9 +39,9 @@ for argument in "\$@"; do
 		*) arguments+=("\$argument") ;;
 	esac
 done
-exec "$haxeon_dir/scripts/haxeon-ffi-audit" "\${arguments[@]}"
+exec "$haxeon_dir/scripts/haxeon" ffi audit "\${arguments[@]}"
 SHIM
-chmod +x "$shim_dir/scripts/haxeon-ffi-audit"
+chmod +x "$shim_dir/scripts/haxeon"
 
 # Callers list generators in dependency order; each toolkit keeps ownership
 # of its header, include paths and audit rules.

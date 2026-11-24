@@ -4,7 +4,7 @@ exosuit_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 root_dir=${HAXEON_ROOT:-"$exosuit_dir/haxeon"}
 root_dir=$(cd "$root_dir" && pwd)
 haxe_bin="$root_dir/.tools/haxe/haxe"
-source "$root_dir/scripts/haxeon-compiler.sh"
+source "$root_dir/scripts/lib/haxeon-compiler.sh"
 fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/exosuit-workspace-rpc-wasm.XXXXXX")
 cleanup() {
  rm -rf -- "$fixture_dir"
