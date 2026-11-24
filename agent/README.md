@@ -30,7 +30,7 @@ a bundle's `exosuit-agent.hl`).
 - **Warm spare.** `main.hl --spare` loads, links to exohost (`service-spare`) and waits. exohost hands it a workspace
   (`adopt`) when an idle one is opened, so the open needs no process start. exohost keeps one spare while an editor is
   linked.
-- **Pipe.** A Windows named pipe whose DACL grants only the current user; a private `agent.sock` in the state folder
+- **Pipe.** A Windows named pipe whose DACL grants only the current user; a private a short `.sock` in `workspace-sockets` beside the state folders
   elsewhere. Clients check the service's identity (generation and root) before they watch its catalog.
 - **Devices.** The service never dials a relay. exohost forwards a paired device's stream to the pipe, sending first an
   intro with the device's grants (`ForwardedStream`); the service serves that connection with only those grants.

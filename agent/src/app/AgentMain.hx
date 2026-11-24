@@ -230,6 +230,7 @@ class AgentMain {
 		var socket = AgentState.endpointOf(workspaceId, stateDirectory);
 		if (Sys.systemName() != "Windows" && socket.length > 100)
 			throw "State directory path is too long for a local socket";
+		AgentState.prepareSocketFolder(socket);
 		var early:Array<NativeRpcTransport> = [];
 		var accept:NativeRpcTransport->Void = function(transport) early.push(transport);
 		hub.listen(NativeRpcHub.local(socket), function(transport) accept(transport));

@@ -400,6 +400,18 @@ class MachineCatalog {
 		return folders;
 	}
 
+	/** The folder, beside `workspaces`, that holds the services' short socket files. */
+	public static inline final WORKSPACE_SOCKETS = "workspace-sockets";
+
+	/**
+		The Unix socket of the workspace service whose state folder is `directory`: `<agent state base>/workspace-sockets/
+		<sha256(directory)[0..16]>.sock`. A name in the state folder itself would overflow sockaddr_un (104 bytes on macOS)
+		under a long state root. The agent listens here, creates the folder (private), and everything else (exohost's
+		`service.endpoint`, the window's connect) is handed this path, so only this function spells it.
+	**/
+	public static function workspaceSocket(directory:String):String
+		return Path.join([agentStateBase(), WORKSPACE_SOCKETS, haxe.crypto.Sha256.encode(directory).substr(0, 16) + ".sock"]);
+
 	/** Where workspace services keep their state (the agent's `AgentState.base`). */
 	public static function agentStateBase():String {
 		var configured = Sys.getEnv("EXOSUIT_AGENT_STATE_HOME");

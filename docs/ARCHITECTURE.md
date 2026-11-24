@@ -120,7 +120,7 @@ One process per running workspace (`agent/src/app/AgentMain.hx`; details in [age
 - **State.** `workspaces/<id>/` under `%LOCALAPPDATA%\Exosuit` (or `$XDG_STATE_HOME/exosuit`): `agent.lock` (one
   service per workspace), `workspace.json`, `catalog.sqlite`, `service.log`, `catalog-snapshot.bin`, and a folder per
   terminal host. `EXOSUIT_AGENT_STATE_HOME` moves it.
-- **Pipe.** A same-user named pipe (or `agent.sock` in the state folder). It listens and reports to exohost before the
+- **Pipe.** A same-user named pipe (or a short `.sock` in `workspace-sockets` beside the state folders). It listens and reports to exohost before the
   catalog, terminals and agents are up; early connections wait in the pipe.
 - **Catalog.** The workspace's groups, agent sessions and terminal records, in SQLite (`WorkspaceSqliteStore`). The
   catalog watch (`WorkspaceCatalogService`) serves CATALOG pages and pushes CHANGED to watching connections.

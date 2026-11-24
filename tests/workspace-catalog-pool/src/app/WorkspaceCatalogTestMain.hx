@@ -350,7 +350,7 @@ class WorkspaceCatalogTestMain {
 
 	/** An endpoint in the shape the agent gives its service on this system. */
 	static function ep(id:String):String
-		return Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-" + id : "/tmp/exosuit-" + id + "/agent.sock";
+		return Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-" + id : "/tmp/workspace-sockets/exosuit-" + id + ".sock";
 
 	/** A holder of a watch on `id`'s service; with `learning` the watch starts on the alias and learns the id. */
 	static function hold(network:Network, id:String, learning:Bool = false):Holder
@@ -385,9 +385,9 @@ class WorkspaceCatalogTestMain {
 		require(!WorkspaceLink.validEndpoint("\\\\.\\pipe\\other", true) && !WorkspaceLink.validEndpoint("\\\\.\\pipe\\exosuit-", true)
 			&& !WorkspaceLink.validEndpoint("\\\\.\\pipe\\exosuit-a\\b", true) && !WorkspaceLink.validEndpoint("\\\\evil\\pipe\\exosuit-a", true)
 			&& !WorkspaceLink.validEndpoint("C:\\x\\agent.sock", true), "other pipes and paths are refused on Windows");
-		require(WorkspaceLink.validEndpoint("/home/u/state/workspaces/w1/agent.sock", false), "the agent's socket path is valid");
+		require(WorkspaceLink.validEndpoint("/home/u/state/workspace-sockets/0123456789abcdef.sock", false), "the agent's socket path is valid");
 		require(!WorkspaceLink.validEndpoint("agent.sock", false) && !WorkspaceLink.validEndpoint("/tmp/other.sock", false)
-			&& !WorkspaceLink.validEndpoint("/tmp/../etc/agent.sock", false) && !WorkspaceLink.validEndpoint("", false)
+			&& !WorkspaceLink.validEndpoint("/tmp/../workspace-sockets/a.sock", false) && !WorkspaceLink.validEndpoint("/home/u/state/workspaces/w1/agent.sock", false) && !WorkspaceLink.validEndpoint("", false)
 			&& !WorkspaceLink.validEndpoint("/etc/passwd", false), "other sockets are refused");
 		print("PASS: only the agent's pipe and socket shapes are valid endpoints");
 	}

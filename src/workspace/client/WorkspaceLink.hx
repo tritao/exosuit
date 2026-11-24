@@ -93,7 +93,7 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 
 	/**
 		Whether `endpoint` has the shape the agent gives its service (AgentState.endpointOf): a named pipe
-		`\\.\pipe\exosuit-<key>` on Windows, else `<state folder>/agent.sock`. exohost's reply is data from another
+		`\\.\pipe\exosuit-<key>` on Windows, else `<state base>/workspace-sockets/<key>.sock`. exohost's reply is data from another
 		process, so a link connects to nothing else.
 	**/
 	public static function validEndpoint(endpoint:String, windows:Bool = true):Bool {
@@ -110,9 +110,10 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 			}
 			return true;
 		}
-		if (!StringTools.startsWith(endpoint, "/") || !StringTools.endsWith(endpoint, "/agent.sock"))
+		if (!StringTools.startsWith(endpoint, "/") || !StringTools.endsWith(endpoint, ".sock"))
 			return false;
-		return endpoint.split("/").indexOf("..") < 0;
+		var parts = endpoint.split("/");
+		return parts.indexOf("..") < 0 && parts.length > 2 && parts[parts.length - 2] == exohost.MachineCatalog.WORKSPACE_SOCKETS;
 	}
 
 	static inline final WINDOWS_PIPE = "\\\\.\\pipe\\exosuit-";

@@ -21,10 +21,22 @@ class AgentState {
 	public static function directoryOf(id:String):String
 		return absolute(Path.join([base(), "workspaces", id]));
 
-	/** The pipe (a named pipe on Windows, else `agent.sock` in the state folder) the service of workspace `id` listens on. */
+	/**
+		The pipe (a named pipe on Windows, else a short hashed socket in `workspace-sockets` beside the state folders, see
+		MachineCatalog.workspaceSocket) the service of workspace `id` listens on. Call `prepareSocketFolder` before listening.
+	**/
 	public static function endpointOf(id:String, directory:String):String
 		return Sys.systemName() == "Windows" ? "\\\\.\\pipe\\exosuit-" + Sha256.encode(id + "\n" + directory).substr(0, 20)
-			: Path.join([directory, "agent.sock"]);
+			: exohost.MachineCatalog.workspaceSocket(directory);
+
+	/** Creates the folder of the service's socket, private to this user (mode 700). A no-op on Windows. */
+	public static function prepareSocketFolder(endpoint:String):Void {
+		if (Sys.systemName() == "Windows") return;
+		var folder = Path.directory(endpoint);
+		ensureDirectories(Path.directory(folder));
+		if (!AgentNative.prepareDirectory(folder))
+			throw "Workspace socket folder must be private and owned by this user";
+	}
 
 	static function absolute(path:String):String {
 		// fullPath uses realpath on POSIX, which fails before a new state directory exists. Keep separators identical
