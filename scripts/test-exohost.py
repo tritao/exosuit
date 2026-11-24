@@ -1130,7 +1130,7 @@ def test_editor(fixture: Fixture, directory: Path) -> None:
     environment = dict(fixture.environment, EXOSUIT_AGENT_STATE_HOME=str(directory / "agent-state"), XDG_STATE_HOME=str(directory / "state"),
                        EXOSUIT_AGENT_LAUNCHER=str(ROOT / "agent/build/host/main.hl"))
     environment.pop("EXOSUIT_EXOHOST_AUTOSTART")
-    variable = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+    variable = "PATH" if os.name == "nt" else "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
     environment[variable] = os.pathsep.join([str(path) for path in native] + [environment[variable]])
     editors = []
     for index in (1, 2):

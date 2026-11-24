@@ -59,7 +59,7 @@ def main() -> int:
             assert "started" in exohost("start")
             native = [path for path in (TEST.parent / "native").glob("*") if path.is_dir()]
             environment = dict(exohost.environment)
-            variable = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+            variable = "PATH" if os.name == "nt" else "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
             environment[variable] = os.pathsep.join([str(path) for path in native] + [environment[variable]])
             result = subprocess.run([str(harness.HL), str(TEST), "--origin", relay.origin, "--folder-a", str(folder_a), "--folder-b", str(folder_b)],
                                     env=environment, capture_output=True, text=True, timeout=300)

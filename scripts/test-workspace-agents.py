@@ -13,7 +13,7 @@ if run_cli(ROOT,['build','--project',str(project),*mode])!=0: sys.exit('build fa
 windows=os.name=='nt'
 output=project.parent/'build/host'
 env=dict(os.environ)
-variable='PATH' if windows else 'LD_LIBRARY_PATH'
+variable='PATH' if windows else 'DYLD_LIBRARY_PATH' if sys.platform=='darwin' else 'LD_LIBRARY_PATH'
 env[variable]=os.pathsep.join([*(str(p) for p in [HAXEON/'out',haxeon_paths.vm_dir(HAXEON),*sorted(p for p in (output/'native').iterdir() if p.is_dir())]),*([env[variable]] if env.get(variable) else [])])
 with tempfile.TemporaryDirectory(prefix='exosuit-codex-') as temporary:
  root=Path(temporary)
