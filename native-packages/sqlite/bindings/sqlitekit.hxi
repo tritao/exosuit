@@ -23,15 +23,28 @@ interface SqliteKit @target("portable-abi64") @library("sqlitekit") {
 	/**
 	 * Borrowed bytes are valid until the next step, reset, or finalize.
 	 */
-	extern fn sqlitekit_column_blob(stmt: ptr<sqlitekit_stmt>, column: c_int, out_size: ptr<u64> @out) -> ptr<const<void>> @borrowed;
+	extern fn sqlitekit_column_blob(
+		stmt: ptr<sqlitekit_stmt>,
+		column: c_int,
+		out_size: ptr<u64> @out
+	) -> ptr<const<void>> @borrowed;
 	/**
 	 * Copies a blob into caller storage; a null/short buffer reports required size.
 	 */
-	extern fn sqlitekit_column_blob_copy(stmt: ptr<sqlitekit_stmt>, column: c_int, buffer: nullable<ptr<void>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;
+	extern fn sqlitekit_column_blob_copy(
+		stmt: ptr<sqlitekit_stmt>,
+		column: c_int,
+		buffer: nullable<ptr<void>> @out_buffer("inout_size"),
+		inout_size: ptr<u32> @inout
+	) -> c_int;
 	extern fn sqlitekit_column_count(stmt: ptr<sqlitekit_stmt>) -> c_int;
 	extern fn sqlitekit_column_double(stmt: ptr<sqlitekit_stmt>, column: c_int) -> f64;
 	extern fn sqlitekit_column_int64(stmt: ptr<sqlitekit_stmt>, column: c_int) -> i64;
-	extern fn sqlitekit_column_text(stmt: ptr<sqlitekit_stmt>, column: c_int, out_size: ptr<u64> @out) -> ptr<const<c_char>> @borrowed;
+	extern fn sqlitekit_column_text(
+		stmt: ptr<sqlitekit_stmt>,
+		column: c_int,
+		out_size: ptr<u64> @out
+	) -> ptr<const<c_char>> @borrowed;
 	extern fn sqlitekit_column_type(stmt: ptr<sqlitekit_stmt>, column: c_int) -> c_int;
 	extern fn sqlitekit_commit(db: ptr<sqlitekit_db>) -> c_int;
 	extern fn sqlitekit_exec(db: ptr<sqlitekit_db>, sql: utf8) -> c_int;
@@ -44,8 +57,16 @@ interface SqliteKit @target("portable-abi64") @library("sqlitekit") {
 	/**
 	 * One writer per database path. The sibling .sqlitekit-lock file remains on disk.
 	 */
-	extern fn sqlitekit_open(path: utf8, busy_ms: c_int, out_db: ptr<nullable<ptr<sqlitekit_db>>> @out @borrowed) -> c_int;
-	extern fn sqlitekit_prepare(db: ptr<sqlitekit_db>, sql: utf8, out_stmt: ptr<nullable<ptr<sqlitekit_stmt>>> @out @borrowed) -> c_int;
+	extern fn sqlitekit_open(
+		path: utf8,
+		busy_ms: c_int,
+		out_db: ptr<nullable<ptr<sqlitekit_db>>> @out @borrowed
+	) -> c_int;
+	extern fn sqlitekit_prepare(
+		db: ptr<sqlitekit_db>,
+		sql: utf8,
+		out_stmt: ptr<nullable<ptr<sqlitekit_stmt>>> @out @borrowed
+	) -> c_int;
 	extern fn sqlitekit_reset(stmt: ptr<sqlitekit_stmt>) -> c_int;
 	extern fn sqlitekit_rollback(db: ptr<sqlitekit_db>) -> c_int;
 	/**
