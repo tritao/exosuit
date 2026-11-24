@@ -206,9 +206,12 @@ def isolated_environment(state: Path, launcher: Path | None = None, test: str | 
         XDG_STATE_HOME=str(state),
         EXOSUIT_AGENT_STATE_HOME=str(state / "exosuit"),
         PRAGTICAL_PORTABLE=str(state / "portable"),
+        # Takes effect only with EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1: relay credentials then stay out of the keychain.
+        EXOSUIT_RELAY_TEST_CREDENTIALS_DIR=str(state / "relay-credentials"),
         **agent_homes(state),
     )
     (state / "portable").mkdir(parents=True, exist_ok=True)
+    (state / "relay-credentials").mkdir(mode=0o700, parents=True, exist_ok=True)
     if test is not None:
         environment = with_libraries(environment, ROOT / "tests" / test / "build" / "host" / "native")
     return environment

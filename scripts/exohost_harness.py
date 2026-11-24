@@ -56,8 +56,10 @@ class Exohost:
         self.home = base / home
         portable = base / "portable"
         portable.mkdir(exist_ok=True)
+        credentials = base / "relay-credentials"
+        credentials.mkdir(mode=0o700, exist_ok=True)
         self.environment = with_libraries(
-            dict(os.environ, EXOSUIT_EXOHOST_HOME=str(self.home), EXOSUIT_EXOHOST_SCAN="0", EXOSUIT_EXOHOST_TRAY="0", EXOSUIT_EXOHOST_AUTOSTART="0",
+            dict(os.environ, EXOSUIT_RELAY_TEST_CREDENTIALS_DIR=str(credentials), EXOSUIT_EXOHOST_HOME=str(self.home), EXOSUIT_EXOHOST_SCAN="0", EXOSUIT_EXOHOST_TRAY="0", EXOSUIT_EXOHOST_AUTOSTART="0",
                  EXOSUIT_EXOHOST_LAUNCHER=str(EXOHOST), PRAGTICAL_PORTABLE=str(portable), **extra),
             EXOHOST.parent / "native", AGENT.parent / "native")
 
