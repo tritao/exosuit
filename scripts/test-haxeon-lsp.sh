@@ -4,9 +4,16 @@ set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
-language_server=${HAXEON_LSP:-"$haxeon_root/scripts/haxeon-lsp"}
 smoke_dir=$(mktemp -d "${TMPDIR:-/tmp}/exosuit-real-lsp.XXXXXX")
 trap 'rm -rf -- "$smoke_dir"' EXIT
+# HAXEON_LSP names one executable, as the editor reads it (a release's tools/haxeon-lsp). Without it the server is
+# `haxeon lsp` (Haxeon removed scripts/haxeon-lsp), which the smoke test starts through a launcher of its own.
+language_server=${HAXEON_LSP:-}
+if [[ -z $language_server ]]; then
+    language_server="$smoke_dir/haxeon-lsp"
+    printf '#!/usr/bin/env bash\nexec %q lsp "$@"\n' "$haxeon" > "$language_server"
+    chmod +x "$language_server"
+fi
 compiler_mode=()
 if [[ ${HAXEON_SELF_HOSTED:-0} == 1 ]]; then
     compiler_mode+=(--self-hosted)
@@ -25,10 +32,10 @@ cat > "$smoke_dir/haxeon.json" <<'JSON'
 JSON
 
 "$haxeon" run --project "$root_dir/tests/real-language-service-smoke/haxeon.json" \
-    "${compiler_mode[@]}" -- "$language_server" "$smoke_dir"
-"$haxeon" build --project "$smoke_dir/haxeon.json" "${compiler_mode[@]}"
+    ${compiler_mode[@]+"${compiler_mode[@]}"} -- "$language_server" "$smoke_dir"
+"$haxeon" build --project "$smoke_dir/haxeon.json" ${compiler_mode[@]+"${compiler_mode[@]}"}
 set +e
-"$haxeon" run --project "$smoke_dir/haxeon.json" "${compiler_mode[@]}"
+"$haxeon" run --project "$smoke_dir/haxeon.json" ${compiler_mode[@]+"${compiler_mode[@]}"}
 status=$?
 set -e
 if [[ $status -ne 42 ]]; then
@@ -38,4 +45,4 @@ fi
 echo "PASS: real language-service edit, diagnose, fix, save, build and execution"
 
 "$haxeon" run --project "$root_dir/tests/real-language-service-smoke/haxeon.json" \
-    "${compiler_mode[@]}" -- "$language_server" "$root_dir" repository
+    ${compiler_mode[@]+"${compiler_mode[@]}"} -- "$language_server" "$root_dir" repository

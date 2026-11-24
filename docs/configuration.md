@@ -50,9 +50,13 @@ platform when needed. An explicit `editor/fonts/font_fallback_paths` list is loa
 at startup in its configured order.
 
 Array preferences are JSON strings containing arrays. For example, the value of
-`languages/haxeon/command` is `"[\"/path with spaces/haxeon-lsp\",\"--stdio\"]"`.
-An empty array uses `$HAXEON_LSP`, then the bundled server, then
-`$HAXEON_ROOT/scripts/haxeon lsp`. Arguments are passed directly without shell splitting.
+`languages/haxeon/command` is `"[\"/path with spaces/haxeon\",\"lsp\"]"`.
+An empty array uses `$HAXEON_LSP` (one executable, started with no arguments, such as
+a release's `tools/haxeon-lsp`), then the bundled server, then `haxeon lsp` from the
+Haxeon checkout: `<checkout>/scripts/haxeon lsp`, where the checkout is `$HAXEON_ROOT`
+or the nearest `haxeon` folder above the install or working folder (on Windows, the
+checkout's `out/sdk/bin/haxeon`, or `haxeon` on `PATH`). Haxeon no longer has a
+`scripts/haxeon-lsp` launcher. Arguments are passed directly without shell splitting.
 Advanced keyboard overrides use the same array representation, with entries such
 as `"Ctrl+A|doc:select-all"` under `editor/keyboard/keybindings`.
 
