@@ -399,7 +399,10 @@ class EditorControl {
 		app.requestFrame();
 		wait(terminal ? "a new terminal" : "a new agent session", answer, function() {
 			for (key => value in tabKeys())
-				if (!before.exists(key)) return value;
+				if (!before.exists(key)) {
+					if (value.kind == "terminal") openTerminal(value.id);
+					return value;
+				}
 			return null;
 		});
 	}
@@ -443,9 +446,14 @@ class EditorControl {
 		});
 	}
 
+	/** The open terminal `id`, started even in a window that draws no frames (TerminalPane.sizeUnlaidOut). */
 	function openTerminal(id:String):Null<TerminalPane> {
 		for (tab in app.host.allTerminalTabs())
-			if (!tab.disposed && (tab.resourceId == id || tab.id == id)) return pane(tab);
+			if (!tab.disposed && (tab.resourceId == id || tab.id == id)) {
+				var found = pane(tab);
+				if (found != null) found.sizeUnlaidOut();
+				return found;
+			}
 		return null;
 	}
 

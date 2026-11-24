@@ -245,6 +245,14 @@ class TerminalPane implements AgentTerminalPanel {
 	static function rgbColor(color:Color):Int
 		return (Math.round(color.red * 255) << 16) | (Math.round(color.green * 255) << 8) | Math.round(color.blue * 255);
 
+	/**
+		A workspace terminal opens once a layout gives it a grid. A window that draws no frames (macOS stops them while the
+		screen is locked) never lays it out, so a program driving the window starts it at the emulator's grid instead; the
+		first layout resizes it as usual, since the pane still has no viewport.
+	**/
+	public function sizeUnlaidOut():Void
+		if (!closed && remoteBackend != null && viewportWidth <= 0.0) session.resize(session.emulator.columns(), session.emulator.rows());
+
 	public function poll():Void {
 		if (closed) return;
 		if (inputFailure != null) {

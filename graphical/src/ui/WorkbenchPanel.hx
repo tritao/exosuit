@@ -397,6 +397,9 @@ class WorkbenchPanel implements View {
 		design Q2). The control plane's `exosuit.terminal.create` and `exosuit.agent.create` run this too.
 	**/
 	public function make(id:Null<String>, group:String, terminal:Bool, ?provider:String):Void {
+		// The rows are synced before a frame is built, and a window that draws no frames (macOS stops them while the screen
+		// is locked) would leave the model without its open workspace: the control plane's create would do nothing.
+		syncState();
 		var workspace = id == null ? model.openWorkspace : id;
 		if (workspace == null) return;
 		if (terminal) inWorkspace(workspace, function(_) { reveal(workspace); createTerminal(workspace, group); });
@@ -414,6 +417,7 @@ class WorkbenchPanel implements View {
 		view, not a terminal, and the window goes to its workspace as New Agent Session's does.
 	**/
 	public function makeChat(id:Null<String>, group:String, provider:String):Void {
+		syncState();
 		var workspace = id == null ? model.openWorkspace : id, act = actions;
 		if (workspace == null || act == null) return;
 		goThere(workspace, function() { reveal(workspace); act.createChat(provider, group); });
