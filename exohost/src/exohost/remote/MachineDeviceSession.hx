@@ -5,6 +5,7 @@ import haxeon.rpc.MessageTransport;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcHandshake;
 import haxeon.rpc.RpcPeerOptions;
+import haxeon.rpc.RpcError;
 import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
@@ -206,7 +207,7 @@ class MachineDeviceSession {
 		current.register(MachineDirectoryProtocol.DIRECTORY, function(request, context) {
 			var wanted = request.machine;
 			if (wanted != null && wanted != host.machineId()) {
-				context.fail({code: "machine_mismatch", message: "This is not that machine", ambiguous: false});
+				context.fail(new RpcError("machine_mismatch", "This is not that machine", false));
 				return;
 			}
 			shownRevision = host.revision();
@@ -215,30 +216,30 @@ class MachineDeviceSession {
 		current.register(MachineDirectoryProtocol.SESSIONS, function(request, context) {
 			var wanted = request.machine;
 			if (wanted != null && wanted != host.machineId()) {
-				context.fail({code: "machine_mismatch", message: "This is not that machine", ambiguous: false});
+				context.fail(new RpcError("machine_mismatch", "This is not that machine", false));
 				return;
 			}
 			asked.push({reply: host.listSessions(deviceId), answer: function(value) context.respond(value)});
 		});
 		current.register(MachineDirectoryProtocol.OPEN, function(request, context) {
 			if (!MachineDirectoryProtocol.validOpen(request)) {
-				context.fail({code: "invalid_request", message: "Invalid workspace reference", ambiguous: false});
+				context.fail(new RpcError("invalid_request", "Invalid workspace reference", false));
 				return;
 			}
 			var ref:WorkspaceRef = request.ref;
 			if (ref.machine != host.machineId()) {
-				context.fail({code: "machine_mismatch", message: "This is not that machine", ambiguous: false});
+				context.fail(new RpcError("machine_mismatch", "This is not that machine", false));
 				return;
 			}
 			var grants = host.grantsFor(deviceId, ref.workspace);
 			if (grants == null) {
 				// The same answer as for a workspace that does not exist: a device cannot probe for ids.
-				context.fail({code: "unknown_workspace", message: "No such workspace", ambiguous: false});
+				context.fail(new RpcError("unknown_workspace", "No such workspace", false));
 				return;
 			}
 			if (streamCount() + openingIn.length >= MachineDirectoryProtocol.STREAM_LIMIT - 1
 				|| streamsIn(ref.workspace) >= STREAMS_PER_WORKSPACE) {
-				context.fail({code: "too_many_streams", message: "Too many open workspaces", ambiguous: false});
+				context.fail(new RpcError("too_many_streams", "Too many open workspaces", false));
 				return;
 			}
 			var id = nextStream++;
@@ -248,19 +249,19 @@ class MachineDeviceSession {
 				if (pipe == null || closed) {
 					if (pipe != null)
 						pipe.close();
-					context.fail({code: error == null ? "workspace_unavailable" : error, message: "Could not open the workspace", ambiguous: false});
+					context.fail(new RpcError(error == null ? "workspace_unavailable" : error, "Could not open the workspace", false));
 					return;
 				}
 				var now = host.grantsFor(deviceId, ref.workspace);
 				if (now == null || !MachineGrants.same(now, grants)) {
 					pipe.close();
-					context.fail({code: "unknown_workspace", message: "No such workspace", ambiguous: false});
+					context.fail(new RpcError("unknown_workspace", "No such workspace", false));
 					return;
 				}
 				var device = mux.open(id);
 				if (device == null) {
 					pipe.close();
-					context.fail({code: "too_many_streams", message: "Too many open workspaces", ambiguous: false});
+					context.fail(new RpcError("too_many_streams", "Too many open workspaces", false));
 					return;
 				}
 				streams.set(id, {device: device, workspace: ref.workspace, grants: grants, pipe: pipe, toService: null, toDevice: null});
