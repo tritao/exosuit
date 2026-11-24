@@ -1,4 +1,8 @@
-# RPC v1 compatibility vectors
+# RPC compatibility vectors
+
+These are the envelopes of haxeon RPC protocol v2 (see [rpc-v2-upgrade.md](rpc-v2-upgrade.md)). The envelope encodings
+match v1 except the request, whose method is now a key (`RpcMethodKey`; Exosuit's methods are `Id(n)`), and Hello and
+Welcome, which a v2 peer sends with protocol 2.
 
 All hex below is canonical MessagePack output. RPC envelopes are single-entry
 maps: permanent variant id -> positional argument array. Records use permanent
@@ -12,7 +16,7 @@ on native, Wasm32 and Wasm GC. Both encode and decode/re-encode must agree.
 | hello | `8101940101a6746573742f3191ae776f726b73706163652e72656164` |
 | welcome | `8102940101a76167656e742f3191ae776f726b73706163652e72656164` |
 | refused | `8103918301ae756e6b6e6f776e5f6d6574686f6402ae756e6b6e6f776e5f6d6574686f6403c2` |
-| request | `8104940164cd03e8c4048101a177` |
+| request | `8104940181019164cd03e8c4048101a177` |
 | response | `81059201c400` |
 | failed | `810692018301ae756e6b6e6f776e5f6d6574686f6402ae756e6b6e6f776e5f6d6574686f6403c2` |
 | cancel | `81079101` |
@@ -23,9 +27,9 @@ on native, Wasm32 and Wasm GC. Both encode and decode/re-encode must agree.
 | rename w/e/op/g/1/New, nullable tree fields | `8a01a17702a16503a26f7004a167050106a34e657707c008c009c00ac0` |
 | framed query | `484d504b0100000000048101a177` |
 
-Hello uses protocol/codec 1, application `test/1`, capability `workspace.read`;
+These Hello and Welcome vectors carry protocol/codec 1 (the encoding is the same for 2), application `test/1`, capability `workspace.read`;
 Welcome uses application `agent/1`. Error code/message are `unknown_method`,
-ambiguity false. Request has id 1, method 100, timeout 1000 and the query payload.
+ambiguity false. Request has id 1, method `Id(100)`, timeout 1000 and the query payload.
 Response and notification have empty binary payloads; notification method is 200.
 
 ## Evolution rules

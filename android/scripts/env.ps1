@@ -11,7 +11,7 @@ Set-ToolchainEnvironment
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 $script:HaxeonRoot = Join-Path $script:RepoRoot 'haxeon'
 $script:BuildRoot = Join-Path $script:AndroidRoot 'build'
-# Where Haxeon keeps its HashLink VM and the CLI's bytecode (scripts/haxeon_paths.py reads haxeon/cmake/hashlink-output-paths.txt).
+# Where Haxeon keeps its HashLink VM and the CLI's bytecode: its SDK's bin, haxeon/out/sdk/bin (scripts/haxeon_paths.py).
 $script:VmDirectory = (& python (Join-Path $script:RepoRoot 'scripts/haxeon_paths.py') $script:HaxeonRoot | Select-Object -First 1)
 $script:Hl = Join-Path $script:VmDirectory 'hl.exe'
 $script:Cli = Join-Path $script:VmDirectory 'haxeon-cli.hl'
