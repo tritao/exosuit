@@ -3,7 +3,8 @@ package app;
 import devtools.InspectionClient;
 import haxeon.ui.*;
 import haxeon.ui.core.*;
-import haxeon.ui.host.DesktopUiApplication;
+import haxeon.ui.host.UiApplication;
+import haxeon.ui.host.UiDiagnosticsProvider;
 import haxeon.ui.host.DesktopUiHostContext;
 import haxeon.ui.theme.Theme;
 import haxeon.ui.widgets.KeyedView;
@@ -15,7 +16,7 @@ import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.Text;
 
 /** Standalone viewer: no target rendering or event processing takes place in this process. */
-class DevToolsApp implements DesktopUiApplication {
+class DevToolsApp implements UiApplication implements UiDiagnosticsProvider {
 	final ui:UiContext;
 	final host:DesktopUiHostContext;
 	final client:InspectionClient;

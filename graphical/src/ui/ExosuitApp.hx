@@ -37,7 +37,8 @@ import haxeon.ui.docking.DockPanelDescriptor;
 import haxeon.ui.docking.DockSplitAxis;
 import haxeon.ui.docking.DockDropZone;
 import haxeon.ui.docking.DockWorkspaceModel;
-import haxeon.ui.host.DesktopUiApplication;
+import haxeon.ui.host.UiApplication;
+import haxeon.ui.host.UiDiagnosticsProvider;
 import haxeon.ui.host.UiHostContext;
 import haxeon.platform.event.PlatformEvent;
 import haxeon.platform.event.EventSubscription;
@@ -97,7 +98,7 @@ import ui.shell.phone.PhoneShell;
  * reaches this shell's command picker through `ui.commands`.
  */
 @:allow(ui.WorkbenchActions, ui.ExohostWorkbenchMachine, ui.ScmPanelController, ui.AgentTabs, ui.TerminalTabs, ui.RemoteFileTabs, ui.ExosuitDiagnostics, ui.ExplorerPanelController, ui.ServedFolders, ui.SettingsTab, ui.ResponsiveLayout, ui.ContextSwitching, ui.DeviceWorkbenchMachine, ui.shell.DesktopShell, ui.shell.phone.PhoneShell)
-class ExosuitApp implements DesktopUiApplication {
+class ExosuitApp implements UiApplication implements UiDiagnosticsProvider {
 	public final ui:UiContext;
 
 	/** Let go of every retained UI tree before a guarded live patch: the context's, and the nodes session panels keep. */
@@ -1844,7 +1845,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function context():UiContext return ui;
 
-	/** The view tree and window state a host's diagnostics read (DesktopUiApplication); see ExosuitDiagnostics. */
+	/** The view tree and window state a host's diagnostics read (UiDiagnosticsProvider); see ExosuitDiagnostics. */
 	public function diagnosticState():Dynamic
 		return diagnostics.diagnosticState();
 

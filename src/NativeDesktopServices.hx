@@ -1,8 +1,8 @@
 import haxeon.ui.host.DesktopUiHostContext;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import haxeon.platform.async.Future;
-import haxeon.platform.async.Outcome;
+import haxeon.async.Future;
+import haxeon.async.Outcome;
 import haxeon.platform.event.PlatformEvent;
 import haxe.io.Bytes;
 
