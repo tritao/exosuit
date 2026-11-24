@@ -159,9 +159,11 @@ class ExosuitCtl {
 					// Approves only the pending device whose code is the one the person compared with the device's screen.
 					if (code == null)
 						throw new Usage("approve needs --code NNNNNN: the code the device shows");
+					if (digits(code) == "")
+						throw new Usage("--code needs the digits the device shows");
 					var pending:Array<Dynamic> = remote({op: "remote-devices"}).pending ?? [];
 					var named = words.length > 0 && !StringTools.startsWith(words[0], "workspace-") ? words.shift() : null;
-					var matching = [for (item in pending) if (digits(item.authenticationCode) == digits(code) && (named == null || item.deviceId == named)) item];
+					var matching = [for (item in pending) if (digits(item.authenticationCode) != "" && digits(item.authenticationCode) == digits(code) && (named == null || item.deviceId == named)) item];
 					if (matching.length != 1)
 						throw new Failed(new ControlError("not_found", matching.length == 0 ? "no pending device has code " + code : "more than one pending device has code " + code), 3);
 					print(Json.stringify(remote({op: "remote-approve", deviceId: matching[0].deviceId, workspaces: [for (id in words) {workspace: id, preset: "all"}]}, 60)));
