@@ -10,4 +10,4 @@ ctest --test-dir "$build_dir" --output-on-failure
 self_hosted=()
 if [[ ${HAXEON_SELF_HOSTED:-0} == 1 ]]; then self_hosted+=(--self-hosted); fi
 "$haxeon_root/scripts/haxeon" run --project "$package_dir/tests/haxeon.json" \
-    "${self_hosted[@]}"
+    ${self_hosted[@]+"${self_hosted[@]}"}

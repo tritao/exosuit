@@ -8,4 +8,4 @@ self_hosted=()
 if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
   self_hosted+=(--self-hosted)
 fi
-"$haxeon" run --project "$root_dir/tests/workspace-persistence/haxeon.json" "${self_hosted[@]}" -- "$directory/catalog.sqlite"
+"$haxeon" run --project "$root_dir/tests/workspace-persistence/haxeon.json" ${self_hosted[@]+"${self_hosted[@]}"} -- "$directory/catalog.sqlite"
