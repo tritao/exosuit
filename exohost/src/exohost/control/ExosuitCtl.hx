@@ -33,7 +33,7 @@ class ExosuitCtl {
 		"  quit [--mode prompt|recover|save]  close the window (prompt asks about unsaved work)",
 		"  watch [EVENT...]             print events as JSON lines until interrupted (all of them when none is named)",
 		"  devices                      remote access: paired and pending devices, as JSON",
-		"  approve --code NNNNNN [DEVICE] [WORKSPACE...]  approve the one pending device that shows this code, granting the workspaces",
+		"  approve --code NNNNNN [DEVICE] [WORKSPACE...]  approve the one pending device that shows this code (spaces are ignored: --code 760823 or --code \"760 823\"), granting the workspaces",
 		"options: --instance ID, --new-window, --line N, --column N, --timeout N[s|ms] (default 5 s), --output text|json",
 		"exit codes: 0 ok, 2 usage, 3 no such window, 4 connection or timeout, 5 the window refused, 6 protocol, 7 internal"
 	].join("\n");
@@ -161,7 +161,7 @@ class ExosuitCtl {
 						throw new Usage("approve needs --code NNNNNN: the code the device shows");
 					var pending:Array<Dynamic> = remote({op: "remote-devices"}).pending ?? [];
 					var named = words.length > 0 && !StringTools.startsWith(words[0], "workspace-") ? words.shift() : null;
-					var matching = [for (item in pending) if (item.authenticationCode == code && (named == null || item.deviceId == named)) item];
+					var matching = [for (item in pending) if (digits(item.authenticationCode) == digits(code) && (named == null || item.deviceId == named)) item];
 					if (matching.length != 1)
 						throw new Failed(new ControlError("not_found", matching.length == 0 ? "no pending device has code " + code : "more than one pending device has code " + code), 3);
 					print(Json.stringify(remote({op: "remote-approve", deviceId: matching[0].deviceId, workspaces: [for (id in words) {workspace: id, preset: "all"}]}, 60)));
@@ -201,6 +201,17 @@ class ExosuitCtl {
 	}
 
 	/** A decimal number; `Std.parseInt` reads a leading 0 as octal in haxeon (docs/haxeon-compiler-bugs.md). */
+	/** `text` with every character but the digits removed: a pairing code prints as "760 823" and is compared as 760823. */
+	public static function digits(text:Null<String>):String {
+		var kept = new StringBuf();
+		for (index in 0...(text == null ? 0 : text.length)) {
+			var code = StringTools.fastCodeAt(text, index);
+			if (code >= 48 && code <= 57)
+				kept.addChar(code);
+		}
+		return kept.toString();
+	}
+
 	static function decimal(text:String):Int {
 		var result = 0;
 		for (index in 0...text.length)
