@@ -28,6 +28,11 @@ import sys
 import tempfile
 import time
 
+if sys.platform == 'darwin':
+    # A workspace's socket is <state>/workspace-sockets/<16 hex>.sock, and sockaddr_un holds 104 bytes: macOS's default
+    # $TMPDIR (/var/folders/xx/<28 characters>/T/) leaves a test's state too little room.
+    os.environ['TMPDIR'] = tempfile.tempdir = '/tmp'
+
 import haxeon_paths
 
 ROOT = Path(__file__).resolve().parent.parent

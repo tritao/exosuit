@@ -11,6 +11,9 @@ set -euo pipefail
 # Everything the tests start keeps its state in a home of the run's own, removed at the end: never the user's exohost
 # (which is not started either, see exohost/README.md), editor or agent state, ~/.claude or ~/.codex. Variables inherited
 # from the user's session are replaced, not reused. EXOSUIT_TEST_HOME names a folder to use instead (kept).
+# macOS's default $TMPDIR (/var/folders/xx/<28 characters>/T/) is too long for the unix sockets the tests' state holds
+# (sockaddr_un has 104 bytes).
+if [[ $(uname -s) == Darwin ]]; then export TMPDIR=/tmp; fi
 test_home=${EXOSUIT_TEST_HOME:-}
 remove_test_home=0
 if [[ -z $test_home ]]; then
