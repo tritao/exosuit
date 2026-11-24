@@ -1,6 +1,7 @@
 package config;
 
 import build.HashLinkPath;
+import build.HaxeonSdk;
 import sys.FileSystem;
 
 /** Resolves argv without shell parsing; environment overrides denote one executable. */
@@ -24,7 +25,7 @@ class LanguageServerCommand {
 		var directory = FileSystem.absolutePath(start);
 		while (true) {
 			var candidate = directory + "/haxeon";
-			if (FileSystem.exists(candidate + "/scripts/haxeon-lsp") && !FileSystem.isDirectory(candidate + "/scripts/haxeon-lsp")) return candidate;
+			if (FileSystem.exists(candidate + "/scripts/haxeon") && !FileSystem.isDirectory(candidate + "/scripts/haxeon")) return candidate;
 			var parent = haxe.io.Path.directory(directory);
 			if (parent == directory || parent.length == 0) break;
 			directory = parent;
@@ -54,9 +55,12 @@ class LanguageServerCommand {
 		if (configured.length > 0) return configured.copy();
 		if (environment != null && environment.length > 0) return [environment];
 		if (bundledAvailable) return [bundled];
-		// Windows cannot execute the Bash launcher; run what it runs, `haxeon lsp`, with the checkout's own haxeon command,
-		// or the one on PATH when the root has no VM path table (outside a checkout).
-		if (windows) return [try HashLinkPath.executable(compilerRoot, "haxeon") catch (_:Dynamic) "haxeon", "lsp"];
-		return [compilerRoot + "/scripts/haxeon-lsp"];
+		// The language server is `haxeon lsp` (Haxeon removed its scripts/haxeon-lsp alias). Windows cannot execute the Bash
+		// launcher, so it runs the checkout's own haxeon command from its staged SDK, or the one on PATH outside a checkout.
+		if (windows) {
+			var command = HashLinkPath.executable(HaxeonSdk.ofCheckout(compilerRoot), "haxeon");
+			return [FileSystem.exists(command) ? command : "haxeon", "lsp"];
+		}
+		return [compilerRoot + "/scripts/haxeon", "lsp"];
 	}
 }

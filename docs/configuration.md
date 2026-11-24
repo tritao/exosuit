@@ -52,7 +52,7 @@ at startup in its configured order.
 Array preferences are JSON strings containing arrays. For example, the value of
 `languages/haxeon/command` is `"[\"/path with spaces/haxeon-lsp\",\"--stdio\"]"`.
 An empty array uses `$HAXEON_LSP`, then the bundled server, then
-`$HAXEON_ROOT/scripts/haxeon-lsp`. Arguments are passed directly without shell splitting.
+`$HAXEON_ROOT/scripts/haxeon lsp`. Arguments are passed directly without shell splitting.
 Advanced keyboard overrides use the same array representation, with entries such
 as `"Ctrl+A|doc:select-all"` under `editor/keyboard/keybindings`.
 

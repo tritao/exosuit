@@ -26,18 +26,21 @@ class ConfigurationTestMain {
 		require(config.LanguageServerCommand.resolve(["configured", "argument"], "environment", "bundled", true, "compiler").join("|") == "configured|argument"
 			&& config.LanguageServerCommand.resolve([], "environment", "bundled", true, "compiler")[0] == "environment"
 			&& config.LanguageServerCommand.resolve([], "", "bundled", true, "compiler")[0] == "bundled"
-			&& config.LanguageServerCommand.resolve([], null, "bundled", false, "compiler")[0] == "compiler/scripts/haxeon-lsp",
+			&& config.LanguageServerCommand.resolve([], null, "bundled", false, "compiler").join("|") == "compiler/scripts/haxeon|lsp",
 			"language server command overrides lost their precedence or argument boundaries");
-		var discovery = arguments[2] + "/discovery", launcher = discovery + "/haxeon/scripts/haxeon-lsp";
+		var discovery = arguments[2] + "/discovery", launcher = discovery + "/haxeon/scripts/haxeon";
 		for (suffix in ["", "/haxeon", "/haxeon/scripts", "/haxeon/cmake", "/graphical", "/graphical/build", "/graphical/build/host"])
 			FileSystem.createDirectory(discovery + suffix);
-		// Windows runs `haxeon lsp` with the haxeon command in the VM directory Haxeon's path table names for the platform.
-		File.saveContent(discovery + "/haxeon/cmake/hashlink-output-paths.txt", "release=out/release-vm
-windows-msvc=out/windows-vm
-");
-		var haxeonCommand = Sys.systemName() == "Windows" ? "windows-vm/haxeon.exe" : "release-vm/haxeon";
-		require(config.LanguageServerCommand.resolve([], null, "bundled", false, discovery + "/haxeon", true).join("|")
-			== discovery + "/haxeon/out/" + haxeonCommand + "|lsp", "the Windows language server command is not `haxeon lsp` from the VM directory");
+		// Windows runs `haxeon lsp` with the haxeon command of the checkout's staged SDK (out/sdk/bin), `haxeon` when it has none.
+		var haxeonCommand = discovery + "/haxeon/out/sdk/bin/haxeon" + (Sys.systemName() == "Windows" ? ".exe" : "");
+		require(config.LanguageServerCommand.resolve([], null, "bundled", false, discovery + "/haxeon", true).join("|") == "haxeon|lsp",
+			"outside a built checkout the Windows language server command is not `haxeon lsp` from PATH");
+		FileSystem.createDirectory(discovery + "/haxeon/out");
+		FileSystem.createDirectory(discovery + "/haxeon/out/sdk");
+		FileSystem.createDirectory(discovery + "/haxeon/out/sdk/bin");
+		File.saveContent(haxeonCommand, "fixture");
+		require(config.LanguageServerCommand.resolve([], null, "bundled", false, discovery + "/haxeon", true).join("|") == haxeonCommand + "|lsp",
+			"the Windows language server command is not `haxeon lsp` from the checkout's SDK");
 		File.saveContent(launcher, "fixture");
 		// Compared as absolute paths: on Windows the root is found with the absolute start's backslashes and a "/haxeon" suffix.
 		var found = config.LanguageServerCommand.findCompilerRoot(discovery + "/graphical/build/host");
