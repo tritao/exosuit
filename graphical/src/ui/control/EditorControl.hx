@@ -29,7 +29,8 @@ private typedef Waiting = {
 	  and `project.changed`.
 	- `exosuit.quit {mode}` (prompt, recover, save).
 	- T1, reading: `exosuit.ui.snapshot {state?}` (devtools.UiSnapshot, plus the app's state when asked),
-	  `exosuit.state.get {path?}` (ExosuitDiagnostics.automationState, or one field of it); the event `exosuit.ui.changed`.
+	  `exosuit.state.get {path?}` (ExosuitDiagnostics.automationState, or one field of it), `exosuit.memory {collect?, census?, path?}`
+	  (devtools.MemoryStats); the event `exosuit.ui.changed`.
 	- T2, commands: `exosuit.commands.list {available?}`, `exosuit.command.run {name}`.
 	- T3, workspaces and windows: `exosuit.workspace.open {id}`, `exosuit.context.switch {context}`,
 	  `exosuit.window.new {context?, paths?}`, `exosuit.folder.add {path, workspace?}`.
@@ -217,6 +218,14 @@ class EditorControl {
 						state = state == null ? null : Reflect.field(state, field);
 					}
 				answer({state: state}, null);
+			case "exosuit.memory":
+				// GC counters for memory measurements (docs/benchmarks/memory); collect: true runs a full collection first.
+				var census = text(params, "census", null);
+				var refused = census == null ? null : devtools.MemoryStats.census(census, text(params, "path", null));
+				if (refused != null)
+					answer(null, new ControlError("invalid_argument", refused));
+				else
+					answer(devtools.MemoryStats.sample(Reflect.field(params, "collect") == true), null);
 			case "exosuit.commands.list":
 				installCommands();
 				var available = Reflect.field(params, "available") == true;

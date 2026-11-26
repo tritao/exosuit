@@ -303,6 +303,7 @@ class AgentMain {
 		// file-change batches that follow it go out at once.
 		var hotUntil:Float = clock() + 500;
 		var reason = "idle";
+		var memoryStats = new devtools.MemoryStats();
 		while (true) {
 			// Provider processes are read by polling; everything else wakes the event wait.
 			var polled = processes.activeCount() > 0;
@@ -321,6 +322,7 @@ class AgentMain {
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();
+			memoryStats.poll(Sys.time());
 			// exohost asked: at once, or (a restart onto another build) once no agent turn runs.
 			var asked = report.stopRequest;
 			if (asked == "now" || asked == "turn" && agents.activeCount() == 0) {

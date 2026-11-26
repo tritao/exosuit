@@ -123,13 +123,25 @@ class ControlRouter {
 		if (DRIVING.match(method)) {
 			driven.set(editor.window, Sys.time());
 			log(peer, editor, method);
-		} else if (method != "exosuit.ui.snapshot" && method != "exosuit.state.get")
+		} else if (!readOnly(method, params))
 			log(peer, editor, method);
 		if (!directory.request(editor.window, method, params, function(result, error) {
 			reply.resolve(error == null ? {ok: true, instance_id: editor.window, result: result == null ? {} : result} : failure(error));
 		}))
 			reply.resolve(failure(new ControlError("not_found", "window " + editor.window + " is not linked")));
 		return reply;
+	}
+
+	/**
+		Whether a call only reads the window, so it is not logged: a snapshot, a state read, and `exosuit.memory` unless it
+		forces a full collection (`collect`) or starts or writes an allocation census (`census`).
+	**/
+	static function readOnly(method:String, params:Dynamic):Bool {
+		return switch method {
+			case "exosuit.ui.snapshot", "exosuit.state.get": true;
+			case "exosuit.memory": params == null || Reflect.field(params, "collect") != true && Reflect.field(params, "census") == null;
+			default: false;
+		}
 	}
 
 	/** The window a request goes to, or why there is none. */
