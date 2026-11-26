@@ -267,6 +267,7 @@ class GraphicalMain {
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			var applicationPoll = context.onPoll;
+			var terminalRootsAt = -1.0;
 			instance.context().commands.register(new haxeon.ui.core.Command("devtools.open", "Developer: Open DevTools", function() {
 				try {
 					var projectRoot = Sys.getEnv("EXOSUIT_PROJECT_ROOT");
@@ -300,9 +301,17 @@ class GraphicalMain {
 					}
 				}
 				if (applicationPoll != null) applicationPoll();
-				// Terminal tabs keep their workspaces' links (and services) in use.
-				if (workspaceLinks != null) instance.useTerminalRoots(
-					[for (terminal in instance.host.allTerminalTabs()) if (terminal.remote && !terminal.disposed) terminal.workspaceRoot]);
+				// Terminal tabs keep their workspaces' links (and services) in use. A link lingers for
+				// WorkspaceLinks.LINGER_MS, so once a second is enough: resolving a root's workspace checks its folders on
+				// disk, which every poll of an idle window did before, once per tab.
+				var now = NativeKit.nk_time_seconds();
+				if (workspaceLinks != null && now - terminalRootsAt >= 1.0) {
+					terminalRootsAt = now;
+					var roots:Array<String> = [];
+					for (terminal in instance.host.allTerminalTabs())
+						if (terminal.remote && !terminal.disposed && roots.indexOf(terminal.workspaceRoot) < 0) roots.push(terminal.workspaceRoot);
+					instance.useTerminalRoots(roots);
+				}
 			};
 			if (arguments.indexOf("--open-devtools") >= 0) instance.context().commands.execute("devtools.open");
 			app = instance;

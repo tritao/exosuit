@@ -307,11 +307,12 @@ class WorkspaceLink implements WorkspaceAttachment implements WorkspaceRpcEndpoi
 		connection stays, and with it the catalog, the terminals and the sessions.
 	**/
 	public function follow(next:WorkspaceServiceTarget):Void {
-		if (disposed || next.workspace != workspace) return;
+		// Callers pass the same target (MachineClient.serviceTarget) on every poll: compare its text only when it is new.
+		if (disposed || next.workspace != workspace || next == serviceTarget) return;
 		var signature = next.signature();
+		serviceTarget = next;
 		if (signature == selectedTarget) return;
 		selectedTarget = signature;
-		serviceTarget = next;
 	}
 
 	function stopCatalog():Void {

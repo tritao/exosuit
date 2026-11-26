@@ -258,8 +258,20 @@ class MachineClient {
 		return workspace == null ? null : serviceTarget(workspace);
 	}
 
-	public function serviceTarget(workspace:MachineWorkspace):WorkspaceServiceTarget
-		return WorkspaceServiceTarget.forWorkspace(workspace.id, workspace.folders, scratchOf(workspace));
+	public function serviceTarget(workspace:MachineWorkspace):WorkspaceServiceTarget {
+		// Every terminal view asks for its service on every poll; the folders are checked on disk at most once a second
+		// for the same workspace record (a change to the workspace is a new record).
+		var now = Sys.time(), scratch = scratchOf(workspace);
+		var known = targets.get(workspace.id);
+		if (known != null && known.workspace == workspace && known.scratch == scratch && now - known.at < TARGET_SECONDS)
+			return known.target;
+		var target = WorkspaceServiceTarget.forWorkspace(workspace.id, workspace.folders, scratch);
+		targets.set(workspace.id, {workspace: workspace, scratch: scratch, at: now, target: target});
+		return target;
+	}
+
+	static inline final TARGET_SECONDS = 1.0;
+	final targets:Map<String, {workspace:MachineWorkspace, scratch:Null<String>, at:Float, target:WorkspaceServiceTarget}> = [];
 
 	/** A change to the workspaces is on its way. */
 	public function busy():Bool
