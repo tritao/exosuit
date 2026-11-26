@@ -155,29 +155,54 @@ class WorkspaceSession {
 	}
 
 	public function encode():String {
-		var output = "version=" + VERSION + "\n";
+		// SessionPersistence encodes the session four times a second to see whether it changed: one buffer, not a
+		// string copied once per line.
+		var output = new StringBuf();
+		output.add("version=" + VERSION + "\n");
 		if (savedWorkspace != null) {
-			output += "workspace=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(savedWorkspace.encode())) + "\n";
+			output.add("workspace=");
+			output.add(haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(savedWorkspace.encode())));
+			output.add("\n");
 		}
-		if (machineId.length > 0) output += "contextMachine=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(machineId)) + "
-";
-		for (info in recent) output += "contextRecent=" + [for (value in [info.machine, info.workspace, info.group, info.label, info.workspaceLabel, info.directory])
-			haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":") + "\n";
-		if (groupId.length > 0) output += "contextGroup=" + [for (value in [groupId, groupLabel, groupDirectory]) haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":") + "\n";
-		for (project in projects) output += "project=" + clean(project) + "\n";
-		for (document in documents) output += "document=" + clean(document) + "\n";
-		output += "active=" + clean(activeDocument) + "\n";
-		for (line in layout) output += "layout=" + clean(line) + "\n";
-		for (path in expanded) output += "expanded=" + clean(path) + "\n";
+		if (machineId.length > 0) {
+			output.add("contextMachine=");
+			output.add(haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(machineId)));
+			output.add("\n");
+		}
+		for (info in recent) {
+			output.add("contextRecent=");
+			output.add([for (value in [info.machine, info.workspace, info.group, info.label, info.workspaceLabel, info.directory])
+				haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":"));
+			output.add("\n");
+		}
+		if (groupId.length > 0) {
+			output.add("contextGroup=");
+			output.add([for (value in [groupId, groupLabel, groupDirectory]) haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":"));
+			output.add("\n");
+		}
+		function line(key:String, value:String):Void {
+			output.add(key);
+			output.add(clean(value));
+			output.add("\n");
+		}
+		for (project in projects) line("project=", project);
+		for (document in documents) line("document=", document);
+		line("active=", activeDocument);
+		for (entry in layout) line("layout=", entry);
+		for (path in expanded) line("expanded=", path);
 		var repositoryIds = [for (repositoryId in scmCommitDrafts.keys()) repositoryId];
 		repositoryIds.sort(Reflect.compare);
 		for (repositoryId in repositoryIds) {
 			var message = scmCommitDrafts.get(repositoryId);
-			if (repositoryId.length > 0 && message != null)
-				output += "scmCommitDraft=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(repositoryId)) + ":"
-					+ haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(message)) + "\n";
+			if (repositoryId.length > 0 && message != null) {
+				output.add("scmCommitDraft=");
+				output.add(haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(repositoryId)));
+				output.add(":");
+				output.add(haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(message)));
+				output.add("\n");
+			}
 		}
-		return output;
+		return output.toString();
 	}
 
 	public static function decode(content:String):WorkspaceSession {
