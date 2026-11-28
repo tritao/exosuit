@@ -15,6 +15,17 @@ def run_cli(
     arguments: list[str],
     environment_overrides: dict[str, str] | None = None,
 ) -> int:
+    command, environment = cli_command(project_root, arguments, environment_overrides)
+    return subprocess.run(command, env=environment, check=False).returncode
+
+
+def cli_command(
+    project_root: Path,
+    arguments: list[str],
+    environment_overrides: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    """The command line and environment that run the Haxeon CLI with `arguments`. On Windows it first brings the CLI's
+    bytecode up to date, as scripts/haxeon does on POSIX each time it starts."""
     haxeon_root = Path(
         os.environ.get("HAXEON_ROOT") or str(project_root / "haxeon")
     ).expanduser().resolve(strict=True)
@@ -31,15 +42,11 @@ def run_cli(
 
     haxeon_bin = os.environ.get("HAXEON_BIN")
     if haxeon_bin:
-        return subprocess.run(
-            [haxeon_bin, *arguments], env=environment, check=False
-        ).returncode
+        return [haxeon_bin, *arguments], environment
 
     if os.name != "nt":
         haxeon_script = haxeon_root / "scripts" / "haxeon"
-        return subprocess.run(
-            [str(haxeon_script), *arguments], env=environment, check=False
-        ).returncode
+        return [str(haxeon_script), *arguments], environment
 
     # On Windows hl.exe runs the CLI's bytecode from the VM directory: the command line keeps `hl.exe ... haxeon-cli.hl`,
     # which exohost classifies, and HAXEON_HOME stays the caller's (haxeon.exe would overwrite it with its build checkout).
@@ -74,9 +81,7 @@ def run_cli(
     environment["PATH"] = ";".join(
         [str(hashlink.parent), str(haxeon_root / "out"), environment.get("PATH", "")]
     )
-    return subprocess.run(
-        [str(hashlink), str(cli), *arguments], env=environment, check=False
-    ).returncode
+    return [str(hashlink), str(cli), *arguments], environment
 
 
 def main() -> int:
