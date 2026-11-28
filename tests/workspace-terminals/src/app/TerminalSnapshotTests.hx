@@ -125,11 +125,15 @@ class TerminalSnapshotTests {
 		var opened = false;
 		RpcCalls.call(client, WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "wide", create: true,
 			columns: 277, rows: 65}, 2000, function(_) opened = true, function(e) throw e.code);
-		var deadline = clock() + 5000;
+		// The first SNAPSHOT waits for the host's screen, and a host's first start is slow: it loads its native libraries
+		// from the runtime copy the service just made, and macOS checks each newly written library on its first load
+		// (0.7 s apiece on the test machine, about 2.5 s for a host). The reply is waited for that long, not 2 s.
+		var hostStart = 20000;
+		var deadline = clock() + hostStart + 5000;
 		while (!opened) { require(clock() < deadline, "Wide terminal did not open"); step(); }
 		// The whole snapshot in one reply, as older clients ask: more than one message can carry.
 		var legacy = "";
-		RpcCalls.call(client, WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "w", instance: "instance", id: "wide"}, 2000,
+		RpcCalls.call(client, WorkspaceTerminalProtocol.SNAPSHOT, {workspace: "w", instance: "instance", id: "wide"}, hostStart,
 			function(_) legacy = "answered", function(e) legacy = e.code);
 		while (legacy == "") { require(clock() < deadline, "Legacy snapshot timed out"); step(); }
 		require(legacy == "snapshot_unavailable", "A snapshot larger than one message was answered whole: " + legacy);
